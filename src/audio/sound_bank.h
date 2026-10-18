@@ -1,6 +1,7 @@
 // キー音の読み込み。すべて出力のサンプルレート・ステレオのfloat PCMに展開してメモリに載せる（仕様書12章）
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -18,8 +19,9 @@ bool decode_sound_file(const std::string& path, uint32_t out_rate, Sample& out, 
 class SoundBank {
 public:
     // paths[id] が空なら、そのIDは無音。threads 本のワーカーで並列にデコードする
+    // done には読み終えた数を数える（読み込み画面の進み具合に使う）
     void load(const std::vector<std::string>& paths, uint32_t out_rate, int threads,
-              std::vector<std::string>* errors);
+              std::vector<std::string>* errors, std::atomic<int>* done = nullptr);
     const std::vector<Sample>& samples() const { return samples_; }
 
 private:

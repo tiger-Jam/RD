@@ -114,7 +114,7 @@ bool decode_sound_file(const std::string& path, uint32_t out_rate, Sample& out, 
 }
 
 void SoundBank::load(const std::vector<std::string>& paths, uint32_t out_rate, int threads,
-                     std::vector<std::string>* errors) {
+                     std::vector<std::string>* errors, std::atomic<int>* done) {
     samples_.assign(paths.size(), Sample{});
     std::atomic<size_t> next{0};
     std::mutex err_mu;
@@ -128,6 +128,7 @@ void SoundBank::load(const std::vector<std::string>& paths, uint32_t out_rate, i
                 std::lock_guard<std::mutex> lock(err_mu);
                 errors->push_back(err);
             }
+            if (done) done->fetch_add(1);
         }
     };
     if (threads < 1) threads = 1;

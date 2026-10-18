@@ -32,6 +32,8 @@ add_library(bmj_core STATIC
     src/game/gauge.cpp
     src/util/text.cpp
     src/util/path.cpp
+    src/util/dxa.cpp
+    src/skin/lr2_skin.cpp
 )
 target_include_directories(bmj_core PUBLIC src)
 target_link_libraries(bmj_core PUBLIC bmj_third_party)
@@ -45,10 +47,12 @@ add_executable(bmjoy
     src/audio/mixer.cpp
     src/input/input.cpp
     src/render/play_scene.cpp
+    src/render/skin_play.cpp
+    src/skin/skin_renderer.cpp
 )
 target_link_libraries(bmjoy PRIVATE bmj_core SDL3::SDL3)
 
-add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp)
+add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core)
 
 foreach(t bmj_core bmjoy bmj_tests)

@@ -2,7 +2,7 @@
 
 LR2の挙動を既定にした、7K+S専用のBMSプレイヤー。仕様は `次世代BMSプレイヤー 仕様書 v0.1.md`。
 
-いまはロードマップの1段階目（譜面を1つ指定して、仮のプレイ画面で遊ぶ）まで。
+いまは、譜面を1つ指定して、LR2のプレイスキンで遊べるところまで。
 
 ## ビルド（macOS）
 
@@ -29,6 +29,19 @@ cmake --build build
 | 終了 | ESC（リザルトで F5 を押すともう一度） |
 
 コントローラは LR2 の既定の割り当て（鍵盤 B4 B7 B3 B8 B2 B5 左、皿 上下）。
+
+### スキン
+
+LR2のフォルダ（`LR2files` があるところ）を `--lr2-root` で指定すると、既定で `LR2files/Theme/LR2/Play/play_7.lr2skin` を使う。
+別のスキンは `--skin` で .lr2skin を指定する。スキンの中のパス（`LR2files\Theme\...`）は LR2 のフォルダから探す。
+
+```
+./build/bmjoy 譜面.bme --lr2-root ~/LR2 --skin ~/LR2/LR2files/Theme/WMIX_HD/play/HDPLAY_W.lr2skin --skin-opt 2=1
+```
+
+- 起動時にカスタマイズ項目の一覧（`[番号] 項目 = 選択`）を表示する。`--skin-opt 番号=選択肢の番号` で変える
+- `#RESOLUTION` の無いスキンは、画面全体を覆う画像の大きさから SD / HD / FHD を推定する。`--skin-res sd|hd|fhd` で指定もできる
+- `--no-skin` で仮の画面になる
 
 ### 確認用
 

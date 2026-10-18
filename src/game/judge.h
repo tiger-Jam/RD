@@ -70,6 +70,11 @@ public:
     // LNの始点を押して保持中か
     bool ln_holding(size_t index) const { return active_[index] > 0; }
     bool lane_held(int lane) const { return held_[lane]; }
+    // そのレーンでLNを押し続けている最中か
+    bool lane_ln_holding(int lane) const {
+        const Lane& l = lanes_[lane];
+        return l.cur < l.notes.size() && active_[l.notes[l.cur]] > 0;
+    }
 
 private:
     struct Lane {
