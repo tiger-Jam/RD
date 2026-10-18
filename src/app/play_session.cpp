@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <cstdlib>
 #include <cstdio>
 #include <thread>
@@ -1043,10 +1044,20 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
 
 PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
     AppConfig& cfg = app.cfg;
-    // 段位認定はオプションを書き換える（LR2: Main.cpp:1546。LR2 と同じく、終わっても元に戻さない）。
-    // 配置は正規だけ（難易度表の grade_mirror / grade_random なら MIRROR も使える）。EASY と G-ATTACK は GROOVE に
+    // 段位認定はオプションを書き換える（LR2: Main.cpp:1546）。配置は正規だけ、EASY と G-ATTACK は GROOVE に、
+    // HIDDEN/SUDDEN と皿の自動演奏は切る。LR2 は終わっても戻さないが、BMjoy はコースが終わったら元に戻す
+    const int saved_random = cfg.random, saved_gauge = cfg.gauge, saved_effect = cfg.effect;
+    const bool saved_assist = cfg.assist;
+    struct Restore {
+        std::function<void()> f;
+        ~Restore() { f(); }
+    } restore{[&] {
+        if (course.type != 2) return;
+        cfg.random = saved_random, cfg.gauge = saved_gauge, cfg.effect = saved_effect, cfg.assist = saved_assist;
+        app.save_config();
+    }};
     if (course.type == 2) {
-        if (!(course.allow_mirror && cfg.random == kMirror)) cfg.random = kRandomOff;
+        cfg.random = kRandomOff;
         if (cfg.gauge == kEasy || cfg.gauge == kGAttack) cfg.gauge = kGroove;
         cfg.effect = 0;
         cfg.assist = false;

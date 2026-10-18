@@ -96,24 +96,6 @@ std::vector<Entry> build_tree(const Library& lib) {
         Entry tf;
         tf.label = t.name.empty() ? t.url : t.name;
         tf.sub = t.warning.empty() ? (t.from_cache ? "手元の版" : "") : t.warning;
-        // 表に書かれたコース（段位など）は、表のフォルダの先頭に 1 つのフォルダにまとめる
-        if (!t.courses.empty()) {
-            Entry cf;
-            cf.course_folder = true;
-            bool all_grade = true;
-            for (const TableCourse& tc : t.courses) {
-                Entry ce;
-                ce.kind = Entry::Kind::Course;
-                ce.course = std::make_shared<Course>(make_table_course(tc, by_md5, by_sha256));
-                ce.label = ce.course->name;
-                all_grade = all_grade && ce.course->type == 2;
-                cf.owned += ce.course->playable();
-                cf.total++;
-                cf.children.push_back(std::move(ce));
-            }
-            cf.label = all_grade ? "段位認定" : "COURSE";
-            tf.children.push_back(std::move(cf));
-        }
         for (const std::string& lv : t.levels) {
             Entry lf;
             lf.badge = t.symbol + lv;
@@ -141,6 +123,24 @@ std::vector<Entry> build_tree(const Library& lib) {
         }
         root.push_back(std::move(tf));
     }
+    // コースのフォルダ（LR2 と同じく一番上の階層に、COURSE と 段位認定 を必ず出す）。
+    // 中身は難易度表に書かれたコース。段位の制約があれば段位認定、無ければ COURSE に入れる
+    Entry expert, grade;
+    expert.label = "COURSE", grade.label = "段位認定";
+    expert.course_folder = grade.course_folder = true;
+    for (const DifficultyTable& t : lib.tables)
+        for (const TableCourse& tc : t.courses) {
+            Entry ce;
+            ce.kind = Entry::Kind::Course;
+            ce.course = std::make_shared<Course>(make_table_course(tc, by_md5, by_sha256));
+            ce.label = ce.course->name;
+            Entry& f = ce.course->type == 2 ? grade : expert;
+            f.owned += ce.course->playable();
+            f.total++;
+            f.children.push_back(std::move(ce));
+        }
+    root.push_back(std::move(expert));
+    root.push_back(std::move(grade));
     // 曲フォルダ：実際のフォルダごとにまとめる
     Entry songs;
     songs.label = "曲フォルダ";
