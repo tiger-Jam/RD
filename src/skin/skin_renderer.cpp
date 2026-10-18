@@ -46,6 +46,7 @@ SDL_Texture* SkinRenderer::create_texture(const SkinImage& img) { return make_te
 
 SkinRenderer::~SkinRenderer() {
     for (SDL_Texture* t : textures_) if (t) SDL_DestroyTexture(t);
+    for (auto& [k, v] : inverted_) if (v) SDL_DestroyTexture(v);
     for (auto& v : font_textures_)
         for (SDL_Texture* t : v) if (t) SDL_DestroyTexture(t);
 }
@@ -53,13 +54,31 @@ SkinRenderer::~SkinRenderer() {
 void SkinRenderer::upload(const Lr2Skin& skin) {
     for (SDL_Texture* t : textures_) if (t) SDL_DestroyTexture(t);
     textures_.clear();
-    for (const SkinImage& img : skin.images) textures_.push_back(make_texture(r_, img));
+    for (auto& [k, v] : inverted_) SDL_DestroyTexture(v);
+    inverted_.clear();
+    images_.clear();
+    for (const SkinImage& img : skin.images) textures_.push_back(make_texture(r_, img)), images_.push_back(&img);
     font_textures_.clear();
     for (const ImageFont& f : skin.image_fonts) {
         std::vector<SDL_Texture*> v;
         for (const SkinImage& img : f.images) v.push_back(make_texture(r_, img));
         font_textures_.push_back(std::move(v));
     }
+}
+
+SDL_Texture* SkinRenderer::inverted(SDL_Texture* t) {
+    if (auto it = inverted_.find(t); it != inverted_.end()) return it->second;
+    SDL_Texture* inv = nullptr;
+    for (size_t i = 0; i < textures_.size(); ++i) {
+        if (textures_[i] != t || !images_[i]) continue;
+        SkinImage copy = *images_[i];
+        for (size_t p = 0; p + 3 < copy.rgba.size(); p += 4)
+            copy.rgba[p] = 255 - copy.rgba[p], copy.rgba[p + 1] = 255 - copy.rgba[p + 1], copy.rgba[p + 2] = 255 - copy.rgba[p + 2];
+        inv = make_texture(r_, copy);
+        break;
+    }
+    inverted_[t] = inv;
+    return inv;
 }
 
 void SkinRenderer::set_image_override(int gr, SDL_Texture* tex) {
@@ -685,6 +704,9 @@ void SkinRenderer::draw_image(Item& it) {
     if (d.w < 0) d.w = -d.w, d.x -= d.w;
     if (d.w == 0 || d.h == 0) return;
     SDL_Texture* t = it.tex;
+    // 合成方法 10：描画元の色を反転して、ふつうのαブレンドで描く（DxLib: DX_BLENDMODE_INVSRC）
+    if (d.blend == 10)
+        if (SDL_Texture* inv = inverted(t)) t = inv;
     SDL_SetTextureScaleMode(t, d.filter ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
     SDL_SetTextureColorMod(t, static_cast<Uint8>(std::clamp(d.r, 0, 255)), static_cast<Uint8>(std::clamp(d.g, 0, 255)),
                            static_cast<Uint8>(std::clamp(d.b, 0, 255)));

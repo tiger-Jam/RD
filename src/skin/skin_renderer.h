@@ -165,6 +165,10 @@ private:
 
     SDL_Renderer* r_;
     std::map<int, SDL_Texture*> overrides_;
+    // 合成方法 10（描画元の色を反転する）用に、色を反転したテクスチャを必要になったときに作る
+    std::vector<const SkinImage*> images_;
+    std::map<SDL_Texture*, SDL_Texture*> inverted_;
+    SDL_Texture* inverted(SDL_Texture* t);
     std::vector<SDL_Texture*> textures_;
     std::vector<std::vector<SDL_Texture*>> font_textures_;  // 画像フォントごとの画像
     std::vector<Item> items_;
