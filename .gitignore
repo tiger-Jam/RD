@@ -1,0 +1,5 @@
+build/
+build-*/
+testdata/generated/
+.DS_Store
+参考に/
