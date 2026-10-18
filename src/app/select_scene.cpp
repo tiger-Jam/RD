@@ -16,6 +16,7 @@
 #include "db/difficulty_table.h"
 #include "game/gauge.h"
 #include "input/input.h"
+#include "input/joystick_init.h"
 #include "render/text_cache.h"
 
 namespace fs = std::filesystem;
@@ -183,6 +184,8 @@ void run_select(App& app) {
     app.mixer.play_system(kSysSelect, true);  // 選曲BGM（ループ）
     bool autoplay = false;
     InputMapper input(app.keycfg);
+    std::vector<std::string> joy_names;
+    bool joy_reported = false;
     int repeat_dir = 0;
     uint64_t repeat_next = 0;
     bool quit = false;
@@ -247,7 +250,16 @@ void run_select(App& app) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) quit = true;
-            if (e.type == SDL_EVENT_JOYSTICK_ADDED) SDL_OpenJoystick(e.jdevice.which);
+            if (e.type == SDL_EVENT_JOYSTICK_ADDED) {
+                if (SDL_Joystick* j = SDL_OpenJoystick(e.jdevice.which)) {
+                    const char* name = SDL_GetJoystickName(j);
+                    std::printf("コントローラー接続: %s（ボタン %d、軸 %d、ハット %d）\n", name ? name : "?",
+                                SDL_GetNumJoystickButtons(j), SDL_GetNumJoystickAxes(j), SDL_GetNumJoystickHats(j));
+                    joy_names.push_back(name ? name : "?");
+                }
+            }
+            if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED) std::printf("ウィンドウにフォーカスが来た\n");
+            if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) std::printf("ウィンドウのフォーカスが外れた\n");
             if (e.type == SDL_EVENT_KEY_DOWN) {
                 switch (e.key.key) {
                 case SDLK_UP: move(-1); break;
@@ -429,8 +441,32 @@ void run_select(App& app) {
             st_text = busy ? "更新中…" : status;
         }
         text.draw(px, 644, 14, dim, st_text, 0, 420);
+        // コントローラーの状態（Windows では準備に時間がかかることがある）
+        std::string joy_text;
+        if (!joystick_init().ready()) joy_text = "コントローラーを準備中…（キーボードは使える）";
+        else if (joy_names.empty()) joy_text = "コントローラー：なし";
+        else joy_text = "コントローラー：" + joy_names.front() + (joy_names.size() > 1 ? " ほか" : "");
+        if (joystick_init().ready() && !joy_reported) {
+            std::printf("コントローラーの準備が終わった（%dms）\n", joystick_init().took_ms());
+            joy_reported = true;
+        }
+        if (!(SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS)) joy_text = "ウィンドウをクリックすると操作できます";
+        text.draw(px, 600, 14, joystick_init().ready() ? dim : accent, joy_text, 0, 420);
         text.draw(24, 690, 14, dim,
                   "↑↓ 選ぶ　Enter/→ 決定　Esc/← 戻る　TAB ゲージ　F2 オート　F5 更新　（コントローラ：白鍵 決定／黒鍵 戻る／皿 選ぶ）");
+        if (std::getenv("BMJ_DEBUG_LOOP")) {
+            // 開発用：選曲画面の1秒あたりの描画回数と、1回にかかった時間
+            static uint64_t t = SDL_GetTicksNS();
+            static int frames = 0;
+            static double sum = 0, mx = 0;
+            double ms = (SDL_GetTicksNS() - now) / 1e6;
+            ++frames, sum += ms, mx = std::max(mx, ms);
+            if (SDL_GetTicksNS() - t > 1000000000ull) {
+                std::printf("選曲画面 %dfps、1回 平均%.2fms 最大%.2fms\n", frames, sum / frames, mx);
+                frames = 0, sum = 0, mx = 0;
+                t = SDL_GetTicksNS();
+            }
+        }
         bool settled;
         {
             std::lock_guard<std::mutex> lock(mu);

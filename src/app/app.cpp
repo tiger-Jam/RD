@@ -64,6 +64,10 @@ bool App::init(const char* argv0) {
         return false;
     }
     SDL_SetRenderVSync(renderer, cfg.vsync ? 1 : 0);
+    // 別のプロセスから起動されたときでも、前面に出てキーボードの入力を受けられるようにする
+    SDL_SetHint(SDL_HINT_FORCE_RAISEWINDOW, "1");
+    SDL_RaiseWindow(window);
+    std::printf("描画: %s\n", SDL_GetRendererName(renderer));
     if (const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window)))
         if (m->refresh_rate > 0) refresh_hz = m->refresh_rate;
     skin_renderer = std::make_unique<SkinRenderer>(renderer);

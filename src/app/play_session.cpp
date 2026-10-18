@@ -489,13 +489,26 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             }
 
             if (std::getenv("BMJ_DEBUG_LOOP")) {
-                // 開発用：1秒あたりの入力処理の回数と描画の回数
-                static uint64_t t = now_ns;
+                // 開発用：1秒あたりの入力処理の回数、描画の回数、描画1回にかかった時間、フレームの間隔の最大
+                static uint64_t t = now_ns, last_frame = now_ns;
                 static int loops = 0;
+                static double draw_ms_sum = 0, draw_ms_max = 0, gap_max = 0;
+                static int draws = 0;
                 ++loops;
+                if (frame_ns == 0 || now_ns >= next_frame_ns) {
+                    gap_max = std::max(gap_max, (now_ns - last_frame) / 1e6);
+                    last_frame = now_ns;
+                }
+                if (app.last_draw_ms >= 0) {
+                    draw_ms_sum += app.last_draw_ms;
+                    draw_ms_max = std::max(draw_ms_max, app.last_draw_ms);
+                    ++draws;
+                    app.last_draw_ms = -1;
+                }
                 if (now_ns - t > 1000000000ull) {
-                    std::printf("入力処理 %d回/秒、描画 %dfps\n", loops, ctx.fps);
-                    loops = 0;
+                    std::printf("入力処理 %d回/秒、描画 %dfps、描画1回 平均%.2fms 最大%.2fms、フレーム間隔の最大 %.1fms\n", loops, ctx.fps,
+                                draws ? draw_ms_sum / draws : 0.0, draw_ms_max, gap_max);
+                    loops = 0, draws = 0, draw_ms_sum = 0, draw_ms_max = 0, gap_max = 0;
                     t = now_ns;
                 }
             }
@@ -602,7 +615,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 // 開発用：撮影中はリザルトを2秒ごとに自動で進める
                 if (phase == Phase::Result) result_input();
             }
-            SDL_RenderPresent(renderer);
+            {
+                uint64_t d0 = SDL_GetTicksNS();
+                SDL_RenderPresent(renderer);
+                app.last_draw_ms = (SDL_GetTicksNS() - now_ns) / 1e6;
+                app.last_present_ms = (SDL_GetTicksNS() - d0) / 1e6;
+            }
             if (opt.quit_after > 0 && now_ms / 1000 > opt.quit_after) quit = true, done = true, exit = PlayExit::Quit;
         }
         mixer.stop();

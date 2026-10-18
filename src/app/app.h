@@ -28,6 +28,7 @@ struct App {
     std::unique_ptr<SkinRenderer> skin_renderer, result_renderer;
     int view_w = 640, view_h = 480;
     double refresh_hz = 60.0;
+    double last_draw_ms = -1, last_present_ms = 0;  // 開発用の計測
 
     ~App();
     bool init(const char* argv0);
