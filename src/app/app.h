@@ -8,6 +8,7 @@
 
 #include "app/config.h"
 #include "audio/mixer.h"
+#include "db/song_db.h"
 #include "input/keyconfig.h"
 #include "skin/lr2_skin.h"
 #include "skin/skin_renderer.h"
@@ -18,6 +19,7 @@ struct App {
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     Mixer mixer;
+    SongDb db;
     KeyConfig keycfg = KeyConfig::lr2_default();
     AppConfig cfg;
     std::string cfg_path;

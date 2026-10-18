@@ -68,6 +68,7 @@ bool App::init(const char* argv0) {
         std::fprintf(stderr, "音声デバイスを開けない\n");
         return false;
     }
+    if (!db.open(song_db_path())) std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
     std::printf("音声: %u Hz、出力遅延の推定 %.1f ms／画面 %.0f Hz\n", mixer.sample_rate(),
                 mixer.output_latency_us() / 1000.0, refresh_hz);
     return true;

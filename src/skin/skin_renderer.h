@@ -14,6 +14,7 @@
 
 #include "chart/chart.h"
 #include "game/judge.h"
+#include "render/text_cache.h"
 #include "skin/lr2_skin.h"
 
 namespace bmj {
@@ -68,12 +69,11 @@ struct PlaySkinState {
 
 class SkinRenderer {
 public:
-    explicit SkinRenderer(SDL_Renderer* r) : r_(r) {}
+    explicit SkinRenderer(SDL_Renderer* r) : r_(r), text_(r) {}
     ~SkinRenderer();
     // スキンの画像をテクスチャにする（読み込み直後に1回）
     void upload(const Lr2Skin& skin);
     void draw_play(const Lr2Skin& skin, const PlaySkinState& st);
-    void set_font_path(const std::string& dir) { font_dir_ = dir; }
     // 画像からテクスチャを作る（破棄は呼び出し側）
     SDL_Texture* create_texture(const SkinImage& img);
 
@@ -109,21 +109,12 @@ private:
     double src_time(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st) const;
     bool dst_on(const SkinDst& d, const PlaySkinState& st) const;
 
-    // 文字列を1枚のテクスチャにしたもの（TTF）
-    struct TextTex {
-        SDL_Texture* tex = nullptr;
-        int w = 0, h = 0;
-    };
-    TextTex ttf_text(const TtfFont& f, const std::string& s);
-    const std::vector<uint8_t>* font_data(int thick);
 
     SDL_Renderer* r_;
     std::vector<SDL_Texture*> textures_;
     std::vector<std::vector<SDL_Texture*>> font_textures_;  // 画像フォントごとの画像
     std::vector<Item> items_;
-    std::map<std::string, TextTex> text_cache_;
-    std::map<std::string, std::vector<uint8_t>> font_files_;
-    std::string font_dir_ = "/System/Library/Fonts";
+    TextCache text_;
     uint32_t rand_ = 12345;
 };
 

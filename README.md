@@ -2,7 +2,7 @@
 
 LR2の挙動を既定にした、7K+S専用のBMSプレイヤー。仕様は `次世代BMSプレイヤー 仕様書 v0.1.md`。
 
-いまは、譜面を1つ指定して、LR2のプレイスキンで遊べるところまで。
+いまは、選曲画面（難易度表・曲フォルダ）から選んで、LR2のプレイスキンで遊べるところまで。
 
 ## ビルド（macOS）
 
@@ -14,6 +14,18 @@ cmake --build build
 ```
 
 ## 遊ぶ
+
+```
+./build/bmjoy --add-song-dir ~/BMS --add-table https://stellabms.xyz/sl/table.html   # 最初に1回だけ
+./build/bmjoy                                                                      # 選曲画面
+```
+
+- 選曲画面：↑↓で選ぶ、Enter/→で決定、Esc/←で戻る、TABでゲージ、F2でオート、F5で曲フォルダと難易度表を更新
+  （コントローラは白鍵で決定、黒鍵で戻る、皿で選ぶ）
+- 起動時に、裏で曲フォルダの読み直し（変わったファイルだけ）と難易度表の更新をする。難易度表が取れなくても、最後に取れた版を使う
+- スコア（ランプ・EX・BP・プレイ回数）は `songs.db` に記録する。自己ベストのゴーストにも使う
+
+譜面を直接指定して遊ぶこともできる：
 
 ```
 ./build/bmjoy 譜面.bme [--auto] [--gauge groove|hard|death|easy|pattack|gattack] [--gas] [--hs 100] [--timing ms]

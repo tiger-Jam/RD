@@ -14,6 +14,7 @@ struct PlayOptions {
     uint32_t seed = 0;
     std::string capture_dir;  // 開発用：描画結果を2秒ごとにBMPで保存する
     double quit_after = 0;    // 開発用：指定秒数で終了する
+    bool save_score = true;
 };
 
 enum class PlayExit { Back, Quit };

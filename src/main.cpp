@@ -4,7 +4,9 @@
 //                        [--hs 100] [--seed N] [--timing ms] [--lr2-root DIR] [--skin FILE]
 //                        [--skin-opt 番号=選択] [--skin-res sd|hd|fhd] [--no-skin] [--fps N] [--vsync]
 //                        [--simulate] [--info]
+//   bmjoy                    選曲画面
 //   bmjoy --keyconfig
+//   bmjoy --add-song-dir DIR --add-table URL   曲フォルダ・難易度表を登録する
 //
 // 指定したオプションは設定ファイル（config.txt）に保存され、次からは指定しなくても使われる
 #include <SDL3/SDL.h>
@@ -20,6 +22,7 @@
 
 #include "app/app.h"
 #include "app/play_session.h"
+#include "app/select_scene.h"
 #include "chart/bms_parser.h"
 #include "db/difficulty_table.h"
 #include "db/song_db.h"
@@ -39,6 +42,7 @@ struct Options {
     std::vector<std::string> scan_dirs;  // 開発用：曲フォルダを読んで結果を表示する
     std::string db_path;
     std::vector<std::string> table_urls;  // 開発用：難易度表を取得して表示する
+    std::vector<std::string> add_song_dirs, add_tables;
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000;
     bool gas = false;
@@ -64,6 +68,8 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--scan") o.scan_dirs.push_back(next());
         else if (a == "--db") o.db_path = next();
         else if (a == "--table") o.table_urls.push_back(next());
+        else if (a == "--add-song-dir") o.add_song_dirs.push_back(next());
+        else if (a == "--add-table") o.add_tables.push_back(next());
         else if (a == "--skin-opt") {
             std::string v = next();
             size_t eq = v.find('=');
@@ -91,7 +97,7 @@ bool parse_args(int argc, char** argv, Options& o) {
             o.chart_path = a;
         }
     }
-    return o.keyconfig || !o.scan_dirs.empty() || !o.table_urls.empty() || !o.chart_path.empty();
+    return true;  // 譜面を指定しなければ選曲画面
 }
 
 void print_info(const Chart& c, const BmsParseResult& r) {
@@ -186,6 +192,12 @@ int main(int argc, char** argv) {
         if (opt.timing != 1000) c.judge_timing = opt.timing;
         if (opt.fps != -1000) c.fps = opt.fps;
         if (opt.vsync) c.vsync = true;
+        for (const std::string& d : opt.add_song_dirs) {
+            std::string a = std::filesystem::absolute(d, ec).string();
+            if (std::find(c.song_dirs.begin(), c.song_dirs.end(), a) == c.song_dirs.end()) c.song_dirs.push_back(a);
+        }
+        for (const std::string& t : opt.add_tables)
+            if (std::find(c.tables.begin(), c.tables.end(), t) == c.tables.end()) c.tables.push_back(t);
         if (!app.init(argv[0])) return 1;
         if (opt.no_skin) app.lr2_root.clear();
         if (!opt.skin_opts.empty()) {
@@ -206,6 +218,8 @@ int main(int argc, char** argv) {
 
         if (opt.keyconfig) {
             run_keyconfig(app.window, app.renderer, app.keycfg, keyconfig_path());
+        } else if (opt.chart_path.empty()) {
+            run_select(app);
         } else {
             run_play(app, opt.chart_path, opt.play);
         }

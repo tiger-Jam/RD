@@ -26,6 +26,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "play_skin") play_skin = val;
         else if (key == "skin_res") skin_res = val;
         else if (key == "song_dir") song_dirs.push_back(val);
+        else if (key == "table") tables.push_back(val);
         else if (key == "hi_speed") hi_speed = iv;
         else if (key == "judge_timing") judge_timing = iv;
         else if (key == "gauge") gauge = iv;
@@ -52,6 +53,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "play_skin = " << play_skin << "\n";
     f << "skin_res = " << skin_res << "\n";
     for (const std::string& d : song_dirs) f << "song_dir = " << d << "\n";
+    for (const std::string& t : tables) f << "table = " << t << "\n";
     f << "hi_speed = " << hi_speed << "\n";
     f << "judge_timing = " << judge_timing << "\n";
     f << "gauge = " << gauge << "  # 0=GROOVE 1=HARD 2=DEATH 3=EASY 4=P-ATTACK 5=G-ATTACK\n";
@@ -69,6 +71,13 @@ bool AppConfig::save(const std::string& path) const {
 std::string config_path() {
     char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
     std::string p = dir ? std::string(dir) + "config.txt" : "config.txt";
+    SDL_free(dir);
+    return p;
+}
+
+std::string table_cache_dir() {
+    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
+    std::string p = dir ? std::string(dir) + "tables" : "tables";
     SDL_free(dir);
     return p;
 }

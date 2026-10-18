@@ -52,6 +52,7 @@ add_executable(bmjoy
     src/app/app.cpp
     src/app/config.cpp
     src/app/play_session.cpp
+    src/app/select_scene.cpp
     src/audio/sound_bank.cpp
     src/audio/mixer.cpp
     src/input/input.cpp
@@ -60,6 +61,7 @@ add_executable(bmjoy
     src/render/play_scene.cpp
     src/render/skin_play.cpp
     src/skin/skin_renderer.cpp
+    src/render/text_cache.cpp
 )
 target_link_libraries(bmjoy PRIVATE bmj_core SDL3::SDL3)
 

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <cstdlib>
 #include <cstdio>
 #include <thread>
@@ -17,6 +18,7 @@
 #include "input/input.h"
 #include "render/play_scene.h"
 #include "render/skin_play.h"
+#include "util/hash.h"
 #include "util/path.h"
 
 namespace bmj {
@@ -70,6 +72,15 @@ bool is_movie_file(const std::string& p) {
     return false;
 }
 
+// リザルトに入ったときに1回だけ記録する。途中でやめたときもLR2と同じくFAILEDとして記録する
+void record_score(App& app, const std::string& sha256, const JudgeEngine& j, bool quit_early) {
+    const PlayStats& s = j.stats();
+    int lamp = (j.failed() || quit_early) ? 1 : j.clear();
+    // 途中でやめたときは、残りのノーツもBPに入れる（LR2: statplay.cpp:659）
+    int bp = s.bp() + (quit_early ? s.total_notes - s.note_current : 0);
+    app.db.save_score(sha256, lamp, s.exscore(), bp, s.max_combo);
+}
+
 void print_result(const Chart& chart, const JudgeEngine& j) {
     const PlayStats& s = j.stats();
     static const char* lamps[] = {"NO PLAY", "FAILED", "EASY", "NORMAL", "HARD", "FULL COMBO"};
@@ -94,6 +105,15 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     }
     const Chart& chart = parsed.chart;
     AppConfig& cfg = app.cfg;
+    // スコアは譜面ファイルの原本のSHA-256で記録する（仕様書8章）
+    std::string sha256;
+    {
+        std::ifstream f(chart_path, std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        sha256 = sha256_hex(bytes);
+    }
+    ScoreRecord best_score;
+    bool has_best = app.db.get_score(sha256, best_score);
     Mixer& mixer = app.mixer;
 
     PlayContext ctx;
@@ -159,6 +179,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.last_miss_ms = -1e9;
         // LR2の既定：自己ベストはまだ無く、ターゲットは90%のゴースト（Scene04_Play.cpp:1997）
         ctx.best = Ghost{};
+        if (has_best && best_score.exscore > 0) ctx.best.set_from_exscore(best_score.exscore, judge.stats().total_notes);
         ctx.target.set_default(90, judge.stats().total_notes);
         ctx.target_type = 0;
 
@@ -182,6 +203,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         double last_miss_ms = -1e9;
         int fps_frames = 0;
         uint64_t fps_t0 = scene_start;
+        bool recorded = false;
+        auto enter_result = [&](bool quit_early) {
+            phase = Phase::Result;
+            mixer.stop();
+            print_result(chart, judge);
+            if (!recorded && opt.save_score && !opt.autoplay && started) record_score(app, sha256, judge, quit_early);
+            recorded = true;
+        };
         ctx.timers.set(0, 0);
 
         while (!done) {
@@ -194,7 +223,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     if (e.key.repeat) break;
                     if (e.key.key == SDLK_ESCAPE) {
                         if (phase == Phase::Result) done = true;
-                        else phase = Phase::Result, mixer.stop(), print_result(chart, judge);
+                        else enter_result(judge.stats().note_current < judge.stats().total_notes);
                     } else if (e.key.key == SDLK_RETURN && phase == Phase::Result) {
                         done = true;
                     } else if (e.key.key == SDLK_F5 && phase == Phase::Result) {
@@ -360,12 +389,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 }
             }
             if (phase == Phase::Fadeout && ctx.timers.lapse(2, now_ms) >= (skin ? skin->fadeout : 0)) {
-                phase = Phase::Result;
-                mixer.stop();
-                print_result(chart, judge);
+                enter_result(false);
             } else if (phase == Phase::Failed && ctx.timers.lapse(3, now_ms) >= (skin ? skin->close : 2050)) {
-                phase = Phase::Result;
-                print_result(chart, judge);
+                enter_result(false);
             }
 
             if (std::getenv("BMJ_DEBUG_LOOP")) {

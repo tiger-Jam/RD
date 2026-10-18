@@ -21,6 +21,17 @@ public:
         expect_[5] = pg;
         expect_[4] = notes - pg;
     }
+    // LR2: SetGhost。記録されたEXスコアから、PGREATとGREATだけでできたゴーストを作る
+    void set_from_exscore(int exscore, int notes) {
+        *this = Ghost{};
+        total_notes_ = notes;
+        if (notes <= 0) return;
+        double v = (static_cast<double>(exscore) / notes - 1.0) * notes;
+        int pg = static_cast<int>(v);
+        if (pg < v) pg++;  // LR2: RoundUp
+        expect_[5] = pg;
+        expect_[4] = notes - pg;
+    }
     // LR2: DealJudgeFromQueue（記録されたゴーストが無いとき）。自分のノーツが1つ判定されるたびに呼ぶ
     void deal() {
         if (total_notes_ < 1) return;

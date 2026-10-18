@@ -13,6 +13,7 @@ struct AppConfig {
     std::string skin_res;          // "", "sd", "hd", "fhd"
     std::map<std::string, std::vector<int>> skin_custom;  // スキンのパス → カスタマイズの選択
     std::vector<std::string> song_dirs;  // 曲フォルダ
+    std::vector<std::string> tables;     // 難易度表のURL（アプリには同梱しない。ユーザーが登録する）
     int hi_speed = 100;            // LR2のハイスピ（100=1.00倍）
     int judge_timing = 0;          // LR2の判定タイミング（描画だけをずらす）
     int gauge = 0;                 // GaugeType
@@ -30,5 +31,7 @@ struct AppConfig {
 std::string config_path();
 // 曲データベースの置き場所（同じフォルダの songs.db）
 std::string song_db_path();
+// 難易度表を手元に保存しておくフォルダ
+std::string table_cache_dir();
 
 }  // namespace bmj

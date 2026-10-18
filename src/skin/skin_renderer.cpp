@@ -48,7 +48,6 @@ SkinRenderer::~SkinRenderer() {
     for (SDL_Texture* t : textures_) if (t) SDL_DestroyTexture(t);
     for (auto& v : font_textures_)
         for (SDL_Texture* t : v) if (t) SDL_DestroyTexture(t);
-    for (auto& [k, t] : text_cache_) if (t.tex) SDL_DestroyTexture(t.tex);
 }
 
 void SkinRenderer::upload(const Lr2Skin& skin) {
@@ -492,80 +491,6 @@ void SkinRenderer::draw_image(Item& it) {
     }
 }
 
-const std::vector<uint8_t>* SkinRenderer::font_data(int thick) {
-    // DxLibの太さ（0〜9）をヒラギノの太さに当てはめる
-    int w = thick <= 2 ? 3 : thick <= 4 ? 4 : thick <= 6 ? 6 : 8;
-    char name[64];
-    std::snprintf(name, sizeof(name), "/ヒラギノ角ゴシック W%d.ttc", w);
-    std::string path = font_dir_ + name;
-    auto it = font_files_.find(path);
-    if (it != font_files_.end()) return it->second.empty() ? nullptr : &it->second;
-    std::ifstream f(path, std::ios::binary);
-    std::vector<uint8_t> bytes;
-    if (f) bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-    auto& slot = font_files_[path];
-    slot = std::move(bytes);
-    return slot.empty() ? nullptr : &slot;
-}
-
-SkinRenderer::TextTex SkinRenderer::ttf_text(const TtfFont& f, const std::string& s) {
-    char keybuf[32];
-    std::snprintf(keybuf, sizeof(keybuf), "%d/%d/", f.size, f.thick);
-    std::string key = keybuf + s;
-    if (auto it = text_cache_.find(key); it != text_cache_.end()) return it->second;
-    TextTex out;
-    const std::vector<uint8_t>* data = font_data(f.thick);
-    if (data && f.size > 0) {
-        stbtt_fontinfo info;
-        if (stbtt_InitFont(&info, data->data(), stbtt_GetFontOffsetForIndex(data->data(), 0))) {
-            float scale = stbtt_ScaleForPixelHeight(&info, static_cast<float>(f.size));
-            int ascent, descent, gap;
-            stbtt_GetFontVMetrics(&info, &ascent, &descent, &gap);
-            int base = static_cast<int>(ascent * scale);
-            std::u32string u = utf32(s);
-            float x = 0;
-            for (char32_t ch : u) {
-                int adv, lsb;
-                stbtt_GetCodepointHMetrics(&info, static_cast<int>(ch), &adv, &lsb);
-                x += adv * scale;
-            }
-            int w = std::max(1, static_cast<int>(std::ceil(x)) + 2), h = f.size;
-            std::vector<uint8_t> alpha(static_cast<size_t>(w) * h, 0);
-            x = 0;
-            for (char32_t ch : u) {
-                int adv, lsb, x0, y0, x1, y1;
-                stbtt_GetCodepointHMetrics(&info, static_cast<int>(ch), &adv, &lsb);
-                stbtt_GetCodepointBitmapBox(&info, static_cast<int>(ch), scale, scale, &x0, &y0, &x1, &y1);
-                int gx = static_cast<int>(x) + x0, gy = base + y0;
-                int gw = x1 - x0, gh = y1 - y0;
-                if (gw > 0 && gh > 0) {
-                    std::vector<uint8_t> g(static_cast<size_t>(gw) * gh);
-                    stbtt_MakeCodepointBitmap(&info, g.data(), gw, gh, gw, scale, scale, static_cast<int>(ch));
-                    for (int yy = 0; yy < gh; ++yy)
-                        for (int xx = 0; xx < gw; ++xx) {
-                            int px = gx + xx, py = gy + yy;
-                            if (px < 0 || py < 0 || px >= w || py >= h) continue;
-                            uint8_t& dstp = alpha[static_cast<size_t>(py) * w + px];
-                            dstp = std::max(dstp, g[static_cast<size_t>(yy) * gw + xx]);
-                        }
-                }
-                x += adv * scale;
-            }
-            std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4, 255);
-            for (size_t i = 0; i < alpha.size(); ++i) rgba[i * 4 + 3] = alpha[i];
-            SkinImage img;
-            img.w = w;
-            img.h = h;
-            img.rgba = std::move(rgba);
-            out.tex = make_texture(r_, img);
-            out.w = static_cast<int>(std::ceil(x));
-            out.h = h;
-        }
-    }
-    text_cache_[key] = out;
-    return out;
-}
-
 // LR2: LRDrawText（skindraw:847）。画像フォントがあればそれを、無ければTTFで描く
 void SkinRenderer::draw_text(const Lr2Skin& skin, Item& it) {
     SkinDraw& d = it.d;
@@ -616,7 +541,7 @@ void SkinRenderer::draw_text(const Lr2Skin& skin, Item& it) {
     }
     if (it.font < 0 || it.font >= static_cast<int>(skin.ttf_fonts.size())) return;
     const TtfFont& f = skin.ttf_fonts[it.font];
-    TextTex tt = ttf_text(f, it.str);
+    TextCache::Tex tt = text_.get(f.size, f.thick, it.str);
     if (!tt.tex || tt.w <= 0) return;
     float hl = d.h / static_cast<float>(f.size);
     float width = static_cast<float>(tt.w);

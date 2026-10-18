@@ -153,6 +153,8 @@ SongDb::~SongDb() { close(); }
 bool SongDb::open(const std::string& path) {
     close();
     if (sqlite3_open(path.c_str(), &db_) != SQLITE_OK) return false;
+    // 選曲画面の裏の読み直しと、プレイ後のスコアの記録が重なっても待つ
+    sqlite3_busy_timeout(db_, 5000);
     char* err = nullptr;
     if (sqlite3_exec(db_, kSchema, nullptr, nullptr, &err) != SQLITE_OK) {
         std::fprintf(stderr, "曲データベースを作れない: %s\n", err ? err : "?");
