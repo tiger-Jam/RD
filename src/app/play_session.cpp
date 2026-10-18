@@ -1044,7 +1044,8 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
 
 PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
     AppConfig& cfg = app.cfg;
-    // 段位認定はオプションを書き換える（LR2: Main.cpp:1546）。配置は正規だけ、EASY と G-ATTACK は GROOVE に、
+    // 段位認定はオプションを書き換える（LR2: Main.cpp:1546）。配置は正規だけ（難易度表の指定で MIRROR などを許す）、
+    // EASY と G-ATTACK は GROOVE に、
     // HIDDEN/SUDDEN と皿の自動演奏は切る。LR2 は終わっても戻さないが、BMjoy はコースが終わったら元に戻す
     const int saved_random = cfg.random, saved_gauge = cfg.gauge, saved_effect = cfg.effect;
     const bool saved_assist = cfg.assist;
@@ -1057,7 +1058,9 @@ PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
         app.save_config();
     }};
     if (course.type == 2) {
-        cfg.random = kRandomOff;
+        // 使えない配置は正規に戻す（MIRROR 可なら MIRROR まで、RANDOM 可なら RANDOM まで）
+        int allowed = course.grade_random == 0 ? kRandomOff : course.grade_random == 1 ? kMirror : kRandom;
+        if (cfg.random > allowed) cfg.random = kRandomOff;
         if (cfg.gauge == kEasy || cfg.gauge == kGAttack) cfg.gauge = kGroove;
         cfg.effect = 0;
         cfg.assist = false;

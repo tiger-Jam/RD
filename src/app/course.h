@@ -18,9 +18,9 @@ struct CourseStage {
 struct Course {
     std::string name;
     int type = 0;  // LR2 のコースの種類：0 エキスパート 1 ノンストップ 2 段位認定
-    // 難易度表の grade_mirror / grade_random。段位では 1P 側は正規だけ。
-    // 2P 側で遊べるようになったら、2P 側は MIRROR を強制する（ユーザーの決定。LR2 と表のどちらとも違う）
-    bool allow_mirror = false;
+    // 段位で使える配置（難易度表の grade / grade_mirror / grade_random）。0 = 正規だけ 1 = MIRROR も可 2 = RANDOM も可。
+    // 正規だけのコースは、2P 側で遊べるようになったら 2P 側は MIRROR を強制する（ユーザーの決定）
+    int grade_random = 0;
     std::vector<CourseStage> stages;
     std::string hash;  // スコアのキー
 

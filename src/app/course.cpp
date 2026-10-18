@@ -19,7 +19,7 @@ Course make_table_course(const TableCourse& tc, const std::unordered_map<std::st
     for (const std::string& k : tc.constraints) {
         if (k == "grade" || k == "grade_mirror" || k == "grade_random") {
             c.type = 2;
-            c.allow_mirror = k != "grade";
+            c.grade_random = k == "grade" ? 0 : k == "grade_mirror" ? 1 : 2;
             break;
         }
     }
