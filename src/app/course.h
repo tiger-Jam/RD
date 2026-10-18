@@ -21,6 +21,8 @@ struct Course {
     // 段位で使える配置（難易度表の grade / grade_mirror / grade_random）。0 = 正規だけ 1 = MIRROR も可 2 = RANDOM も可。
     // 正規だけのコースは、2P 側で遊べるようになったら 2P 側は MIRROR を強制する（ユーザーの決定）
     int grade_random = 0;
+    // 難易度表の制約：ハイスピード固定（no_speed。ノースピ）、GOOD 無し（no_good）、GREAT・GOOD 無し（no_great）
+    bool no_speed = false, no_good = false, no_great = false;
     std::vector<CourseStage> stages;
     std::string hash;  // スコアのキー
 

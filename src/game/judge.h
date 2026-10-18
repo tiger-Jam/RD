@@ -53,6 +53,8 @@ struct JudgeConfig {
     bool carry = false;
     std::array<double, kGaugeCount> carry_hp{};
     int carry_combo = 0, carry_max_combo = 0;
+    // 難易度表のコースの制約：GOOD を無くす（no_good）、GREAT と GOOD を無くす（no_great）。無くした判定は BAD になる
+    bool no_good = false, no_great = false;
 };
 
 class JudgeEngine {
@@ -99,6 +101,11 @@ private:
         size_t sound_cur = 0;       // 自動演奏のレーン：次に始点の音を鳴らすノーツ
     };
     bool lane_auto(int lane) const { return cfg_.assist_scratch && lane == 0; }
+    int demote(int judge) const {
+        if (cfg_.no_great && (judge == kGreat || judge == kGood)) return kBad;
+        if (cfg_.no_good && judge == kGood) return kBad;
+        return judge;
+    }
 
     void proc(int lane, int keypress, int timing_ms, int64_t t_us);
     void proc_single(int lane, int keypress, int timing_ms, int64_t t_us);

@@ -210,6 +210,7 @@ void JudgeEngine::proc_single(int lane, int keypress, int timing, int64_t t_us) 
     else if (gap <= win_.great) judge = kGreat;
     else if (gap <= win_.good) judge = kGood;
     else if (gap <= win_.bad) judge = kBad;
+    judge = demote(judge);
     if (judge >= 0 && remaining) {
         judge_to_score(judge, lane, t_us, offset, true);
         l.note_val = note.sound;
@@ -257,6 +258,7 @@ void JudgeEngine::proc_long(int lane, int keypress, int timing, int64_t t_us) {
         else if (gap <= win_.great) judge = kGreat;
         else if (gap <= win_.good) judge = kGood;
         else if (gap <= win_.bad) judge = kBad;
+        judge = demote(judge);
         if (judge >= 0) {
             // 始点ではまだ数えない。終点で始点の判定として数える
             l.note_val = note.sound;

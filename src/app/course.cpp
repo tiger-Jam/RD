@@ -23,6 +23,14 @@ Course make_table_course(const TableCourse& tc, const std::unordered_map<std::st
             break;
         }
     }
+    // 判定の制約も、先に書かれたものを使う
+    for (const std::string& k : tc.constraints) {
+        if (k == "no_good" || k == "no_great") {
+            (k == "no_good" ? c.no_good : c.no_great) = true;
+            break;
+        }
+    }
+    c.no_speed = std::find(tc.constraints.begin(), tc.constraints.end(), "no_speed") != tc.constraints.end();
     for (const TableChart& t : tc.charts) {
         CourseStage s;
         s.md5 = t.md5, s.sha256 = t.sha256;

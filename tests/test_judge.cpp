@@ -253,3 +253,20 @@ TEST(hispeed_green_number) {
     CHECK_EQ(floating_base_bpm(c, 2), 120.0);
     CHECK_EQ(floating_base_bpm(c, 3), 240.0);  // ノーツが多いのは BPM 240
 }
+
+TEST(judge_no_good_no_great) {
+    Chart c = chart_of(kOne);
+    auto judge_at = [&](int t_ms, bool no_good, bool no_great) {
+        JudgeConfig cfg;
+        cfg.no_good = no_good, cfg.no_great = no_great;
+        JudgeEngine j(c, cfg);
+        j.advance(ms(t_ms));
+        j.press(1, ms(t_ms));
+        return j.events().empty() ? -1 : j.events().back().judge;
+    };
+    CHECK_EQ(judge_at(2070, false, false), int(kGood));
+    CHECK_EQ(judge_at(2070, true, false), int(kBad));    // GOOD 無し
+    CHECK_EQ(judge_at(2030, true, false), int(kGreat));
+    CHECK_EQ(judge_at(2030, false, true), int(kBad));    // GREAT・GOOD 無し
+    CHECK_EQ(judge_at(2010, false, true), int(kPGreat));
+}

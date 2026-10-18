@@ -293,6 +293,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             jcfg.carry_combo = course->combo;
             jcfg.carry_max_combo = course->max_combo;
             jcfg.gauge_type = course->gauge_type;
+            jcfg.no_good = course->course->no_good;
+            jcfg.no_great = course->course->no_great;
         }
         JudgeEngine judge(chart, jcfg);
         ctx.judge = &judge;
@@ -466,9 +468,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         auto cover_movable = [&] { return !floating || cfg.gear_mode == 0 || !started || judge.finished(); };
         if (floating) keep_green(cfg.fhs_green);
         start_green = cfg.fhs_green;
+        // ハイスピード固定のコースでは、ハイスピもカバーも変えられない
+        const bool speed_locked = course && course->course->no_speed;
         // 演奏中の START / SELECT の操作（LR2: gameloop:163-327, 384-400）
         auto play_buttons = [&](double now_ms) {
             bool held_start = input.button_held(kStart), held_select = input.button_held(kSelect);
+            ctx.cover_adjusting = held_start || held_select;
+            if (speed_locked) return;
             bool cover_active = cfg.lane_cover && cover_display;
             for (const ButtonInput& b : button_in) {
                 if (!b.down) continue;
@@ -539,7 +545,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 case SDL_EVENT_JOYSTICK_ADDED: SDL_OpenJoystick(e.jdevice.which); break;
                 case SDL_EVENT_MOUSE_WHEEL:
                     // ホイールでレーンカバー（LR2: gameloop:183）
-                    if (phase == Phase::Play && cfg.lane_cover == 1 && cover_movable()) {
+                    if (phase == Phase::Play && cfg.lane_cover == 1 && cover_movable() && !speed_locked) {
                         cfg.lane_cover_v = std::clamp(cfg.lane_cover_v - static_cast<int>(std::lround(e.wheel.y)), 0, 100);
                         if (floating) keep_green(cfg.fhs_green);
                     }
@@ -561,7 +567,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         // 判定タイミング（BMjoy の拡張。LR2 はオプション画面でしか変えられない）
                         int d = e.key.key == SDLK_RIGHT ? 1 : -1;
                         cfg.judge_timing = std::clamp(cfg.judge_timing + d, -199, 199);
-                    } else if (e.key.key == SDLK_UP || e.key.key == SDLK_DOWN) {
+                    } else if ((e.key.key == SDLK_UP || e.key.key == SDLK_DOWN) && !speed_locked) {
                         // ハイスピード（LR2: gameloop:477。端まで行くと反対の端へ回る）。フローティングは 0.50 ずつで、端で止まる
                         if (floating) {
                             hs = std::clamp(hs + (e.key.key == SDLK_UP ? 50 : -50), kFloatingHsMin, kFloatingHsMax);
@@ -571,7 +577,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                             if (cfg.hi_speed > cfg.hs_max) cfg.hi_speed = cfg.hs_min;
                             else if (cfg.hi_speed < cfg.hs_min) cfg.hi_speed = cfg.hs_max;
                         }
-                    } else if (e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) {
+                    } else if ((e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) && !speed_locked) {
                         // レーンカバーの量（LR2: gameloop:481）
                         int d = e.key.key == SDLK_RIGHT ? cfg.shutter_margin : -cfg.shutter_margin;
                         if (cover_movable()) {
@@ -1129,17 +1135,24 @@ PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
     AppConfig& cfg = app.cfg;
     // 段位認定はオプションを書き換える（LR2: Main.cpp:1546）。配置は正規だけ（難易度表の指定で MIRROR などを許す）、
     // EASY と G-ATTACK は GROOVE に、
-    // HIDDEN/SUDDEN と皿の自動演奏は切る。LR2 は終わっても戻さないが、BMjoy はコースが終わったら元に戻す
-    const int saved_random = cfg.random, saved_gauge = cfg.gauge, saved_effect = cfg.effect;
-    const bool saved_assist = cfg.assist;
+    // HIDDEN/SUDDEN と皿の自動演奏は切る。LR2 は終わっても戻さないが、BMjoy はコースが終わったら元に戻す。
+    // ハイスピード固定（ノースピ）のコースは、ハイスピ 1.00・HS-FIX なし・カバーと LIFT なし・基本スクロールスピード 100% で遊ぶ
+    const AppConfig saved = cfg;
     struct Restore {
         std::function<void()> f;
         ~Restore() { f(); }
     } restore{[&] {
-        if (course.type != 2) return;
-        cfg.random = saved_random, cfg.gauge = saved_gauge, cfg.effect = saved_effect, cfg.assist = saved_assist;
-        app.save_config();
+        if (course.type == 2) cfg.random = saved.random, cfg.gauge = saved.gauge, cfg.effect = saved.effect, cfg.assist = saved.assist;
+        if (course.no_speed) {
+            cfg.hs_mode = saved.hs_mode, cfg.hi_speed = saved.hi_speed, cfg.hs_fix = saved.hs_fix, cfg.lane_cover = saved.lane_cover;
+            cfg.lift = saved.lift, cfg.base_speed = saved.base_speed;
+        }
+        if (course.type == 2 || course.no_speed) app.save_config();
     }};
+    if (course.no_speed) {
+        cfg.hs_mode = 0, cfg.hi_speed = 100, cfg.hs_fix = 0, cfg.lane_cover = 0;
+        cfg.lift = false, cfg.base_speed = 100;
+    }
     if (course.type == 2) {
         // 使えない配置は正規に戻す（MIRROR 可なら MIRROR まで、RANDOM 可なら RANDOM まで）
         int allowed = course.grade_random == 0 ? kRandomOff : course.grade_random == 1 ? kMirror : kRandom;
