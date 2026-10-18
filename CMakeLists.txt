@@ -43,6 +43,9 @@ endif()
 
 add_executable(bmjoy
     src/main.cpp
+    src/app/app.cpp
+    src/app/config.cpp
+    src/app/play_session.cpp
     src/audio/sound_bank.cpp
     src/audio/mixer.cpp
     src/input/input.cpp
