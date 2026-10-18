@@ -19,7 +19,12 @@ public:
             ready_ = true;
         };
 #if defined(_WIN32)
-        thread_ = std::thread(init);
+        // 準備中はイベントの受け取りでジョイスティックを更新しない（準備のロックを待ってメインスレッドが止まるため）
+        SDL_SetHint(SDL_HINT_AUTO_UPDATE_JOYSTICKS, "0");
+        thread_ = std::thread([this, init] {
+            init();
+            SDL_SetHint(SDL_HINT_AUTO_UPDATE_JOYSTICKS, "1");
+        });
 #else
         init();  // macOS のコントローラーはメインスレッドで準備する必要がある
 #endif
