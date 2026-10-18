@@ -24,6 +24,7 @@ bool AppConfig::load(const std::string& path) {
         int iv = std::atoi(val.c_str());
         if (key == "lr2_root") lr2_root = val;
         else if (key == "play_skin") play_skin = val;
+        else if (key == "result_skin") result_skin = val;
         else if (key == "skin_res") skin_res = val;
         else if (key == "song_dir") song_dirs.push_back(val);
         else if (key == "table") tables.push_back(val);
@@ -51,6 +52,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "# BMjoy の設定\n";
     f << "lr2_root = " << lr2_root << "\n";
     f << "play_skin = " << play_skin << "\n";
+    f << "result_skin = " << result_skin << "\n";
     f << "skin_res = " << skin_res << "\n";
     for (const std::string& d : song_dirs) f << "song_dir = " << d << "\n";
     for (const std::string& t : tables) f << "table = " << t << "\n";

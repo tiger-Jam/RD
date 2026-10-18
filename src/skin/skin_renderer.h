@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "chart/chart.h"
+#include "game/graph.h"
 #include "game/judge.h"
 #include "render/text_cache.h"
 #include "skin/lr2_skin.h"
@@ -66,6 +67,18 @@ struct PlaySkinState {
     const std::vector<SDL_Texture*>* bga = nullptr;
     int bga_base = -1, bga_layer = -1, bga_poor = -1;
     bool bga_show_poor = false;  // ミスしてから一定時間はPOORの画像を出す
+    // リザルト画面のグラフ
+    const PlayGraph* graph = nullptr;
+    int graph_gauge = 0;
+    int total_notes = 0;
+    int chart_op3 = 0, chart_op4 = 0;  // グラフを描き進める時間（LR2: src_GAUGECHART の op3/op4。入力で op4 が早まる）
+    double chart_length(int full, double t0) const {
+        // LR2: ChangeValueByTime(0, op1, op3, op4, 経過, 0)
+        if (chart_op3 >= chart_op4) return t0 > chart_op3 ? full : 0;
+        if (t0 <= chart_op3) return 0;
+        if (t0 >= chart_op4) return full;
+        return full * (t0 - chart_op3) / (chart_op4 - chart_op3);
+    }
 };
 
 class SkinRenderer {
@@ -75,6 +88,7 @@ public:
     // スキンの画像をテクスチャにする（読み込み直後に1回）
     void upload(const Lr2Skin& skin);
     void draw_play(const Lr2Skin& skin, const PlaySkinState& st);
+    void draw_result(const Lr2Skin& skin, const PlaySkinState& st);
     // 画像からテクスチャを作る（破棄は呼び出し側）
     SDL_Texture* create_texture(const SkinImage& img);
 
@@ -104,6 +118,9 @@ private:
     void add_gauge(const SkinObject& o, const PlaySkinState& st);
     void add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st);
     void add_bga(const SkinObject& o, const PlaySkinState& st, int id, bool base);
+    void add_common(const Lr2Skin& skin, const PlaySkinState& st);
+    void add_gauge_chart(const Lr2Skin& skin, const PlaySkinState& st);
+    void add_score_chart(const Lr2Skin& skin, const PlaySkinState& st);
     void flush(const Lr2Skin& skin);
     void draw_image(Item& it);
     void draw_text(const Lr2Skin& skin, Item& it);

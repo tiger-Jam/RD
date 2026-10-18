@@ -35,6 +35,11 @@ struct PlayContext {
     int target_type = 0;  // 0=更新しない, 1=自己ベスト, 2=ターゲット
     int best_clear = 0;   // この譜面の自己ベストのランプ（LR2の番号）
     int best_exscore = 0;
+    // リザルト画面（LR2: sSelect.old は、このプレイの前の自己ベスト）
+    int result_clear = 0;  // このプレイのランプ
+    bool quit_early = false;
+    int old_exscore = 0, old_maxcombo = 0, old_minbp = -1, old_total_notes = 0;
+    int bp_now() const;    // このプレイのBP（途中でやめたときは残りのノーツも含む）
     int last_offset_ms = 0;
     int last_fast_slow = 0;  // OpenLR2の拡張：0=PGREAT, 1=FAST, 2=SLOW
     // 自分のノーツが1つ判定されたとき（空POORは除く）にゴーストを進める（LR2: JudgeToScore）

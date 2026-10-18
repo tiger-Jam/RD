@@ -32,17 +32,50 @@ bool PlayContext::option(int option) const {
     case 80: return timers.on(40) ? !ret : ret;  // 読み込み中
     case 81: return timers.on(40) ? ret : !ret;
     case 82: return ret;              // リプレイ無し
+    case 90: return result_clear >= 2 ? ret : !ret;  // クリア
+    case 91: return result_clear < 2 ? ret : !ret;   // 失敗
+    case 176: case 177: {
+        // BPMが変わらない曲／変わる曲
+        if (!chart || chart->scroll.empty()) return option == 176 ? ret : !ret;
+        double lo = 1e9, hi = 0;
+        for (const ScrollSeg& s : chart->scroll) lo = std::min(lo, s.bpm), hi = std::max(hi, s.bpm);
+        return (hi != lo) == (option == 177) ? ret : !ret;
+    }
+    case 180: return chart && chart->judge_rank < 1 ? ret : !ret;  // 判定ランク VERY HARD
+    case 181: return chart && chart->judge_rank == 1 ? ret : !ret;
+    case 182: return chart && chart->judge_rank == 2 ? ret : !ret;
+    case 183: return chart && chart->judge_rank > 2 ? ret : !ret;
+    case 300: case 301: case 302: case 303: case 304: case 305: case 306: case 307:
+    case 340: case 341: case 342: case 343: case 344: case 345: case 346: case 347: {
+        // このプレイのランク（AAA..F）。総ノーツ数に対して（LR2: 300-307 / 340-347）
+        if (!st || st->total_notes == 0) return !ret;
+        int r = rank_of(st->exscore(), st->total_notes);
+        int k = (option % 10) % 8;  // 0=AAA .. 7=F
+        if (k == 0) return r >= 8 ? ret : !ret;
+        if (k == 7) return (st->exscore() > 0 && r <= 1) ? ret : !ret;
+        return r == 8 - k ? ret : !ret;
+    }
+    case 320: case 321: case 322: case 323: case 324: case 325: case 326: case 327: {
+        // このプレイの前の自己ベストのランク
+        if (old_total_notes == 0) return !ret;
+        int r = rank_of(old_exscore, old_total_notes);
+        int k = option - 320;
+        if (k == 0) return r >= 8 ? ret : !ret;
+        if (k == 7) return r <= 1 ? ret : !ret;
+        return r == 8 - k ? ret : !ret;
+    }
+    case 330: return st && st->exscore() > old_exscore ? ret : !ret;    // スコア更新
+    case 331: return st && st->max_combo > old_maxcombo ? ret : !ret;   // コンボ更新
+    case 332: return st && old_minbp >= 0 && bp_now() < old_minbp ? ret : !ret;  // BP更新
+    case 335: {
+        // ランク更新
+        if (!st || st->total_notes == 0 || old_total_notes == 0) return !ret;
+        return rank_of(old_exscore, old_total_notes) < rank_of(st->exscore(), st->total_notes) ? ret : !ret;
+    }
     case 100: case 101: case 102: case 103: case 104: case 105:
         return best_clear == option - 100 ? ret : !ret;  // この譜面の自己ベストのランプ
     case 150: case 151: case 152: case 153: case 154: case 155:
         return chart && chart->meta.difficulty == option - 150 ? ret : !ret;  // 譜面の #DIFFICULTY
-    case 177: {
-        // BPMが変わる曲か
-        if (!chart || chart->scroll.empty()) return !ret;
-        double lo = 1e9, hi = 0;
-        for (const ScrollSeg& s : chart->scroll) lo = std::min(lo, s.bpm), hi = std::max(hi, s.bpm);
-        return hi != lo ? ret : !ret;
-    }
     case 194: return chart && chart->meta.backbmp.empty() ? ret : !ret;
     case 195: return chart && !chart->meta.backbmp.empty() ? ret : !ret;
     // 対戦・ゴーストバトル・コース・レーンカバーの調整中は、単曲プレイでは偽
@@ -171,6 +204,16 @@ int PlayContext::number(int id) const {
         return id == 163 ? rest / 1000 / 60 : rest / 1000 % 60;
     }
     case 165: return load_total > 0 ? loaded * 100 / load_total : 0;
+    // リザルト画面：このプレイの前の自己ベストとの比較（LR2: 170-178）
+    case 170: return old_exscore;
+    case 171: return st.exscore();
+    case 172: return st.exscore() - old_exscore;
+    case 173: return old_maxcombo;
+    case 174: return st.max_combo;
+    case 175: return st.max_combo - old_maxcombo;
+    case 176: return old_minbp < 0 ? 0 : old_minbp;
+    case 177: return bp_now();
+    case 178: return bp_now() - std::max(0, old_minbp);
     // OpenLR2の拡張（FAST/SLOW）
     case 201: return last_offset_ms;
     case 210: return last_fast_slow;
@@ -247,8 +290,16 @@ std::string PlayContext::text(int id) const {
 }
 
 // LR2: SetObjectValue_Button。プレイ画面で意味があるのは、まだ機能の無い設定ばかりなので 0（オフ）
+int PlayContext::bp_now() const {
+    if (!judge) return 0;
+    const PlayStats& st = judge->stats();
+    // LR2: totalnotes - note_current + BAD + POOR（途中でやめたときは残りもBPに入る）
+    return st.total_notes - st.note_current + st.judge_count[kBad] + st.judge_count[kPoor];
+}
+
 int PlayContext::button(int type) const {
     switch (type) {
+    case 40: return judge ? judge->gauge_type() : gauge_type;  // ゲージの種類
     case 20: return 0;  // エフェクトの種類（エフェクト無し）
     case 55: return 0;  // ハイスピ固定の種類（OFF）
     default: return 0;

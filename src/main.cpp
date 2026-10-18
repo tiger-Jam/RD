@@ -38,7 +38,7 @@ struct Options {
     std::string chart_path;
     PlayOptions play;
     bool simulate = false, info = false, keyconfig = false, no_skin = false, vsync = false;
-    std::string lr2_root, skin, skin_res;
+    std::string lr2_root, skin, skin_res, result_skin;
     std::vector<std::string> scan_dirs;  // 開発用：曲フォルダを読んで結果を表示する
     std::string db_path;
     std::vector<std::string> table_urls;  // 開発用：難易度表を取得して表示する
@@ -63,6 +63,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--quit-after") o.play.quit_after = std::atof(next());
         else if (a == "--lr2-root") o.lr2_root = next();
         else if (a == "--skin") o.skin = next();
+        else if (a == "--result-skin") o.result_skin = next();
         else if (a == "--skin-res") o.skin_res = next();
         else if (a == "--fps") o.fps = std::atoi(next());
         else if (a == "--scan") o.scan_dirs.push_back(next());
@@ -185,6 +186,7 @@ int main(int argc, char** argv) {
         std::error_code ec;
         if (!opt.lr2_root.empty()) c.lr2_root = std::filesystem::absolute(opt.lr2_root, ec).string();
         if (!opt.skin.empty()) c.play_skin = std::filesystem::absolute(opt.skin, ec).string();
+        if (!opt.result_skin.empty()) c.result_skin = std::filesystem::absolute(opt.result_skin, ec).string();
         if (!opt.skin_res.empty()) c.skin_res = opt.skin_res;
         if (opt.gauge >= 0) c.gauge = opt.gauge;
         if (opt.gas) c.gas = true;

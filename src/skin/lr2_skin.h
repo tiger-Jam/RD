@@ -116,11 +116,15 @@ struct Lr2Skin {
     std::array<SkinDst, 20> note_dst;
     std::array<SkinObject, 2> line, judgeline, gauge;
     std::array<std::array<SkinObject, 6>, 2> nowjudge, nowcombo;
+    // リザルト画面のグラフ（ゲージの推移：0=80%未満, 1=それ以上／スコアの推移：0=自分, 1=自己ベスト, 2=ターゲット）
+    std::array<SkinObject, 2> gaugechart;
+    std::array<SkinObject, 3> scorechart;
 
     std::vector<ImageFont> image_fonts;  // #LR2FONT（最大10）
     std::vector<TtfFont> ttf_fonts;      // #FONT（最大10）
 
     int startinput = 0, loadstart = 0, loadend = 0, playstart = 2000, fadeout = 0, close = 0;
+    int startinput_rank = 0, startinput_update = 0;  // リザルト画面：ランク表示・更新表示のあと、次の入力を受けるまで
     int scratch_side[2] = {0, 0};
 
     std::array<bool, 1000> op{};  // スキン読み込み時点のオプション（#IF の判定に使う。900-999 はカスタム）

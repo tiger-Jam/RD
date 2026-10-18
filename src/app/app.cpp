@@ -45,6 +45,7 @@ void guess_resolution(Lr2Skin& sk) {
 
 App::~App() {
     skin_renderer.reset();
+    result_renderer.reset();
     mixer.close();
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
@@ -63,6 +64,7 @@ bool App::init(const char* argv0) {
     if (const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window)))
         if (m->refresh_rate > 0) refresh_hz = m->refresh_rate;
     skin_renderer = std::make_unique<SkinRenderer>(renderer);
+    result_renderer = std::make_unique<SkinRenderer>(renderer);
     set_view(640, 480);
     if (!mixer.open(0, 128)) {
         std::fprintf(stderr, "音声デバイスを開けない\n");
@@ -85,17 +87,15 @@ void App::set_view(int w, int h, bool resize_window) {
     SDL_SetRenderLogicalPresentation(renderer, w, h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 }
 
-void App::load_play_skin(const std::array<bool, 1000>& options) {
-    play_skin.reset();
-    std::string skin_path = cfg.play_skin.empty()
-                                ? resolve_lr2_path(lr2_root, "LR2files/Theme/LR2/Play/play_7.lr2skin", false)
-                                : cfg.play_skin;
+namespace {
+
+// .lr2skin を読む。configured が空なら LR2 の既定のスキン（default_rel）を使う
+std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, const char* default_rel,
+                                   const std::array<bool, 1000>& options, SkinRenderer& renderer) {
+    std::string skin_path = configured.empty() ? resolve_lr2_path(app.lr2_root, default_rel, false) : configured;
     SkinHeader header;
-    if (lr2_root.empty() || skin_path.empty() || !read_skin_header(lr2_root, skin_path, header)) {
-        std::printf("LR2スキンが見つからないので、仮の画面で遊ぶ（--lr2-root でLR2のフォルダを指定できる）\n");
-        return;
-    }
-    if (auto it = cfg.skin_custom.find(skin_path); it != cfg.skin_custom.end())
+    if (app.lr2_root.empty() || skin_path.empty() || !read_skin_header(app.lr2_root, skin_path, header)) return nullptr;
+    if (auto it = app.cfg.skin_custom.find(skin_path); it != app.cfg.skin_custom.end())
         for (size_t i = 0; i < it->second.size() && i < header.customs.size(); ++i)
             if (it->second[i] >= 0 && it->second[i] < static_cast<int>(header.customs[i].labels.size()))
                 header.customs[i].selected = it->second[i];
@@ -107,18 +107,29 @@ void App::load_play_skin(const std::array<bool, 1000>& options) {
     }
     auto skin = std::make_unique<Lr2Skin>();
     std::string err;
-    if (!load_lr2_skin(lr2_root, skin_path, header, options, *skin, err)) {
+    if (!load_lr2_skin(app.lr2_root, skin_path, header, options, *skin, err)) {
         std::printf("スキンを読めない: %s\n", err.c_str());
-        return;
+        return nullptr;
     }
     if (!header.has_resolution) guess_resolution(*skin);
-    if (cfg.skin_res == "sd") skin->width = 640, skin->height = 480;
-    else if (cfg.skin_res == "hd") skin->width = 1280, skin->height = 720;
-    else if (cfg.skin_res == "fhd") skin->width = 1920, skin->height = 1080;
+    if (app.cfg.skin_res == "sd") skin->width = 640, skin->height = 480;
+    else if (app.cfg.skin_res == "hd") skin->width = 1280, skin->height = 720;
+    else if (app.cfg.skin_res == "fhd") skin->width = 1920, skin->height = 1080;
     for (const auto& w : skin->warnings)
         if (w.find(".dummy") == std::string::npos) std::printf("  スキン警告: %s\n", w.c_str());
-    skin_renderer->upload(*skin);
-    play_skin = std::move(skin);
+    renderer.upload(*skin);
+    return skin;
+}
+
+}  // namespace
+
+void App::load_play_skin(const std::array<bool, 1000>& options) {
+    play_skin = load_skin(*this, cfg.play_skin, "LR2files/Theme/LR2/Play/play_7.lr2skin", options, *skin_renderer);
+    if (!play_skin) std::printf("LR2スキンが見つからないので、仮の画面で遊ぶ（--lr2-root でLR2のフォルダを指定できる）\n");
+}
+
+void App::load_result_skin(const std::array<bool, 1000>& options) {
+    result_skin = load_skin(*this, cfg.result_skin, "LR2files/Theme/LR2/Result/result.lr2skin", options, *result_renderer);
 }
 
 }  // namespace bmj

@@ -14,6 +14,7 @@
 #include "audio/sound_bank.h"
 #include "chart/bms_parser.h"
 #include "game/ghost.h"
+#include "game/graph.h"
 #include "game/judge.h"
 #include "input/input.h"
 #include "render/play_scene.h"
@@ -206,12 +207,69 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         int fps_frames = 0;
         uint64_t fps_t0 = scene_start;
         bool recorded = false;
+        PlayGraph graph;
+        graph.start(judge.gauge());
+        // リザルト画面（LR2: Scene05_Result.cpp）。タイマーはプレイ画面とは別
+        SkinTimers rtimers;
+        uint64_t result_start_ns = 0;
+        int chart_op3 = 0, chart_op4 = 0;
+        Lr2Skin* rskin = nullptr;
         auto enter_result = [&](bool quit_early) {
             phase = Phase::Result;
             mixer.stop();
             print_result(chart, judge);
-            if (!recorded && opt.save_score && !opt.autoplay && started) record_score(app, sha256, judge, quit_early);
+            const PlayStats& ps = judge.stats();
+            // 途中でやめたらゲージを0にして、グラフの残りを埋める（LR2: Play.cpp:1659）
+            std::array<double, kGaugeCount> hp{};
+            for (int g = 0; g < kGaugeCount; ++g) hp[g] = quit_early ? 0.0 : judge.gauge().hp(g);
+            graph.finish(hp, ps.combo, ps.exscore(), ctx.best.exscore(), ctx.target.exscore());
+            ctx.quit_early = quit_early;
+            {
+                // 演奏中に押されたままの入力をリザルトに持ち込まない
+                std::vector<LaneInput> li;
+                std::vector<ButtonInput> bi;
+                input.collect(SDL_GetTicksNS() + 100000000ull, li, bi);
+            }
+            ctx.result_clear = (quit_early || judge.failed()) ? 1 : judge.clear();
+            // 比較に使う「このプレイの前の自己ベスト」は、記録する前に取っておく
+            ctx.old_exscore = has_best ? best_score.exscore : 0;
+            ctx.old_maxcombo = has_best ? best_score.max_combo : 0;
+            ctx.old_minbp = has_best ? best_score.bp : -1;
+            ctx.old_total_notes = has_best ? ps.total_notes : 0;
+            if (!recorded && opt.save_score && !opt.autoplay && started) {
+                record_score(app, sha256, judge, quit_early);
+                // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
+                ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
+            }
             recorded = true;
+            // リザルトスキンは、結果が決まってから読む（#IF でクリア・失敗などを見るスキンがあるため）
+            app.load_result_skin(ctx.load_options());
+            rskin = app.result_skin.get();
+            rtimers = SkinTimers();
+            rtimers.set(0, 0);
+            result_start_ns = SDL_GetTicksNS();
+            if (rskin) {
+                chart_op3 = rskin->gaugechart[0].src.op[2];
+                chart_op4 = rskin->gaugechart[0].src.op[3];
+                app.set_view(rskin->width, rskin->height, false);
+            }
+        };
+        // リザルト画面での決定の入力（LR2: ProcI_Result）。押すたびに グラフ → ランク → 更新 → フェードアウト と進む
+        auto result_input = [&] {
+            double t = (SDL_GetTicksNS() - result_start_ns) / 1e6;
+            if (!rskin) {
+                done = true;
+                return;
+            }
+            if (t <= rskin->startinput) return;
+            if (!rtimers.on(151)) {
+                rtimers.set(151, t);
+                chart_op4 = static_cast<int>(t);  // グラフを最後まで描く
+            } else if (rtimers.lapse(151, t) <= rskin->startinput_rank || rtimers.on(152)) {
+                if (rtimers.lapse(152, t) > rskin->startinput_update && !rtimers.on(2)) rtimers.set(2, t);
+            } else {
+                rtimers.set(152, t);
+            }
         };
         ctx.timers.set(0, 0);
 
@@ -224,10 +282,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 case SDL_EVENT_KEY_DOWN:
                     if (e.key.repeat) break;
                     if (e.key.key == SDLK_ESCAPE) {
-                        if (phase == Phase::Result) done = true;
+                        if (phase == Phase::Result) result_input();
                         else enter_result(judge.stats().note_current < judge.stats().total_notes);
                     } else if (e.key.key == SDLK_RETURN && phase == Phase::Result) {
-                        done = true;
+                        result_input();
                     } else if (e.key.key == SDLK_F5 && phase == Phase::Result) {
                         retry = true, done = true;
                     } else if (e.key.key == SDLK_F4) {
@@ -245,7 +303,29 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     break;
                 default: break;
                 }
-                if (phase == Phase::Play) input.handle(e);
+                input.handle(e);
+            }
+            if (phase == Phase::Result) {
+                // 鍵盤でも進める。白鍵と黒鍵を同時に押していたら、フェードアウトのあとで同じ譜面をもう一度（LR2のクイックリトライ）
+                std::vector<LaneInput> li;
+                std::vector<ButtonInput> bi;
+                input.collect(SDL_GetTicksNS(), li, bi);
+                for (const ButtonInput& b : bi)
+                    if (b.down && b.button <= kKey7) result_input();
+                double t = (SDL_GetTicksNS() - result_start_ns) / 1e6;
+                if (rskin) {
+                    if (t > chart_op3 && !rtimers.on(150)) rtimers.set(150, t);
+                    if (t > chart_op4 && !rtimers.on(151)) rtimers.set(151, t);
+                }
+                if (!rskin || (rtimers.on(2) && rtimers.lapse(2, t) >= rskin->fadeout)) {
+                    if (rskin && rtimers.on(2)) {
+                        bool white = input.button_held(kKey1) || input.button_held(kKey1 + 2) || input.button_held(kKey1 + 4) ||
+                                     input.button_held(kKey1 + 6);
+                        bool black = input.button_held(kKey1 + 1) || input.button_held(kKey1 + 3) || input.button_held(kKey1 + 5);
+                        if (white && black) retry = true;
+                        done = true;
+                    }
+                }
             }
 
             uint64_t now_ns = SDL_GetTicksNS();
@@ -365,6 +445,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 }
                 view.combo = judge.stats().combo;
                 const PlayStats& ps = judge.stats();
+                graph.log(static_cast<int>(song_ms), static_cast<int>(chart.end_us / 1000), judge.gauge(), ps.combo,
+                          ps.exscore(), ctx.best.exscore(), ctx.target.exscore());
                 if (!last_note_set && ps.note_current >= ps.total_notes) ctx.timers.set(143, now_ms), last_note_set = true;
                 if (!fc_set && ps.total_notes > 0 && ps.combo == ps.total_notes) ctx.timers.set(48, now_ms), fc_set = true;
                 // ゲージのタイマー（LR2: ApplyJudgeNote の 42/44）
@@ -427,7 +509,28 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
 
             SDL_Renderer* renderer = app.renderer;
             double render_beat = chart.pos_at(song_us + cfg.judge_timing * 1000);
-            if (phase == Phase::Result) {
+            if (phase == Phase::Result && rskin) {
+                double t = (now_ns - result_start_ns) / 1e6;
+                PlaySkinState st;
+                st.now_ms = t;
+                st.timers = &rtimers;
+                st.option = [&](int o) { return ctx.option(o); };
+                st.number = [&](int id) { return ctx.number(id); };
+                st.bargraph = [&](int ty, double& v, double& m) { return ctx.bargraph(ty, v, m); };
+                st.slider = [&](int ty, int& v, int& lo, int& hi) { return ctx.slider(ty, v, lo, hi); };
+                st.text = [&](int id) { return ctx.text(id); };
+                st.button = [&](int ty) { return ctx.button(ty); };
+                st.chart = &chart;
+                st.judge = &judge;
+                st.graph = &graph;
+                st.graph_gauge = judge.gauge_type();
+                st.total_notes = judge.stats().total_notes;
+                st.chart_op3 = chart_op3;
+                st.chart_op4 = chart_op4;
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+                SDL_RenderClear(renderer);
+                app.result_renderer->draw_result(*rskin, st);
+            } else if (phase == Phase::Result) {
                 app.set_view(640, 480, false);
                 draw_result(renderer, chart, judge);
             } else if (skin) {
@@ -477,7 +580,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 draw_play(renderer, chart, judge, view);
             }
 
-            if (!opt.capture_dir.empty() && (now_ms / 1000 >= next_capture_s * 2 || phase == Phase::Result)) {
+            if (!opt.capture_dir.empty() && now_ms / 1000 >= next_capture_s * 2) {
                 if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {
                     char name[64];
                     std::snprintf(name, sizeof(name), "/frame_%03d%s.bmp", next_capture_s * 2,
@@ -485,8 +588,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     SDL_SaveBMP(shot, (opt.capture_dir + name).c_str());
                     SDL_DestroySurface(shot);
                 }
-                if (phase == Phase::Result) opt.capture_dir.clear();
                 ++next_capture_s;
+                // 開発用：撮影中はリザルトを2秒ごとに自動で進める
+                if (phase == Phase::Result) result_input();
             }
             SDL_RenderPresent(renderer);
             if (opt.quit_after > 0 && now_ms / 1000 > opt.quit_after) quit = true, done = true, exit = PlayExit::Quit;

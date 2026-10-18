@@ -348,7 +348,80 @@ void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
         add_judge_combo(skin, st);
     }
     if (!skin.judgeline[0].dst.empty()) add_play_area(skin.judgeline[0].src, skin.judgeline[0].dst, st, 0, 0, -1);
+    add_common(skin, st);
+    flush(skin);
+}
 
+// LR2: Proc_Result（Scene05_Result.cpp:30）。ゲージの推移グラフは80%未満とそれ以上で画像を描き分ける
+void SkinRenderer::add_gauge_chart(const Lr2Skin& skin, const PlaySkinState& st) {
+    const SkinObject& lo = skin.gaugechart[0];
+    const SkinObject& hi = skin.gaugechart[1];
+    if (!st.graph || lo.src.op[0] <= 0 || lo.dst.empty()) return;
+    const PlayGraph& g = *st.graph;
+    int gauge = std::clamp(st.graph_gauge, 0, kGaugeCount - 1);
+    bool groove = gauge == kGroove || gauge == kEasy;
+    double t0 = st.timers->lapse(0, st.now_ms);
+    int length = static_cast<int>(st.chart_length(lo.src.op[0], t0));
+    int step = std::max(1, static_cast<int>(lo.dst.keys.front().w));
+    int val = g.hp[gauge][0];
+    for (int i = 0; i < length; i += step) {
+        int axis = std::min(PlayGraph::kPoints - 1, i * 1000 / lo.src.op[0]);
+        int last = 0;
+        // 前の点との間は、1%ずつ縦に点を打って線にする
+        while (val != g.hp[gauge][axis]) {
+            const SkinObject& o = (groove && val < 80) ? lo : hi;
+            int y = o.src.op[1] * val / -100;
+            if (last != y) {
+                add_object(o, st, static_cast<float>(i), static_cast<float>(y));
+                last = y;
+            }
+            val += val < g.hp[gauge][axis] ? 1 : -1;
+        }
+        const SkinObject& o = (groove && g.hp[gauge][axis] < 80) ? lo : hi;
+        add_object(o, st, static_cast<float>(i), static_cast<float>(o.src.op[1] * g.hp[gauge][axis] / -100));
+    }
+}
+
+// スコアの推移（0=自分, 1=自己ベスト, 2=ターゲット）
+void SkinRenderer::add_score_chart(const Lr2Skin& skin, const PlaySkinState& st) {
+    if (!st.graph || st.total_notes <= 0) return;
+    const PlayGraph& g = *st.graph;
+    const std::array<int, PlayGraph::kPoints>* data[3] = {&g.exscore, &g.best, &g.target};
+    double t0 = st.timers->lapse(0, st.now_ms);
+    for (int k = 0; k < 3; ++k) {
+        const SkinObject& o = skin.scorechart[k];
+        if (!o.src.valid || o.src.op[0] <= 0 || o.dst.empty()) continue;
+        const auto& d = *data[k];
+        int length = static_cast<int>(st.chart_length(o.src.op[0], t0));
+        int step = std::max(1, static_cast<int>(o.dst.keys.front().w));
+        int div = st.total_notes * -2;
+        int val = d[0];
+        for (int i = 0; i < length; i += step) {
+            int axis = std::min(PlayGraph::kPoints - 1, i * 1000 / o.src.op[0]);
+            int last = 0;
+            while (val != d[axis]) {
+                int y = o.src.op[1] * val / div;
+                if (last != y) {
+                    add_object(o, st, static_cast<float>(i), static_cast<float>(y));
+                    last = y;
+                }
+                val += val < d[axis] ? 1 : -1;
+            }
+            add_object(o, st, static_cast<float>(i), static_cast<float>(d[axis] * o.src.op[1] / div));
+        }
+    }
+}
+
+void SkinRenderer::draw_result(const Lr2Skin& skin, const PlaySkinState& st) {
+    items_.clear();
+    add_gauge_chart(skin, st);
+    add_score_chart(skin, st);
+    add_common(skin, st);
+    flush(skin);
+}
+
+// プレイ画面とリザルト画面で共通のオブジェクト
+void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
     for (const SkinObject& o : skin.image_objs) {
         if (!dst_on(o.dst, st)) continue;
         if (o.dst.op[3] == 1) {
@@ -435,7 +508,6 @@ void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
         else if (o.src.op[1] == 1) d.h = static_cast<float>(d.h * rate);
         add(o.src, d, st.timers->lapse(o.src.timer, st.now_ms));
     }
-    flush(skin);
 }
 
 void SkinRenderer::flush(const Lr2Skin& skin) {
