@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS chart(
 CREATE INDEX IF NOT EXISTS chart_md5 ON chart(md5);
 CREATE INDEX IF NOT EXISTS chart_sha256 ON chart(sha256);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
+CREATE TABLE IF NOT EXISTS lr2_score(
+    md5 TEXT PRIMARY KEY, clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
+    playcount INTEGER, clearcount INTEGER);
 CREATE TABLE IF NOT EXISTS score(
     sha256 TEXT, ln_mode INTEGER, judge_profile INTEGER,
     clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
@@ -317,48 +320,124 @@ bool SongDb::find_by_md5(const std::string& md5, ChartRecord& out) const {
     return true;
 }
 
+namespace {
+
+// BMjoyの記録とLR2から取り込んだ記録を合わせる（ランプ・EX・コンボは高いほう、BPは低いほう、回数は足す）
+void merge_score(ScoreRecord& r, int clear, int ex, int bp, int combo, int play, int clr) {
+    r.clear = std::max(r.clear, clear);
+    r.exscore = std::max(r.exscore, ex);
+    if (bp >= 0) r.bp = r.bp < 0 ? bp : std::min(r.bp, bp);
+    r.max_combo = std::max(r.max_combo, combo);
+    r.playcount += play;
+    r.clearcount += clr;
+}
+
+const char* kMergedScores = R"SQL(
+SELECT c.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0
+  FROM score s JOIN (SELECT DISTINCT sha256 FROM chart) c ON c.sha256 = s.sha256
+ WHERE s.ln_mode = 0 AND s.judge_profile = 0
+UNION ALL
+SELECT c.sha256, l.clear, l.exscore, l.bp, l.max_combo, l.playcount, l.clearcount, 0, 1
+  FROM lr2_score l JOIN (SELECT DISTINCT sha256, md5 FROM chart) c ON c.md5 = l.md5
+)SQL";
+
+}  // namespace
+
 std::vector<ScoreRecord> SongDb::all_scores() const {
     std::vector<ScoreRecord> out;
     if (!db_) return out;
-    Stmt st(db_, "SELECT sha256, clear, exscore, bp, max_combo, playcount, clearcount, last_played FROM score "
-                 "WHERE ln_mode = 0 AND judge_profile = 0");
+    std::unordered_map<std::string, size_t> idx;
+    Stmt st(db_, kMergedScores);
     while (st.step()) {
-        ScoreRecord r;
-        r.sha256 = st.col_text(0);
-        r.clear = static_cast<int>(st.col_i64(1));
-        r.exscore = static_cast<int>(st.col_i64(2));
-        r.bp = static_cast<int>(st.col_i64(3));
-        r.max_combo = static_cast<int>(st.col_i64(4));
-        r.playcount = static_cast<int>(st.col_i64(5));
-        r.clearcount = static_cast<int>(st.col_i64(6));
-        r.last_played = st.col_i64(7);
-        out.push_back(r);
+        std::string sha = st.col_text(0);
+        auto it = idx.find(sha);
+        if (it == idx.end()) {
+            ScoreRecord r;
+            r.sha256 = sha;
+            r.bp = -1;
+            it = idx.emplace(sha, out.size()).first;
+            out.push_back(r);
+        }
+        ScoreRecord& r = out[it->second];
+        merge_score(r, static_cast<int>(st.col_i64(1)), static_cast<int>(st.col_i64(2)), static_cast<int>(st.col_i64(3)),
+                    static_cast<int>(st.col_i64(4)), static_cast<int>(st.col_i64(5)), static_cast<int>(st.col_i64(6)));
+        r.last_played = std::max(r.last_played, st.col_i64(7));
     }
     return out;
 }
 
 bool SongDb::get_score(const std::string& sha256, ScoreRecord& out) const {
     if (!db_) return false;
-    Stmt st(db_, "SELECT clear, exscore, bp, max_combo, playcount, clearcount, last_played FROM score "
-                 "WHERE sha256 = ? AND ln_mode = 0 AND judge_profile = 0");
+    std::string sql = std::string("SELECT * FROM (") + kMergedScores + ") WHERE sha256 = ?";
+    Stmt st(db_, sql.c_str());
     st.text(1, sha256);
-    if (!st.step()) return false;
+    bool found = false;
+    out = ScoreRecord{};
     out.sha256 = sha256;
-    out.clear = static_cast<int>(st.col_i64(0));
-    out.exscore = static_cast<int>(st.col_i64(1));
-    out.bp = static_cast<int>(st.col_i64(2));
-    out.max_combo = static_cast<int>(st.col_i64(3));
-    out.playcount = static_cast<int>(st.col_i64(4));
-    out.clearcount = static_cast<int>(st.col_i64(5));
-    out.last_played = st.col_i64(6);
-    return true;
+    out.bp = -1;
+    while (st.step()) {
+        found = true;
+        merge_score(out, static_cast<int>(st.col_i64(1)), static_cast<int>(st.col_i64(2)), static_cast<int>(st.col_i64(3)),
+                    static_cast<int>(st.col_i64(4)), static_cast<int>(st.col_i64(5)), static_cast<int>(st.col_i64(6)));
+        out.last_played = std::max(out.last_played, st.col_i64(7));
+    }
+    return found;
+}
+
+int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* error) {
+    if (!db_) return -1;
+    sqlite3* src = nullptr;
+    if (sqlite3_open_v2(lr2_score_db.c_str(), &src, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        if (error) *error = "開けない: " + lr2_score_db;
+        sqlite3_close(src);
+        return -1;
+    }
+    int count = 0;
+    {
+        // LR2の score 表（LR2_songmanage.cpp:2696）。EXスコアは PGREAT×2 + GREAT
+        Stmt rd(src, "SELECT hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount FROM score "
+                     "WHERE length(hash) = 32");
+        if (!rd.s) {
+            if (error) *error = "LR2のスコアデータベースではない: " + lr2_score_db;
+            sqlite3_close(src);
+            return -1;
+        }
+        sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
+        Stmt wr(db_, "INSERT OR REPLACE INTO lr2_score(md5, clear, exscore, bp, max_combo, playcount, clearcount) "
+                     "VALUES(?,?,?,?,?,?,?)");
+        while (rd.step()) {
+            std::string md5 = rd.col_text(0);
+            for (char& c : md5) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            int ex = static_cast<int>(rd.col_i64(2) * 2 + rd.col_i64(3));
+            wr.text(1, md5).i64(2, rd.col_i64(1)).i64(3, ex).i64(4, rd.col_i64(4)).i64(5, rd.col_i64(5))
+                .i64(6, rd.col_i64(6)).i64(7, rd.col_i64(7));
+            wr.run();
+            ++count;
+        }
+        sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+    }
+    sqlite3_close(src);
+    return count;
 }
 
 void SongDb::save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo) {
     if (!db_) return;
-    ScoreRecord old;
-    bool had = get_score(sha256, old);
-    ScoreRecord r = had ? old : ScoreRecord{};
+    ScoreRecord r;
+    bool had = false;
+    {
+        Stmt st(db_, "SELECT clear, exscore, bp, max_combo, playcount, clearcount FROM score "
+                     "WHERE sha256 = ? AND ln_mode = 0 AND judge_profile = 0");
+        st.text(1, sha256);
+        if (st.step()) {
+            had = true;
+            r.clear = static_cast<int>(st.col_i64(0));
+            r.exscore = static_cast<int>(st.col_i64(1));
+            r.bp = static_cast<int>(st.col_i64(2));
+            r.max_combo = static_cast<int>(st.col_i64(3));
+            r.playcount = static_cast<int>(st.col_i64(4));
+            r.clearcount = static_cast<int>(st.col_i64(5));
+        }
+    }
     r.clear = std::max(r.clear, clear);
     r.exscore = std::max(r.exscore, exscore);
     r.bp = (r.bp < 0 || !had) ? bp : std::min(r.bp, bp);

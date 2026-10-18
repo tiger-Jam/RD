@@ -52,6 +52,9 @@ public:
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）
     void save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo);
     bool get_score(const std::string& sha256, ScoreRecord& out) const;
+    // LR2のスコアデータベース（LR2files/Database/Score/<名前>.db）を取り込む。取り込んだ件数を返す（失敗なら -1）。
+    // 手元に無い譜面のスコアも MD5 のまま残し、表示するときに BMjoy の記録と合わせて良いほうを使う
+    int import_lr2_scores(const std::string& lr2_score_db, std::string* error = nullptr);
 
 private:
     sqlite3* db_ = nullptr;

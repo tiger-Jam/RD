@@ -70,3 +70,49 @@ TEST(song_db_scan_diff) {
     db.close();
     fs::remove_all(dir);
 }
+
+#include "sqlite3.h"
+
+TEST(song_db_import_lr2) {
+    fs::path dir = fs::temp_directory_path() / "bmj_test_lr2";
+    fs::remove_all(dir);
+    std::string chart_text = "#TITLE A\n#BPM 120\n#00111:0101\n";
+    write(dir / "songs" / "a.bme", chart_text);
+    std::string md5 = md5_hex(chart_text);
+    // LR2と同じ形の score 表を作る（LR2_songmanage.cpp:2696）
+    std::string lr2 = (dir / "player.db").string();
+    sqlite3* db = nullptr;
+    sqlite3_open(lr2.c_str(), &db);
+    sqlite3_exec(db, "CREATE TABLE score(hash TEXT primary key,clear INTEGER,perfect INTEGER,great INTEGER,good INTEGER,"
+                     "bad INTEGER,poor INTEGER,totalnotes INTEGER,maxcombo INTEGER,minbp INTEGER,playcount INTEGER,"
+                     "clearcount INTEGER,failcount INTEGER,rank INTEGER,rate INTEGER,clear_db INTEGER,op_history INTEGER,"
+                     "scorehash TEXT,ghost TEXT,clear_sd INTEGER,clear_ex INTEGER,op_best INTEGER, rseed INTEGER, complete INTEGER)",
+                 nullptr, nullptr, nullptr);
+    std::string ins = "INSERT INTO score(hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount) VALUES('" +
+                      md5 + "', 4, 1, 1, 3, 2, 10, 7), ('ffffffffffffffffffffffffffffffff', 2, 0, 0, 0, 0, 1, 1)";
+    sqlite3_exec(db, ins.c_str(), nullptr, nullptr, nullptr);
+    sqlite3_close(db);
+
+    SongDb sdb;
+    CHECK(sdb.open((dir / "songs.db").string()));
+    sdb.scan({(dir / "songs").string()}, 1);
+    CHECK_EQ(sdb.import_lr2_scores(lr2), 2);
+    auto charts = sdb.all_charts();
+    CHECK_EQ(charts.size(), size_t(1));
+    ScoreRecord sc;
+    CHECK(sdb.get_score(charts[0].sha256, sc));
+    CHECK_EQ(sc.clear, 4);
+    CHECK_EQ(sc.exscore, 3);  // PG1×2 + GR1
+    CHECK_EQ(sc.bp, 3);
+    CHECK_EQ(sc.playcount, 10);
+    // BMjoyで遊ぶと合わせて表示する（ランプは高いほう、回数は足す）
+    sdb.save_score(charts[0].sha256, 5, 4, 0, 2);
+    CHECK(sdb.get_score(charts[0].sha256, sc));
+    CHECK_EQ(sc.clear, 5);
+    CHECK_EQ(sc.exscore, 4);
+    CHECK_EQ(sc.bp, 0);
+    CHECK_EQ(sc.playcount, 11);
+    CHECK_EQ(sdb.all_scores().size(), size_t(1));  // 手元に無い譜面の分は表示には出ない
+    sdb.close();
+    fs::remove_all(dir);
+}

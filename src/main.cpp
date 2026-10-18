@@ -7,6 +7,7 @@
 //   bmjoy                    選曲画面
 //   bmjoy --keyconfig
 //   bmjoy --add-song-dir DIR --add-table URL   曲フォルダ・難易度表を登録する
+//   bmjoy --import-lr2 LR2files/Database/Score/名前.db   LR2のスコアを取り込む
 //
 // 指定したオプションは設定ファイル（config.txt）に保存され、次からは指定しなくても使われる
 #include <SDL3/SDL.h>
@@ -43,6 +44,7 @@ struct Options {
     std::string db_path;
     std::vector<std::string> table_urls;  // 開発用：難易度表を取得して表示する
     std::vector<std::string> add_song_dirs, add_tables;
+    std::string import_lr2;  // LR2のスコアデータベース
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000;
     bool gas = false;
@@ -71,6 +73,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--table") o.table_urls.push_back(next());
         else if (a == "--add-song-dir") o.add_song_dirs.push_back(next());
         else if (a == "--add-table") o.add_tables.push_back(next());
+        else if (a == "--import-lr2") o.import_lr2 = next();
         else if (a == "--skin-opt") {
             std::string v = next();
             size_t eq = v.find('=');
@@ -218,6 +221,12 @@ int main(int argc, char** argv) {
                 if (idx >= 0 && idx < static_cast<int>(sel.size())) sel[idx] = choice;
         }
 
+        if (!opt.import_lr2.empty()) {
+            std::string err;
+            int n = app.db.import_lr2_scores(opt.import_lr2, &err);
+            if (n < 0) std::printf("LR2のスコアを取り込めない: %s\n", err.c_str());
+            else std::printf("LR2のスコアを %d 件取り込んだ\n", n);
+        }
         if (opt.keyconfig) {
             run_keyconfig(app.window, app.renderer, app.keycfg, keyconfig_path());
         } else if (opt.chart_path.empty()) {
