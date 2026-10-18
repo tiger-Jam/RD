@@ -18,6 +18,7 @@
 #include "game/graph.h"
 #include "game/judge.h"
 #include "input/input.h"
+#include "input/joystick_init.h"
 #include "render/play_scene.h"
 #include "render/skin_play.h"
 #include "util/hash.h"
@@ -333,6 +334,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 }
             }
 
+            joystick_init().open_new();
             uint64_t now_ns = SDL_GetTicksNS();
             double now_ms = (now_ns - scene_start) / 1e6;
             double dt_ms = (now_ns - prev_ns) / 1e6;

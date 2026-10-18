@@ -163,6 +163,15 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
             mapper->handle(e);
         }
 
+        joystick_init().open_new();
+        {
+            // 一覧の表示用に、開いているコントローラーを数え直す
+            int n = 0;
+            SDL_JoystickID* ids = SDL_GetJoysticks(&n);
+            for (int i = 0; ids && i < n; ++i)
+                if (SDL_Joystick* j = SDL_GetJoystickFromID(ids[i])) joys[ids[i]] = j;
+            SDL_free(ids);
+        }
         uint64_t now = SDL_GetTicksNS();
         std::vector<LaneInput> lanes;
         std::vector<ButtonInput> buttons;

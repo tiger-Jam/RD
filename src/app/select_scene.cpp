@@ -446,6 +446,10 @@ void run_select(App& app) {
         if (!joystick_init().ready()) joy_text = "コントローラーを準備中…（キーボードは使える）";
         else if (joy_names.empty()) joy_text = "コントローラー：なし";
         else joy_text = "コントローラー：" + joy_names.front() + (joy_names.size() > 1 ? " ほか" : "");
+        for (const std::string& nm : joystick_init().open_new()) {
+            std::printf("コントローラー接続: %s\n", nm.c_str());
+            joy_names.push_back(nm);
+        }
         if (joystick_init().ready() && !joy_reported) {
             std::printf("コントローラーの準備が終わった（%dms）\n", joystick_init().took_ms());
             joy_reported = true;

@@ -5,6 +5,8 @@
 #include <SDL3/SDL.h>
 
 #include <atomic>
+#include <string>
+#include <vector>
 #include <thread>
 
 namespace bmj {
@@ -32,6 +34,24 @@ public:
     bool ready() const { return ready_.load(); }
     bool ok() const { return ok_.load(); }
     int took_ms() const { return ms_.load(); }
+    // つながっているコントローラーを開く。準備を裏で行うと、最初からつながっている分の
+    // SDL_EVENT_JOYSTICK_ADDED がメインスレッドに届かないので、準備が終わったら自分で一覧して開く。
+    // 新しく開いたものの名前を返す（メインスレッドから毎フレーム呼んでよい）
+    std::vector<std::string> open_new() {
+        std::vector<std::string> names;
+        if (!ready_ || !ok_) return names;
+        int n = 0;
+        SDL_JoystickID* ids = SDL_GetJoysticks(&n);
+        for (int i = 0; ids && i < n; ++i) {
+            if (SDL_GetJoystickFromID(ids[i])) continue;  // 開いている
+            if (SDL_Joystick* j = SDL_OpenJoystick(ids[i])) {
+                const char* name = SDL_GetJoystickName(j);
+                names.push_back(name ? name : "?");
+            }
+        }
+        SDL_free(ids);
+        return names;
+    }
     // 終了する前に呼ぶ（準備中に SDL_Quit すると落ちるため）
     void join() {
         if (thread_.joinable()) thread_.join();
