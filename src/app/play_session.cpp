@@ -180,6 +180,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         // LR2の既定：自己ベストはまだ無く、ターゲットは90%のゴースト（Scene04_Play.cpp:1997）
         ctx.best = Ghost{};
         if (has_best && best_score.exscore > 0) ctx.best.set_from_exscore(best_score.exscore, judge.stats().total_notes);
+        ctx.best_clear = has_best ? best_score.clear : 0;
+        ctx.best_exscore = has_best ? best_score.exscore : 0;
         ctx.target.set_default(90, judge.stats().total_notes);
         ctx.target_type = 0;
 
@@ -442,6 +444,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.bargraph = [&](int t, double& v, double& m) { return ctx.bargraph(t, v, m); };
                 st.slider = [&](int t, int& v, int& lo, int& hi) { return ctx.slider(t, v, lo, hi); };
                 st.text = [&](int id) { return ctx.text(id); };
+                st.button = [&](int t) { return ctx.button(t); };
                 st.chart = &chart;
                 st.judge = &judge;
                 st.notes_visible = started;

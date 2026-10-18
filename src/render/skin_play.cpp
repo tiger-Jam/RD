@@ -32,6 +32,23 @@ bool PlayContext::option(int option) const {
     case 80: return timers.on(40) ? !ret : ret;  // 読み込み中
     case 81: return timers.on(40) ? ret : !ret;
     case 82: return ret;              // リプレイ無し
+    case 100: case 101: case 102: case 103: case 104: case 105:
+        return best_clear == option - 100 ? ret : !ret;  // この譜面の自己ベストのランプ
+    case 150: case 151: case 152: case 153: case 154: case 155:
+        return chart && chart->meta.difficulty == option - 150 ? ret : !ret;  // 譜面の #DIFFICULTY
+    case 177: {
+        // BPMが変わる曲か
+        if (!chart || chart->scroll.empty()) return !ret;
+        double lo = 1e9, hi = 0;
+        for (const ScrollSeg& s : chart->scroll) lo = std::min(lo, s.bpm), hi = std::max(hi, s.bpm);
+        return hi != lo ? ret : !ret;
+    }
+    case 194: return chart && chart->meta.backbmp.empty() ? ret : !ret;
+    case 195: return chart && !chart->meta.backbmp.empty() ? ret : !ret;
+    // 対戦・ゴーストバトル・コース・レーンカバーの調整中は、単曲プレイでは偽
+    case 10: case 11: case 12: case 13: case 270: case 271: case 280: case 281: case 282: case 283: case 284:
+    case 289: case 290: case 291: case 622: case 623:
+        return !ret;
     case 83: case 84: return !ret;
     case 160: return ret;             // 7KEYS
     case 161: case 162: case 163: case 164: return !ret;
@@ -189,9 +206,9 @@ bool PlayContext::bargraph(int type, double& val, double& max) const {
         max = n * 2;
         return true;
     case 12: val = best.exscore(); max = n * 2; return true;
-    case 13: val = 0; max = n * 2; return true;  // 自己ベストの最終スコア（スコアの保存がまだ無い）
+    case 13: val = best_exscore; max = n * 2; return true;  // 自己ベストの最終スコア
     case 14: val = target.exscore(); max = n * 2; return true;
-    case 15: val = target.total_notes() > 0 ? n * 2 * 0.9 : 0; max = n * 2; return true;
+    case 15: val = target.final_exscore(); max = n * 2; return true;
     case 20: val = st->judge_count[kPGreat]; max = n; return true;
     case 21: val = st->judge_count[kGreat]; max = n; return true;
     case 22: val = st->judge_count[kGood]; max = n; return true;
@@ -226,6 +243,15 @@ std::string PlayContext::text(int id) const {
     case 14: return m.artist;
     case 15: return m.subartist;
     default: return {};
+    }
+}
+
+// LR2: SetObjectValue_Button。プレイ画面で意味があるのは、まだ機能の無い設定ばかりなので 0（オフ）
+int PlayContext::button(int type) const {
+    switch (type) {
+    case 20: return 0;  // エフェクトの種類（エフェクト無し）
+    case 55: return 0;  // ハイスピ固定の種類（OFF）
+    default: return 0;
     }
 }
 

@@ -359,6 +359,11 @@ struct Loader {
             src_into(sk.sliders.back().src);
         } else if (cmd == "#DST_SLIDER") {
             if (!sk.sliders.empty()) read_dst(sk.sliders.back().dst, c, t_skin);
+        } else if (cmd == "#SRC_BUTTON") {
+            sk.buttons.emplace_back();
+            src_into(sk.buttons.back().src);
+        } else if (cmd == "#DST_BUTTON") {
+            if (!sk.buttons.empty()) read_dst(sk.buttons.back().dst, c, t_skin);
         } else if (cmd == "#SRC_BGA") {
             sk.bgas.emplace_back();
             src_into(sk.bgas.back().src);

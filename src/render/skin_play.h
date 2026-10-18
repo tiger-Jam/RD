@@ -33,6 +33,8 @@ struct PlayContext {
     // （LR2の既定は target=0：2P側は更新しない、defaulttarget=90%）
     Ghost best, target;
     int target_type = 0;  // 0=更新しない, 1=自己ベスト, 2=ターゲット
+    int best_clear = 0;   // この譜面の自己ベストのランプ（LR2の番号）
+    int best_exscore = 0;
     int last_offset_ms = 0;
     int last_fast_slow = 0;  // OpenLR2の拡張：0=PGREAT, 1=FAST, 2=SLOW
     // 自分のノーツが1つ判定されたとき（空POORは除く）にゴーストを進める（LR2: JudgeToScore）
@@ -47,6 +49,7 @@ struct PlayContext {
     bool bargraph(int type, double& val, double& max) const;
     bool slider(int type, int& val, int& lo, int& hi) const;
     std::string text(int id) const;
+    int button(int type) const;
     // スキン読み込み時に #IF の判定に使う値（LR2: Main.cpp:1041 で全番号を評価している）
     std::array<bool, 1000> load_options() const;
 };

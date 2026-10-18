@@ -48,6 +48,7 @@ struct PlaySkinState {
     std::function<bool(int, double&, double&)> bargraph;  // 種類 → 値と最大値
     std::function<bool(int, int&, int&, int&)> slider;    // 種類 → 値, 最小, 最大
     std::function<std::string(int)> text; // LR2の文字列ID → 文字列
+    std::function<int(int)> button;       // ボタンの種類 → いまの値（コマ番号になる）
 
     const Chart* chart = nullptr;
     const JudgeEngine* judge = nullptr;

@@ -372,6 +372,23 @@ void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
             }
         }
     }
+    // ボタン（LR2: SetObjectValue_Button → AddDrawingBuffer_Image）。設定の値をそのままコマ番号にする
+    for (const SkinObject& o : skin.buttons) {
+        if (!dst_on(o.dst, st) || !o.src.valid) continue;
+        SkinDraw d = eval_dst(o.dst, st.timers->lapse(o.dst.timer, st.now_ms));
+        if (!d.visible) continue;
+        SDL_Texture* tex = image_tex(o.src.gr);
+        if (!tex) continue;
+        int v = st.button ? st.button(o.src.op[0]) : 0;
+        int count = o.src.graphcount();
+        v = std::clamp(v, 0, count - 1);
+        Item it;
+        it.sort = d.sort;
+        it.tex = tex;
+        it.src = frame_rect(o.src, v);
+        it.d = d;
+        items_.push_back(it);
+    }
     for (const SkinObject& o : skin.sliders) {
         if (!dst_on(o.dst, st) || o.src.op[1] < 1) continue;
         int v = 0, lo = 0, hi = 1;

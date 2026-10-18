@@ -108,7 +108,7 @@ struct Lr2Skin {
     int width = 640, height = 480;
 
     std::vector<SkinImage> images;  // #IMAGE の番号（0..99）と特殊番号（100以降）
-    std::vector<SkinObject> image_objs, numbers, bargraphs, sliders, bgas;
+    std::vector<SkinObject> image_objs, numbers, bargraphs, sliders, bgas, buttons;
     std::vector<SkinText> texts;
 
     std::array<SkinSrc, 20> note, mine, ln_start, ln_end, ln_body;

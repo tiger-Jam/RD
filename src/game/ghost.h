@@ -41,6 +41,7 @@ public:
         now_note_++;
     }
     int exscore() const { return rate_; }  // LR2の PLAYSCORE::rate（その時点のEXスコア）
+    int final_exscore() const { return expect_[4] + expect_[5] * 2; }  // LR2の PLAYSCORE::exscore
     int judge(int j) const { return judge_[j]; }
     int now_note() const { return now_note_; }
     int total_notes() const { return total_notes_; }
