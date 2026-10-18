@@ -15,8 +15,11 @@ find_package(SDL3 REQUIRED CONFIG)
 find_package(Threads REQUIRED)
 
 # 単一ヘッダのライブラリは実装を1つの翻訳単位にまとめる
-add_library(bmj_third_party STATIC third_party/third_party_impl.c third_party/stb_vorbis_impl.c)
-target_include_directories(bmj_third_party SYSTEM PUBLIC third_party)
+add_library(bmj_third_party STATIC third_party/third_party_impl.c third_party/stb_vorbis_impl.c
+    third_party/sqlite/sqlite3.c third_party/yyjson/yyjson.c)
+target_include_directories(bmj_third_party SYSTEM PUBLIC third_party third_party/sqlite third_party/yyjson)
+target_compile_definitions(bmj_third_party PUBLIC SQLITE_THREADSAFE=2 SQLITE_DEFAULT_WAL_SYNCHRONOUS=1 SQLITE_OMIT_LOAD_EXTENSION)
+find_package(CURL REQUIRED)
 if(APPLE)
     target_link_libraries(bmj_third_party PUBLIC "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation")
 elseif(UNIX)
@@ -34,6 +37,8 @@ add_library(bmj_core STATIC
     src/util/path.cpp
     src/util/dxa.cpp
     src/skin/lr2_skin.cpp
+    src/util/hash.cpp
+    src/db/song_db.cpp
 )
 target_include_directories(bmj_core PUBLIC src)
 target_link_libraries(bmj_core PUBLIC bmj_third_party)
@@ -58,7 +63,7 @@ add_executable(bmjoy
 target_link_libraries(bmjoy PRIVATE bmj_core SDL3::SDL3)
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
-    tests/test_input.cpp src/input/input.cpp src/input/keyconfig.cpp)
+    tests/test_input.cpp tests/test_db.cpp src/input/input.cpp src/input/keyconfig.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 
 foreach(t bmj_core bmjoy bmj_tests)

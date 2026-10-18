@@ -15,11 +15,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "app/app.h"
 #include "app/play_session.h"
 #include "chart/bms_parser.h"
+#include "db/song_db.h"
 #include "game/judge.h"
 #include "render/keyconfig_scene.h"
 #include "skin/lr2_skin.h"
@@ -33,6 +35,8 @@ struct Options {
     PlayOptions play;
     bool simulate = false, info = false, keyconfig = false, no_skin = false, vsync = false;
     std::string lr2_root, skin, skin_res;
+    std::vector<std::string> scan_dirs;  // 開発用：曲フォルダを読んで結果を表示する
+    std::string db_path;
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000;
     bool gas = false;
@@ -55,6 +59,8 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--skin") o.skin = next();
         else if (a == "--skin-res") o.skin_res = next();
         else if (a == "--fps") o.fps = std::atoi(next());
+        else if (a == "--scan") o.scan_dirs.push_back(next());
+        else if (a == "--db") o.db_path = next();
         else if (a == "--skin-opt") {
             std::string v = next();
             size_t eq = v.find('=');
@@ -82,7 +88,7 @@ bool parse_args(int argc, char** argv, Options& o) {
             o.chart_path = a;
         }
     }
-    return o.keyconfig || !o.chart_path.empty();
+    return o.keyconfig || !o.scan_dirs.empty() || !o.chart_path.empty();
 }
 
 void print_info(const Chart& c, const BmsParseResult& r) {
@@ -123,6 +129,16 @@ int main(int argc, char** argv) {
                      "                [--simulate] [--info]\n"
                      "       bmjoy --keyconfig\n");
         return 2;
+    }
+    if (!opt.scan_dirs.empty()) {
+        SongDb db;
+        std::string path = opt.db_path.empty() ? "songs_scan_test.db" : opt.db_path;
+        if (!db.open(path)) return 1;
+        int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
+        ScanStats s = db.scan(opt.scan_dirs, threads);
+        std::printf("%d 譜面（追加 %d／変更 %d／削除 %d／読めない %d）%.2f 秒（%d スレッド）\n", s.found, s.added, s.updated,
+                    s.removed, s.failed, s.seconds, threads);
+        return 0;
     }
     if (opt.info || opt.simulate) {
         BmsParseResult parsed = parse_bms_file(opt.chart_path, {opt.play.seed ? opt.play.seed : 1});

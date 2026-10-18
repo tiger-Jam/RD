@@ -73,4 +73,11 @@ std::string config_path() {
     return p;
 }
 
+std::string song_db_path() {
+    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
+    std::string p = dir ? std::string(dir) + "songs.db" : "songs.db";
+    SDL_free(dir);
+    return p;
+}
+
 }  // namespace bmj

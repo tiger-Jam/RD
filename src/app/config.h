@@ -28,5 +28,7 @@ struct AppConfig {
 
 // 設定ファイルの置き場所（macOS なら ~/Library/Application Support/BMjoy/config.txt）
 std::string config_path();
+// 曲データベースの置き場所（同じフォルダの songs.db）
+std::string song_db_path();
 
 }  // namespace bmj
