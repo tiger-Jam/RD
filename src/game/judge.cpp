@@ -38,7 +38,8 @@ JudgeEngine::JudgeEngine(const Chart& chart, const JudgeConfig& cfg)
 }
 
 int JudgeEngine::clear() const {
-    return clear_type(gauge_, gauge_type_, stats_.total_notes, stats_.note_current, stats_.max_combo);
+    return clear_type(gauge_, gauge_type_, stats_.total_notes, stats_.note_current, stats_.max_combo,
+                      stats_.judge_count[kGood]);
 }
 
 void JudgeEngine::apply_judge(int judge) {

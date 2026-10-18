@@ -128,7 +128,16 @@ TEST(judge_autoplay_full_combo) {
     for (int64_t t = 0; t <= c.end_us; t += 1000) j.advance(t);
     CHECK_EQ(j.stats().note_current, j.stats().total_notes);
     CHECK_EQ(j.stats().max_combo, j.stats().total_notes);
-    CHECK_EQ(j.clear(), 5);
+    CHECK_EQ(j.clear(), 6);  // 全部 PGREAT なので PERFECT
+}
+
+TEST(clear_perfect_and_full_combo) {
+    GaugeSet g;
+    g.init(300, 10);
+    for (int i = 0; i < 10; ++i) g.apply_judge(kPGreat);
+    CHECK_EQ(clear_type(g, kGroove, 10, 10, 10, 0), 6);  // 空POORがあってもコンボが切れていなければ PERFECT
+    CHECK_EQ(clear_type(g, kGroove, 10, 10, 10, 1), 5);  // GOOD があれば FULL COMBO
+    CHECK_EQ(clear_type(g, kHard, 10, 10, 9, 0), 4);
 }
 
 TEST(gauge_groove_values) {

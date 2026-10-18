@@ -106,7 +106,7 @@ void record_score(App& app, const std::string& sha256, const JudgeEngine& j, boo
 
 void print_result(const Chart& chart, const JudgeEngine& j) {
     const PlayStats& s = j.stats();
-    static const char* lamps[] = {"NO PLAY", "FAILED", "EASY", "NORMAL", "HARD", "FULL COMBO"};
+    static const char* lamps[] = {"NO PLAY", "FAILED", "EASY", "NORMAL", "HARD", "FULL COMBO", "PERFECT"};
     std::printf("結果: %s\n", chart.meta.title.c_str());
     std::printf("  ランプ %s / EX %d / MAX COMBO %d / BP %d\n", lamps[j.failed() ? 1 : j.clear()], s.exscore(),
                 s.max_combo, s.bp());
@@ -341,7 +341,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 double lo = 1e18, hi = 0;
                 for (const Note& n : chart.notes)
                     if (n.kind != NoteKind::Invisible) lo = std::min(lo, chart.bpm_at(n.time_us)), hi = std::max(hi, chart.bpm_at(n.time_us));
-                bool keep_fc = ctx.result_clear == 5 && !assist && (cfg.random != kScatter || lo == hi);
+                bool keep_fc = ctx.result_clear >= 5 && !assist && (cfg.random != kScatter || lo == hi);
                 if (!keep_fc) ctx.result_clear = 2;
             }
             // 比較に使う「このプレイの前の自己ベスト」は、記録する前に取っておく

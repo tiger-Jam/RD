@@ -61,7 +61,7 @@ int gauge_lamp(int gauge) {
 bool SelectContext::option(int op) const {
     if (op < 0) return !option(-op);
     const bool song = chart && is_song(type);
-    const int lamp = song && score ? score->clear : 0;
+    const int lamp = song && score ? skin_lamp(score->clear) : 0;
     switch (op) {
     case 0: return true;
     case 1: return is_folder(type);
@@ -138,7 +138,7 @@ bool SelectContext::option(int op) const {
     if (op >= 520 && op <= 565) {
         // 難易度 d のランプが v（op = 520 + d*10 + v）
         int d = (op - 520) / 10, v = (op - 520) % 10;
-        return song && d < 5 && v <= 5 && diff_count[d] > 0 && diff_lamp[d] == v;
+        return song && d < 5 && v <= 5 && diff_count[d] > 0 && skin_lamp(diff_lamp[d]) == v;
     }
     if (op >= 900 && op < 1000 && skin) return skin->op[op];
     return false;

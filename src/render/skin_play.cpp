@@ -80,7 +80,7 @@ bool PlayContext::option(int option) const {
         return rank_of(old_exscore, old_total_notes) < rank_of(st->exscore(), st->total_notes) ? ret : !ret;
     }
     case 100: case 101: case 102: case 103: case 104: case 105:
-        return best_clear == option - 100 ? ret : !ret;  // この譜面の自己ベストのランプ
+        return skin_lamp(best_clear) == option - 100 ? ret : !ret;  // この譜面の自己ベストのランプ
     case 150: case 151: case 152: case 153: case 154: case 155:
         return chart && chart->meta.difficulty == option - 150 ? ret : !ret;  // 譜面の #DIFFICULTY
     case 190: return has_stagefile ? !ret : ret;

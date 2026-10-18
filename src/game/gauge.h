@@ -34,7 +34,10 @@ inline bool gauge_failed(const GaugeSet& g, int type) { return g.hp(type) < 2.0;
 // GAS（OpenLR2で追加されたゲージ自動切り替え）。configured から順に生きているゲージを返す
 int gas_select(const GaugeSet& g, int configured);
 
-// クリアランプ（LR2の番号：1 FAILED, 2 EASY, 3 NORMAL, 4 HARD, 5 FULL COMBO）
-int clear_type(const GaugeSet& g, int gauge_type, int total_notes, int note_current, int max_combo);
+// クリアランプ（1 FAILED, 2 EASY, 3 NORMAL, 4 HARD, 5 FULL COMBO, 6 PERFECT）。
+// 5 までは LR2 の番号。6 は FULL COMBO のうち GOOD が 0 のもの（空POORはコンボを切らないので構わない）
+int clear_type(const GaugeSet& g, int gauge_type, int total_notes, int note_current, int max_combo, int good);
+// スキンに渡すランプ（LR2 のスキンは 5 までしか知らないので、PERFECT は FULL COMBO として見せる）
+inline int skin_lamp(int lamp) { return lamp > 5 ? 5 : lamp; }
 
 }  // namespace bmj

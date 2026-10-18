@@ -75,8 +75,8 @@ int gas_select(const GaugeSet& g, int configured) {
     return kEasy;
 }
 
-int clear_type(const GaugeSet& g, int gauge_type, int total_notes, int note_current, int max_combo) {
-    if (total_notes == max_combo) return 5;
+int clear_type(const GaugeSet& g, int gauge_type, int total_notes, int note_current, int max_combo, int good) {
+    if (total_notes == max_combo) return good == 0 ? 6 : 5;
     if (gauge_type == kHard || gauge_type == kGAttack || gauge_type == kPAttack) {
         if (note_current == total_notes && g.hp(gauge_type) >= 2.0) return 4;
         return 1;

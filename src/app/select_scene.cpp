@@ -66,13 +66,14 @@ SDL_Color lamp_color(int lamp) {
     case 3: return {80, 160, 255, 255};   // NORMAL
     case 4: return {240, 240, 240, 255};  // HARD
     case 5: return {255, 210, 60, 255};   // FULL COMBO
+    case 6: return {255, 255, 200, 255};  // PERFECT
     default: return {60, 60, 70, 255};    // NO PLAY
     }
 }
 
 const char* lamp_name(int lamp) {
-    static const char* names[] = {"NO PLAY", "FAILED", "EASY CLEAR", "CLEAR", "HARD CLEAR", "FULL COMBO"};
-    return lamp >= 0 && lamp <= 5 ? names[lamp] : "?";
+    static const char* names[] = {"NO PLAY", "FAILED", "EASY CLEAR", "CLEAR", "HARD CLEAR", "FULL COMBO", "PERFECT"};
+    return lamp >= 0 && lamp <= 6 ? names[lamp] : "?";
 }
 
 // 一覧の木を作る：難易度表（レベル別）と曲フォルダ

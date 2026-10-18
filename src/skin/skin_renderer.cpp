@@ -1,5 +1,7 @@
 #include "skin/skin_renderer.h"
 
+#include "game/gauge.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -538,7 +540,9 @@ void SkinRenderer::add_bars(const Lr2Skin& skin, const PlaySkinState& st) {
             const SkinObject& lv = b.level[bar.level_index];
             if (lv.src.valid && !lv.dst.empty()) add_numbers(lv.src, lv.dst, st, bar.level, d.x, d.y);
         }
-        if (bar.lamp >= 0 && bar.lamp < 10 && b.lamp[bar.lamp].src.valid) add_object(b.lamp[bar.lamp], st, d.x, d.y);
+        // スキンに無い番号のランプ（PERFECT）は FULL COMBO の絵で出す
+        int lamp = bar.lamp >= 0 && bar.lamp < 10 && !b.lamp[bar.lamp].src.valid ? skin_lamp(bar.lamp) : bar.lamp;
+        if (lamp >= 0 && lamp < 10 && b.lamp[lamp].src.valid) add_object(b.lamp[lamp], st, d.x, d.y);
     }
 }
 
