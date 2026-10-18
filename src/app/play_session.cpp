@@ -306,10 +306,17 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         int chart_op3 = 0, chart_op4 = 0;
         Lr2Skin* rskin = nullptr;
         auto enter_result = [&](bool quit_early) {
-            phase = Phase::Result;
             mixer.stop();
             print_result(chart, judge);
             const PlayStats& ps = judge.stats();
+            // LR2（Main.cpp:1697）：オートプレイ・1 ノーツも判定していない・GOOD 以上が 1 つも無いときは、
+            // リザルトを出さず、記録もせずに選曲画面へ戻る
+            if (opt.autoplay || ps.note_current == 0 ||
+                ps.judge_count[kGood] + ps.judge_count[kGreat] + ps.judge_count[kPGreat] == 0) {
+                done = true;
+                return;
+            }
+            phase = Phase::Result;
             // 途中でやめたらゲージを0にして、グラフの残りを埋める（LR2: Play.cpp:1659）
             std::array<double, kGaugeCount> hp{};
             for (int g = 0; g < kGaugeCount; ++g) hp[g] = quit_early ? 0.0 : judge.gauge().hp(g);
