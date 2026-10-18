@@ -79,7 +79,9 @@ bool App::init(const char* argv0) {
     select_renderer = std::make_unique<SkinRenderer>(renderer);
     set_view(640, 480);
     std::printf("音声デバイスを開いています\n");
-    if (!mixer.open(0, 128)) {
+    // 音の出力（LR2 SETUP の OUTPUT TYPE とバッファ数）。排他モードが使えなければ共有モードになる
+    if (!mixer.open(0, cfg.audio_buffer > 0 ? static_cast<uint32_t>(cfg.audio_buffer) : (cfg.audio_exclusive ? 64 : 128),
+                    cfg.audio_exclusive)) {
         std::fprintf(stderr, "音声デバイスを開けない\n");
         return false;
     }
@@ -95,8 +97,14 @@ bool App::init(const char* argv0) {
         }
     }
     if (!db.open(song_db_path())) std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
-    std::printf("音声: %u Hz、出力遅延の推定 %.1f ms／画面 %.0f Hz\n", mixer.sample_rate(),
-                mixer.output_latency_us() / 1000.0, refresh_hz);
+    double estimate = mixer.output_latency_us() / 1000.0;
+    // 実際の遅延を測って、曲の時計（判定とノーツの位置）に使う（Windows のみ）
+    bool measured = mixer.calibrate_latency();
+    std::printf("音声: %s／%u Hz／%u フレーム×%u、出力遅延 %.1f ms（%s%s）／画面 %.0f Hz\n", mixer.exclusive() ? "排他" : "共有",
+                mixer.sample_rate(), mixer.period_frames(), mixer.periods(), mixer.output_latency_us() / 1000.0,
+                measured ? "実測。見積もりは " : "見積もり", measured ? (std::to_string(static_cast<int>(estimate * 10) / 10.0).substr(0, 4) + " ms").c_str() : "",
+                refresh_hz);
+    if (cfg.audio_exclusive && !mixer.exclusive()) std::printf("排他モードで開けなかったので、共有モードで鳴らしています\n");
     return true;
 }
 

@@ -550,19 +550,23 @@ int main(int, char**) {
             g.check(X + 38, Y + 38, "16bitモードで起動する(フルスクリーンモードのみ)", d_false, false);
             g.check(X + 38, Y + 68, "垂直同期(プレイ中ちらつくなら変えてみてください)", cfg.vsync);
             g.group(X + 10, Y + 114, 558, 186, "SOUND");
-            g.label(X + 48, Y + 154, "OUTPUT TYPE", false);
 #ifdef _WIN32
-            const char* out_type = "WASAPI（共有）";
-#elif defined(__APPLE__)
+            g.label(X + 48, Y + 154, "OUTPUT TYPE");
+            g.combo(&cfg.audio_exclusive, X + 182, Y + 145, 250, 22, {"WASAPI（共有）", "WASAPI（排他）"}, cfg.audio_exclusive ? 1 : 0,
+                    [&](int i) { cfg.audio_exclusive = i == 1; });
+#else
+            g.label(X + 48, Y + 154, "OUTPUT TYPE", false);
+#ifdef __APPLE__
             const char* out_type = "Core Audio";
 #else
             const char* out_type = "ALSA / PulseAudio";
 #endif
             g.combo(&d_buffer + 1, X + 182, Y + 145, 250, 22, {out_type}, 0, [](int) {}, false);
+#endif
             g.label(X + 48, Y + 195, "PLAYBACK DRIVER", false);
             g.combo(&d_buffer + 2, X + 182, Y + 187, 250, 22, {"既定のデバイス"}, 0, [](int) {}, false);
-            g.label(X + 48, Y + 235, "バッファ数 (低くすれば音の出が早くなりますがノイズが増えます)", false);
-            g.edit_int(d_buffer, X + 462, Y + 226, 58, 22, false);
+            g.label(X + 48, Y + 235, "バッファ数 (低くすれば音の出が早くなりますがノイズが増えます)");
+            g.edit_int(cfg.audio_buffer, X + 462, Y + 226, 58, 22, true, 0, 4096);
             g.check(X + 48, Y + 268, "FMOD Exを使用しない(どうしても発音遅延やノイズが気になるならチェックを入れてください)", d_true, false);
             g.check(X + 22, Y + 328, "高精度なタイマーを使用する(基本的に外して下さい)", d_true, false);
         } else {

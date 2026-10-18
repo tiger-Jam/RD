@@ -61,6 +61,8 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "levelbar_9") levelbar_9 = iv;
         else if (key == "select_speed_next") select_speed_next = iv;
         else if (key == "joystick_directinput") joystick_directinput = iv != 0;
+        else if (key == "audio_exclusive") audio_exclusive = iv != 0;
+        else if (key == "audio_buffer") audio_buffer = iv;
         else if (key.rfind("skin_custom ", 0) == 0) {
             // skin_custom <スキンのパス> = 選択,選択,...
             std::vector<int> sel;
@@ -116,6 +118,8 @@ bool AppConfig::save(const std::string& path) const {
     f << "levelbar_9 = " << levelbar_9 << "\n";
     f << "select_speed_next = " << select_speed_next << "\n";
     f << "joystick_directinput = " << (joystick_directinput ? 1 : 0) << "  # Windows：1 にすると SDL の DirectInput も使う（起動が遅くなる環境がある）\n";
+    f << "audio_exclusive = " << (audio_exclusive ? 1 : 0) << "  # 1 = Windows の WASAPI 排他モード（音の遅れが小さい）\n";
+    f << "audio_buffer = " << audio_buffer << "  # 1 回分のフレーム数。0 = 自動\n";
     for (const auto& [skin, sel] : skin_custom) {
         f << "skin_custom " << skin << " =";
         for (size_t i = 0; i < sel.size(); ++i) f << (i ? "," : " ") << sel[i];

@@ -17,6 +17,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <future>
 #include <optional>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #include "app/app.h"
+#include "audio/mixer.h"
 #include "app/play_session.h"
 #include "app/select_scene.h"
 #include "chart/bms_parser.h"
@@ -66,6 +68,8 @@ struct Options {
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000;
     bool gas = false;
+    bool latency_test = false, exclusive = false;  // 開発用：音の遅れを測る
+    int buffer = 0;
 };
 
 bool parse_args(int argc, char** argv, Options& o) {
@@ -78,6 +82,9 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--info") o.info = true;
         else if (a == "--no-skin") o.no_skin = true;
         else if (a == "--keyconfig") o.keyconfig = true;
+        else if (a == "--latency-test") o.latency_test = true;
+        else if (a == "--exclusive") o.exclusive = true;
+        else if (a == "--buffer") o.buffer = std::atoi(next());
         else if (a == "--vsync") o.vsync = true;
         else if (a == "--capture") o.play.capture_dir = next();
         else if (a == "--quit-after") o.play.quit_after = std::atof(next());
@@ -145,6 +152,61 @@ int simulate(const Chart& chart, int gauge, bool gas) {
     const PlayStats& s = j.stats();
     std::printf("ランプ %d / EX %d / MAX COMBO %d / BP %d / %d ノーツ\n", j.clear(), s.exscore(), s.max_combo, s.bp(),
                 s.total_notes);
+    return 0;
+}
+
+// 音の遅れを測る（開発用）。クリック音を「鳴らす」と命令した時刻から、オーディオ機器がその音を鳴らす時刻までを、
+// WASAPI の IAudioClock（今どこまで鳴らしたかを時刻つきで返す）で求める。共有モードでも排他モードでも同じ物差しで測れる
+int latency_test(bool exclusive, int buffer) {
+    Mixer m;
+    if (!m.open(0, buffer > 0 ? static_cast<uint32_t>(buffer) : 128, exclusive)) {
+        std::printf("音声デバイスを開けない\n");
+        return 1;
+    }
+    std::printf("モード: %s／%u Hz／周期 %u フレーム × %u／見積もりの遅延 %.1f ms\n", m.exclusive() ? "排他" : "共有",
+                m.sample_rate(), m.period_frames(), m.periods(), m.output_latency_us() / 1000.0);
+#ifdef _WIN32
+    SDL_Delay(300);
+    if (m.calibrate_latency()) std::printf("曲の時計に使う遅延（実測）: %.2f ms\n", m.output_latency_us() / 1000.0);
+    LARGE_INTEGER qf;
+    QueryPerformanceFrequency(&qf);
+    auto now_100ns = [&] {
+        LARGE_INTEGER c;
+        QueryPerformanceCounter(&c);
+        return static_cast<double>(c.QuadPart) * 1e7 / static_cast<double>(qf.QuadPart);
+    };
+    SDL_Delay(500);
+    std::vector<double> ms;
+    for (int i = 0; i < 40; ++i) {
+        int64_t before = m.click_frame();
+        double t_call = now_100ns();
+        m.play_test_click();
+        while (m.click_frame() == before) SDL_Delay(0);
+        int64_t frame = m.click_frame();
+        SDL_Delay(100);
+        double played = 0;
+        uint64_t qpc = 0;
+        if (!m.device_position(played, qpc)) {
+            std::printf("オーディオ機器の位置を取れない\n");
+            return 1;
+        }
+        // クリックのフレームが鳴る時刻 = 位置を取った時刻 −（そこまでに鳴った時間 − クリックの位置）
+        double click_sec = static_cast<double>(frame) / m.sample_rate();
+        double t_play = static_cast<double>(qpc) - (played - click_sec) * 1e7;
+        ms.push_back((t_play - t_call) / 1e4);
+        SDL_Delay(150 + (i * 37) % 50);  // 周期とそろわないように少しずつずらす
+    }
+    std::sort(ms.begin(), ms.end());
+    double sum = 0;
+    for (double v : ms) sum += v;
+    double mean = sum / ms.size(), var = 0;
+    for (double v : ms) var += (v - mean) * (v - mean);
+    std::printf("実測の遅延（%zu 回）: 平均 %.2f ms／中央 %.2f ms／最小 %.2f ms／最大 %.2f ms／標準偏差 %.2f ms\n", ms.size(), mean,
+                ms[ms.size() / 2], ms.front(), ms.back(), std::sqrt(var / ms.size()));
+#else
+    std::printf("実測は Windows（WASAPI）だけ\n");
+#endif
+    m.close();
     return 0;
 }
 
@@ -272,6 +334,7 @@ int main(int argc, char** argv) {
                      "       bmjoy --keyconfig\n");
         return 2;
     }
+    if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
     if (!opt.table_urls.empty()) {
         std::string cache = opt.db_path.empty() ? "tables_test" : opt.db_path;
         for (const std::string& u : opt.table_urls) {

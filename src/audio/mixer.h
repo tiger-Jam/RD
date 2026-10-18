@@ -25,7 +25,22 @@ public:
     Mixer(const Mixer&) = delete;
     Mixer& operator=(const Mixer&) = delete;
 
-    bool open(uint32_t preferred_rate, uint32_t period_frames);
+    // exclusive：Windows の WASAPI 排他モードを試す（使えなければ共有モードで開く）
+    bool open(uint32_t preferred_rate, uint32_t period_frames, bool exclusive = false);
+    bool exclusive() const { return exclusive_; }
+    // 実際に使っている周期の長さと個数（フレーム）
+    uint32_t period_frames() const { return period_frames_; }
+    uint32_t periods() const { return periods_; }
+
+    // 遅延の測定用（--latency-test）：短いクリック音を今すぐ鳴らす。鳴り始めのフレーム位置は click_frame() に入る
+    void play_test_click() { push_command(kTestClick); }
+    int64_t click_frame() const { return click_frame_.load(std::memory_order_acquire); }
+    // オーディオ機器が今どこまで鳴らしたか（秒）と、その時刻（QueryPerformanceCounter と同じ基準の 100ns 単位）。
+    // Windows（WASAPI）だけ。取れなければ false
+    bool device_position(double& played_sec, uint64_t& qpc_100ns) const;
+    // 出力の遅延を実測で合わせ直す（Windows のみ。数十ms かかる）。書き出したのにまだ鳴っていない長さの平均から、
+    // コールバックの周期の半分を引いたものを遅延とする。測れたら true
+    bool calibrate_latency();
     void close();
     uint32_t sample_rate() const { return rate_; }
     // 出力までの遅延の推定値（マイクロ秒）
@@ -74,6 +89,13 @@ private:
         bool loop = false;
     };
     static constexpr int32_t kSysBase = 0x10000, kSysLoop = 0x100, kSysStop = 0x200;
+    static constexpr int32_t kTestClick = 0x7fff0000;
+    Sample test_click_;
+    int64_t test_click_pos_ = -1;
+    std::atomic<int64_t> rendered_frames_{0};  // これまでに書き出したフレームの数（音声スレッドだけが増やす）
+    std::atomic<int64_t> click_frame_{-1};
+    bool exclusive_ = false;
+    uint32_t period_frames_ = 0, periods_ = 0;
     std::vector<Sample> sys_samples_;
     std::array<SysVoice, 16> sys_voices_{};
     void run_system_command(int32_t cmd);

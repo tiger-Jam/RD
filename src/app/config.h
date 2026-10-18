@@ -55,6 +55,10 @@ struct AppConfig {
     // Windows で SDL の DirectInput を使うか。既定では使わず、コントローラーは Raw Input で直接読む
     // （DirectInput の機器の列挙に数十秒かかる環境があるため）
     bool joystick_directinput = false;
+    // 音の出力（LR2: OUTPUT TYPE / バッファ数）。排他は Windows の WASAPI 排他モード（ほかのアプリの音は止まる）。
+    // バッファは 1 回分のフレーム数。0 なら自動（共有 128、排他 64）
+    bool audio_exclusive = false;
+    int audio_buffer = 0;
 
     bool load(const std::string& path);
     bool save(const std::string& path) const;

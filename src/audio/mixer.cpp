@@ -7,14 +7,20 @@
 
 #include "miniaudio.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <audioclient.h>
+#endif
+
 namespace bmj {
 
 Mixer::Mixer() = default;
 Mixer::~Mixer() { close(); }
 
-bool Mixer::open(uint32_t preferred_rate, uint32_t period_frames) {
+bool Mixer::open(uint32_t preferred_rate, uint32_t period_frames, bool exclusive) {
     device_ = std::make_unique<ma_device>();
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
+    cfg.playback.shareMode = exclusive ? ma_share_mode_exclusive : ma_share_mode_shared;
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = 2;
     cfg.sampleRate = preferred_rate;  // 0ならデバイスの既定
@@ -24,11 +30,24 @@ bool Mixer::open(uint32_t preferred_rate, uint32_t period_frames) {
     cfg.noClip = MA_TRUE;
     cfg.dataCallback = &Mixer::callback;
     cfg.pUserData = this;
-    if (ma_device_init(nullptr, &cfg, device_.get()) != MA_SUCCESS) {
+    ma_result res = ma_device_init(nullptr, &cfg, device_.get());
+    if (res != MA_SUCCESS && exclusive) {
+        // 排他モードが使えない（ほかのアプリが使っている・形式が合わない）ときは共有モードで開き直す
+        cfg.playback.shareMode = ma_share_mode_shared;
+        res = ma_device_init(nullptr, &cfg, device_.get());
+    }
+    if (res != MA_SUCCESS) {
         device_.reset();
         return false;
     }
     rate_ = device_->sampleRate;
+    exclusive_ = device_->playback.shareMode == ma_share_mode_exclusive;
+    period_frames_ = device_->playback.internalPeriodSizeInFrames;
+    periods_ = device_->playback.internalPeriods;
+    // 測定用のクリック音（1kHz を 5ms）
+    test_click_.pcm.assign(static_cast<size_t>(rate_ / 200) * 2, 0.0f);
+    for (size_t i = 0; i < test_click_.pcm.size() / 2; ++i)
+        test_click_.pcm[i * 2] = test_click_.pcm[i * 2 + 1] = (i / (rate_ / 2000)) % 2 ? 0.5f : -0.5f;
     uint64_t buffered = static_cast<uint64_t>(device_->playback.internalPeriodSizeInFrames) *
                         std::max<ma_uint32>(1, device_->playback.internalPeriods);
     latency_us_ = static_cast<int64_t>(buffered * 1000000ull / device_->playback.internalSampleRate);
@@ -38,6 +57,55 @@ bool Mixer::open(uint32_t preferred_rate, uint32_t period_frames) {
         return false;
     }
     return true;
+}
+
+bool Mixer::device_position(double& played_sec, uint64_t& qpc_100ns) const {
+#ifdef _WIN32
+    if (!device_ || device_->pContext->backend != ma_backend_wasapi) return false;
+    auto* client = static_cast<IAudioClient*>(device_->wasapi.pAudioClientPlayback);
+    if (!client) return false;
+    IAudioClock* clock = nullptr;
+    if (FAILED(client->GetService(__uuidof(IAudioClock), reinterpret_cast<void**>(&clock))) || !clock) return false;
+    UINT64 freq = 0, pos = 0, qpc = 0;
+    bool ok = SUCCEEDED(clock->GetFrequency(&freq)) && freq > 0 && SUCCEEDED(clock->GetPosition(&pos, &qpc));
+    clock->Release();
+    if (!ok) return false;
+    played_sec = static_cast<double>(pos) / static_cast<double>(freq);
+    qpc_100ns = qpc;
+    return true;
+#else
+    (void)played_sec, (void)qpc_100ns;
+    return false;
+#endif
+}
+
+bool Mixer::calibrate_latency() {
+#ifdef _WIN32
+    LARGE_INTEGER qf;
+    QueryPerformanceFrequency(&qf);
+    double sum = 0;
+    int n = 0;
+    for (int i = 0; i < 40; ++i) {
+        double played = 0;
+        uint64_t qpc = 0;
+        int64_t rendered = rendered_frames_.load(std::memory_order_relaxed);
+        if (!device_position(played, qpc)) return false;
+        LARGE_INTEGER c;
+        QueryPerformanceCounter(&c);
+        double now_100ns = static_cast<double>(c.QuadPart) * 1e7 / static_cast<double>(qf.QuadPart);
+        // いま鳴っている位置（位置を取ってから今までに進んだ分を足す）
+        double playing = played + (now_100ns - static_cast<double>(qpc)) / 1e7;
+        sum += static_cast<double>(rendered) / rate_ - playing;
+        ++n;
+        SDL_DelayNS(1700000);  // 周期とそろわないように半端な間隔で取る
+    }
+    double ahead = sum / n - (period_frames_ / 2.0) / rate_;
+    if (ahead <= 0 || ahead > 0.5) return false;
+    latency_us_ = static_cast<int64_t>(ahead * 1e6);
+    return true;
+#else
+    return false;
+#endif
 }
 
 void Mixer::close() {
@@ -173,7 +241,10 @@ void Mixer::render(float* out, uint32_t frames) {
     size_t tail = queue_tail_.load(std::memory_order_acquire);
     while (head != tail) {
         int32_t cmd = queue_[head];
-        if (cmd >= kSysBase) {
+        if (cmd == kTestClick) {
+            test_click_pos_ = 0;
+            click_frame_.store(rendered_frames_.load(std::memory_order_relaxed), std::memory_order_release);
+        } else if (cmd >= kSysBase) {
             run_system_command(cmd);
         } else if (!running) {
             // 曲を止めている間のキー音は捨てる
@@ -188,6 +259,16 @@ void Mixer::render(float* out, uint32_t frames) {
     }
     queue_head_.store(head, std::memory_order_release);
 
+    // 測定用のクリック音
+    if (test_click_pos_ >= 0) {
+        int64_t len = test_click_.frames();
+        for (uint32_t i = 0; i < frames && test_click_pos_ < len; ++i, ++test_click_pos_) {
+            out[i * 2] += test_click_.pcm[test_click_pos_ * 2];
+            out[i * 2 + 1] += test_click_.pcm[test_click_pos_ * 2 + 1];
+        }
+        if (test_click_pos_ >= len) test_click_pos_ = -1;
+    }
+    rendered_frames_.fetch_add(frames, std::memory_order_relaxed);
     // システム音
     for (SysVoice& v : sys_voices_) {
         if (!v.sample) continue;
