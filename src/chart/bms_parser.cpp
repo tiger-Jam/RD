@@ -246,6 +246,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
         s.pos = b;
         s.speed = stopped ? 0.0 : bpm / 60.0 / 1e6;
         s.bpm = bpm;
+        s.stop = stopped;
         if (!chart.scroll.empty() && chart.scroll.back().time_us == s.time_us) chart.scroll.back() = s;
         else chart.scroll.push_back(s);
     };

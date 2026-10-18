@@ -217,3 +217,18 @@ TEST(gauge_course) {
     s.init(300, 10);
     CHECK_EQ(s.hp(kGroove), 20.0);
 }
+
+TEST(chart_constant_speed) {
+    // BPM 120 で始まり、小節 1 の頭で BPM 240 に変わる。小節 1・2 の頭にノーツ
+    Chart c = chart_of("#BPM 120\n#00103:F0\n#00111:01\n#00211:01\n");
+    CHECK_EQ(c.notes.size(), size_t(2));
+    if (c.notes.size() != 2) return;
+    // 普通は 1 小節 = 4 拍
+    CHECK(std::abs((c.notes[1].pos - c.notes[0].pos) - 4.0) < 1e-6);
+    c.make_constant_speed();
+    // 一定速度では、位置は時刻に比例する（BPM 150：1 秒 = 2.5 拍）
+    double dt_s = (c.notes[1].time_us - c.notes[0].time_us) / 1e6;
+    CHECK(std::abs((c.notes[1].pos - c.notes[0].pos) - dt_s * 2.5) < 1e-6);
+    CHECK(std::abs(c.notes[0].pos - 2.0 * 2.5) < 1e-6);  // 2 秒の位置
+    CHECK(std::abs(c.pos_at(c.notes[1].time_us) - c.notes[1].pos) < 1e-9);
+}

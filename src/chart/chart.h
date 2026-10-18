@@ -35,12 +35,16 @@ struct BgaEvent {
     uint16_t image = 0;
 };
 
-// 時刻→位置の区分線形テーブルの1区間。STOP中は speed=0。
+// 時刻→位置の区分線形テーブルの1区間。速さの変化は種類ごとに持つ（仕様書6章「ソフランの種類」）：
+// BPM の変化は bpm、スクロール速度の変化（BMS の #SCROLL、osu の SV）は scroll、停止は stop。
+// speed はそれらを合わせた結果（BPM × scroll。停止中は 0）
 struct ScrollSeg {
     int64_t time_us = 0;
     double pos = 0.0;
-    double speed = 0.0;  // 拍/マイクロ秒
-    double bpm = 0.0;    // 表示用（STOP中も直前のBPM）
+    double speed = 0.0;   // 拍/マイクロ秒
+    double bpm = 0.0;     // 表示用（STOP中も直前のBPM）
+    double scroll = 1.0;  // スクロール速度の倍率
+    bool stop = false;
 };
 
 struct BarLine {
@@ -81,6 +85,9 @@ struct Chart {
     double bpm_at(int64_t time_us) const;
     // 判定対象のノーツ数（LNモードLN：LN1本＝1）
     int judgeable_notes() const;
+    // 一定速度にする（HS-FIX の CONSTANT）。BPM とスクロール速度の変化を無視し、BPM 150 の速さで流す。停止では止まる。
+    // ノーツと小節線の位置も付け直す
+    void make_constant_speed();
 };
 
 }  // namespace bmj

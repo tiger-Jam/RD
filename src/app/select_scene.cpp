@@ -190,9 +190,8 @@ bool play_option_keys(AppConfig& cfg, const InputMapper& input, const std::vecto
     if (pressed[5] && !down(7) && !down(6)) loop(cfg.hs_min, cfg.hs_max, -cfg.hs_margin, cfg.hi_speed), changed = true;
     if (pressed[7] && !down(5) && !down(6)) loop(cfg.hs_min, cfg.hs_max, cfg.hs_margin, cfg.hi_speed), changed = true;
     if ((pressed[5] && held(7)) || (pressed[7] && held(5))) {
-        // HS-FIX。CONSTANT（4）は未対応なので飛ばす。5 の MAIN BPM は OpenLR2 の拡張
+        // HS-FIX。5 の MAIN BPM は OpenLR2 の拡張
         loop(0, 5, 1, cfg.hs_fix);
-        if (cfg.hs_fix == 4) cfg.hs_fix = 5;
         changed = true;
     }
     if (pressed[3]) changed = true;  // BATTLE（未対応。LR2 と同じく音だけ鳴る）
@@ -934,7 +933,6 @@ void run_select(App& app) {
                     else if (ty == 50) loop(app.cfg.effect, 0, 3);
                     else if (ty == 55) {
                         loop(app.cfg.hs_fix, 0, 5);
-                        if (app.cfg.hs_fix == 4) app.cfg.hs_fix = dir > 0 ? 5 : 3;  // CONSTANT は未対応
                     } else if (ty == 57) {
                         app.cfg.hi_speed = std::clamp(app.cfg.hi_speed + dir * app.cfg.hs_margin, app.cfg.hs_min, app.cfg.hs_max);
                         app.mixer.play_system(kSysOptionChange);

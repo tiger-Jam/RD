@@ -120,11 +120,22 @@ void print_result(const Chart& chart, const JudgeEngine& j) {
 
 }  // namespace
 
+// 譜面の BPM の幅（LR2 の minBPM / maxBPM）。譜面の頭の #BPM から始めて、ノーツのある BPM で広げる
+static void note_bpm_range(const Chart& chart, double& lo, double& hi) {
+    lo = hi = chart.initial_bpm;
+    for (const Note& n : chart.notes) {
+        if (n.kind == NoteKind::Invisible || n.kind == NoteKind::Mine) continue;
+        double bpm = chart.bpm_at(n.time_us);
+        lo = std::min(lo, bpm), hi = std::max(hi, bpm);
+    }
+}
+
 // ハイスピード固定（LR2: bmsload:3314）。ノーツのある BPM を基準に、BPM 150 と同じ速さに見えるように掛ける
 double hs_fix_multiplier(const Chart& chart, int hs_fix) {
     if (hs_fix == 0) return 1.0;
     std::map<double, int> per_bpm;
-    double sum = 0, max_bpm = 0, min_bpm = 1e18;
+    double sum = 0, max_bpm, min_bpm;
+    note_bpm_range(chart, min_bpm, max_bpm);
     int count = 0;
     for (const Note& n : chart.notes) {
         if (n.kind == NoteKind::Invisible || n.kind == NoteKind::Mine) continue;
@@ -132,8 +143,6 @@ double hs_fix_multiplier(const Chart& chart, int hs_fix) {
         per_bpm[bpm]++;
         sum += bpm;
         count++;
-        max_bpm = std::max(max_bpm, bpm);
-        min_bpm = std::min(min_bpm, bpm);
     }
     if (count == 0) return 1.0;
     switch (hs_fix) {
@@ -165,6 +174,16 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     apply_random_option(parsed.chart, cfg.random, parsed.rng);
     // CONVERGE のときは皿の自動演奏を切る（LR2: bmsload:2102）
     const bool assist = cfg.assist && cfg.random != kConverge;
+    // HS-FIX の CONSTANT：一定の速さで流す。LR2 と同じく、スコアは残さず、BPM が変わる譜面のクリアは EASY 扱い
+    const bool constant = cfg.hs_fix == 4;
+    bool constant_easy = false;
+    if (constant) {
+        double lo, hi;
+        note_bpm_range(parsed.chart, lo, hi);
+        constant_easy = hi != lo;
+        parsed.chart.make_constant_speed();
+        opt.save_score = false;
+    }
     const Chart& chart = parsed.chart;
     const double speed_multiplier = hs_fix_multiplier(chart, cfg.hs_fix);
     // スコアは譜面ファイルの原本のSHA-256で記録する（仕様書8章）
@@ -356,6 +375,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             }
             ctx.result_clear = (quit_early || judge.failed()) ? 1 : judge.clear();
             // SCATTER と皿の自動演奏は EASY 止まり。フルコンボは、自動演奏でなく SCATTER でない（か BPM が一定の）ときだけ残す（LR2: statplay.cpp:780）
+            if (constant_easy && ctx.result_clear > 2 && ctx.result_clear < 5) ctx.result_clear = 2;
             if (forces_easy(cfg.random, assist) && ctx.result_clear > 2) {
                 // BPM が一定か（LR2 はノーツのある BPM の最小と最大で見る）
                 double lo = 1e18, hi = 0;

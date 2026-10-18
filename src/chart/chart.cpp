@@ -23,6 +23,22 @@ double Chart::bpm_at(int64_t time_us) const {
     return s ? s->bpm : initial_bpm;
 }
 
+void Chart::make_constant_speed() {
+    constexpr double kSpeed = 150.0 / 60e6;  // BPM 150 の拍/マイクロ秒
+    double pos = 0;
+    for (size_t i = 0; i < scroll.size(); ++i) {
+        ScrollSeg& s = scroll[i];
+        if (i > 0) pos += scroll[i - 1].speed * static_cast<double>(s.time_us - scroll[i - 1].time_us);
+        s.pos = pos;
+        s.speed = s.stop || s.speed == 0 ? 0.0 : kSpeed;
+    }
+    for (Note& n : notes) {
+        n.pos = pos_at(n.time_us);
+        if (n.end_us >= 0) n.end_pos = pos_at(n.end_us);
+    }
+    for (BarLine& b : bars) b.pos = pos_at(b.time_us);
+}
+
 int Chart::judgeable_notes() const {
     int n = 0;
     for (const Note& note : notes)
