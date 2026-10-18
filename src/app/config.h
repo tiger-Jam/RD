@@ -53,6 +53,7 @@ struct AppConfig {
     int levelbar_5 = 9, levelbar_7 = 12, levelbar_9 = 42;  // レベルバー最大値（LR2: levelbarflash_*）
     // 選曲のスクロール（LR2: speedfirst / speednext。ms）
     int select_speed_first = 300, select_speed_next = 70;
+    bool preview = true;  // 選曲中に、カーソルの曲を頭から鳴らす（LR2: select.preview。既定は有り）
     // Windows で SDL の DirectInput を使うか。既定では使わず、コントローラーは Raw Input で直接読む
     // （DirectInput の機器の列挙に数十秒かかる環境があるため）
     bool joystick_directinput = false;

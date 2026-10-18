@@ -79,6 +79,13 @@ bool Mixer::device_position(double& played_sec, uint64_t& qpc_100ns) const {
 #endif
 }
 
+void Mixer::wait_callback() const {
+    int64_t f0 = rendered_frames_.load(std::memory_order_relaxed);
+    for (int i = 0; i < 200 && rendered_frames_.load(std::memory_order_relaxed) == f0; ++i) SDL_Delay(1);
+    int64_t f1 = rendered_frames_.load(std::memory_order_relaxed);
+    for (int i = 0; i < 200 && rendered_frames_.load(std::memory_order_relaxed) == f1; ++i) SDL_Delay(1);
+}
+
 bool Mixer::calibrate_latency() {
 #ifdef _WIN32
     LARGE_INTEGER qf;
@@ -269,7 +276,15 @@ void Mixer::render(float* out, uint32_t frames) {
         if (test_click_pos_ >= len) test_click_pos_ = -1;
     }
     rendered_frames_.fetch_add(frames, std::memory_order_relaxed);
-    // システム音
+    // システム音。くり返し鳴らすもの（選曲 BGM）は、プレビュー中に音量を下げる
+    const float loop_target = sys_loop_target_.load(std::memory_order_relaxed);
+    const float loop_step = sys_loop_step_.load(std::memory_order_relaxed);
+    const float loop_gain0 = sys_loop_gain_;
+    auto loop_gain_at = [&](uint32_t i) {
+        float d = loop_step * static_cast<float>(i + 1);
+        return loop_gain0 < loop_target ? std::min(loop_target, loop_gain0 + d) : std::max(loop_target, loop_gain0 - d);
+    };
+    sys_loop_gain_ = frames ? loop_gain_at(frames - 1) : loop_gain0;
     for (SysVoice& v : sys_voices_) {
         if (!v.sample) continue;
         const float* pcm = v.sample->pcm.data();
@@ -279,8 +294,9 @@ void Mixer::render(float* out, uint32_t frames) {
                 if (!v.loop) break;
                 v.pos = 0;
             }
-            out[i * 2] += pcm[v.pos * 2];
-            out[i * 2 + 1] += pcm[v.pos * 2 + 1];
+            float g = v.loop ? loop_gain_at(i) : 1.0f;
+            out[i * 2] += pcm[v.pos * 2] * g;
+            out[i * 2 + 1] += pcm[v.pos * 2 + 1] * g;
             ++v.pos;
         }
         if (!v.loop && v.pos >= len) v.sample = nullptr;

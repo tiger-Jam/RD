@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <future>
 #include <list>
 #include <fstream>
 #include <sstream>
@@ -15,6 +16,8 @@
 #include <unordered_map>
 
 #include "app/play_session.h"
+#include "audio/sound_bank.h"
+#include "chart/bms_parser.h"
 #include "app/select_context.h"
 #include "app/decide_scene.h"
 #include "app/skin_select_scene.h"
@@ -455,6 +458,26 @@ void run_select(App& app) {
     auto banner = std::make_shared<BannerLoad>();
     std::thread banner_thread;
     std::string banner_want;  // 今のカーソルの曲のバナー
+    // 曲のプレビュー（LR2: Songselect.cpp:2710）。カーソルを 500ms 置いた曲を裏で読み、曲の頭からオートで鳴らす。
+    // 鳴らしている間は選曲 BGM を 1 秒かけて小さくし、カーソルが別の曲に移ったら止めて戻す
+    struct Preview {
+        Chart chart;
+        SoundBank bank;
+        std::string path;
+    };
+    std::shared_ptr<Preview> preview;            // 鳴らしているもの
+    std::future<std::shared_ptr<Preview>> preview_load;
+    std::vector<std::future<std::shared_ptr<Preview>>> stale_loads;  // 要らなくなった読み込み（終わるのを待たずに手放す）
+    std::string preview_path;                    // 読んでいる・鳴らしている譜面（空なら何もしていない）
+    auto stop_preview = [&](bool restore_bgm) {
+        if (preview) {
+            app.mixer.stop();
+            app.mixer.wait_callback();
+            preview.reset();
+        }
+        preview_path.clear();
+        if (restore_bgm) app.mixer.fade_system_loop(1.0f, 1000);
+    };
     SDL_Texture* banner_tex = nullptr;
     auto banner_path_of = [](const ChartRecord& c) -> std::string {
         if (c.banner.empty()) return {};
@@ -531,6 +554,9 @@ void run_select(App& app) {
             PlayOptions po;
             po.autoplay = autoplay;
             std::string path = e->chart->path;
+            stop_preview(false);
+            if (preview_load.valid()) stale_loads.push_back(std::move(preview_load));
+            app.mixer.fade_system_loop(1.0f, 0);
             app.mixer.stop_system(kSysSelect);
             // 決定画面（スキンが無ければ出さない）
             {
@@ -1091,6 +1117,52 @@ void run_select(App& app) {
             std::printf("コントローラーの準備が終わった（%dms）\n", joystick_init().took_ms());
             joy_reported = true;
         }
+        // プレビュー
+        stale_loads.erase(std::remove_if(stale_loads.begin(), stale_loads.end(),
+                                         [](auto& f) { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }),
+                          stale_loads.end());
+        if (app.cfg.preview) {
+            const Entry* pe = current();
+            std::string want = pe && pe->kind == Entry::Kind::Chart ? pe->chart->path : "";
+            if (!preview_path.empty() && want != preview_path) stop_preview(true);
+            if (preview_load.valid() && preview_load.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                std::shared_ptr<Preview> p = preview_load.get();
+                if (p && p->path == preview_path) {
+                    app.mixer.stop();
+                    app.mixer.wait_callback();
+                    std::vector<ScheduledSound> schedule;
+                    uint32_t rate = app.mixer.sample_rate();
+                    auto frame_of = [&](int64_t us) { return us * static_cast<int64_t>(rate) / 1000000; };
+                    for (const BgmEvent& b : p->chart.bgm) schedule.push_back({frame_of(b.time_us), b.sound});
+                    for (const Note& n : p->chart.notes)
+                        if ((n.kind == NoteKind::Normal || n.kind == NoteKind::Long) && n.sound)
+                            schedule.push_back({frame_of(n.time_us), n.sound});
+                    preview = p;
+                    app.mixer.set_song(&preview->bank.samples(), std::move(schedule));
+                    app.mixer.start(0);
+                    app.mixer.fade_system_loop(0.025f, 1000);
+                    std::printf("プレビュー: %s\n", preview->chart.meta.title.c_str());
+                }
+            }
+            if (!want.empty() && preview_path.empty() && !preview_load.valid() && sctx.timers.lapse(11, t_ms) >= 500) {
+                preview_path = want;
+                uint32_t rate = app.mixer.sample_rate();
+                preview_load = std::async(std::launch::async, [want, rate]() -> std::shared_ptr<Preview> {
+                    BmsParseOptions popt;
+                    popt.random_seed = 1;
+                    BmsParseResult parsed = parse_bms_file(want, popt);
+                    if (!parsed.ok) return nullptr;
+                    auto p = std::make_shared<Preview>();
+                    p->path = want;
+                    p->chart = std::move(parsed.chart);
+                    std::vector<std::string> missing;
+                    std::vector<std::string> paths = resolve_chart_sounds(p->chart, missing);
+                    p->bank.load(paths, rate, static_cast<int>(std::max(2u, std::thread::hardware_concurrency() / 2)), nullptr);
+                    return p;
+                });
+            }
+        }
+
         // 描画
         if (sk) {
             const Level& lv = stack.back();
@@ -1400,6 +1472,10 @@ void run_select(App& app) {
         SDL_RenderPresent(r);
         SDL_DelayPrecise(4'000'000);
     }
+    stop_preview(false);
+    if (preview_load.valid()) preview_load.wait();
+    for (auto& f : stale_loads) f.wait();
+    app.mixer.fade_system_loop(1.0f, 0);
     app.mixer.stop_system(kSysSelect);
     if (banner_thread.joinable()) banner_thread.join();
     if (banner_tex) app.select_renderer->set_image_override(102, nullptr), SDL_DestroyTexture(banner_tex);

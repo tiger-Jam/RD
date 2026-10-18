@@ -32,7 +32,9 @@ namespace bmj {
 namespace {
 
 // キー音のファイル名を解決する（LR2: FindAltSound。書かれた名前→拡張子をogg/wavに替える→1つ上のフォルダ）
-std::vector<std::string> resolve_sounds(const Chart& chart, std::vector<std::string>& missing) {
+}  // namespace
+
+std::vector<std::string> resolve_chart_sounds(const Chart& chart, std::vector<std::string>& missing) {
     DirIndex dir(chart.base_dir);
     std::vector<std::string> paths(chart.wav.size());
     for (size_t i = 0; i < chart.wav.size(); ++i) {
@@ -50,6 +52,8 @@ std::vector<std::string> resolve_sounds(const Chart& chart, std::vector<std::str
     }
     return paths;
 }
+
+namespace {
 
 // BGAの画像のファイル名を解決する（LR2: FindAltImage。書かれた名前→png/jpg/bmp→1つ上のフォルダ）
 std::vector<std::string> resolve_images(const Chart& chart) {
@@ -205,7 +209,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
 
     // キー音はワーカーで読み込む。読み込み中もスキンの読み込み画面を動かす
     std::vector<std::string> missing;
-    std::vector<std::string> paths = resolve_sounds(chart, missing);
+    std::vector<std::string> paths = resolve_chart_sounds(chart, missing);
     for (const auto& m : missing) std::printf("キー音が見つからない: %s\n", m.c_str());
     int total_sounds = static_cast<int>(std::count_if(paths.begin(), paths.end(), [](auto& p) { return !p.empty(); }));
     // BGAの画像（動画はまだ対応していないので読まない）

@@ -53,6 +53,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "window_h") window_h = iv;
         else if (key == "db_update") db_update = iv;
         else if (key == "select_speed_first") select_speed_first = iv;
+        else if (key == "preview") preview = iv != 0;
         else if (key == "base_speed") base_speed = iv;
         else if (key == "poor_bga_ms") poor_bga_ms = iv;
         else if (key == "input_interval") input_interval = iv;
@@ -111,6 +112,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "window_h = " << window_h << "  # ウインドウサイズ。両方 1 以上なら解像度・拡大率より優先\n";
     f << "db_update = " << db_update << "  # 0=起動時に曲フォルダを読み直す 1=手動（選曲画面の F5）\n";
     f << "select_speed_first = " << select_speed_first << "\n";
+    f << "preview = " << (preview ? 1 : 0) << "  # 選曲中に曲を鳴らす\n";
     f << "base_speed = " << base_speed << "\n";
     f << "poor_bga_ms = " << poor_bga_ms << "\n";
     f << "input_interval = " << input_interval << "\n";

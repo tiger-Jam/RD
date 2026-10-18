@@ -60,6 +60,13 @@ public:
     void set_system_sounds(std::vector<Sample> sounds) { sys_samples_ = std::move(sounds); }
     void play_system(int id, bool loop = false) { push_command(kSysBase + id + (loop ? kSysLoop : 0)); }
     void stop_system(int id) { push_command(kSysBase + id + kSysStop); }
+    // くり返し鳴らしているシステム音（選曲 BGM）の音量を、ms かけて target にする（LR2: SetFadePreview）
+    void fade_system_loop(float target, int ms) {
+        sys_loop_target_.store(target);
+        sys_loop_step_.store(ms > 0 ? 1.0f / (ms * 0.001f * static_cast<float>(rate_)) : 1.0f);
+    }
+    // 音声のコールバックが少なくとも 1 回まわるまで待つ（stop() のあと、曲の音を差し替えてよくなるまで）
+    void wait_callback() const;
     // そのシステム音がサウンドセットにあるか（無いときは別の音で代わりに鳴らす）
     bool has_system(int id) const { return id >= 0 && id < static_cast<int>(sys_samples_.size()) && !sys_samples_[id].pcm.empty(); }
 
@@ -94,6 +101,8 @@ private:
     int64_t test_click_pos_ = -1;
     std::atomic<int64_t> rendered_frames_{0};  // これまでに書き出したフレームの数（音声スレッドだけが増やす）
     std::atomic<int64_t> click_frame_{-1};
+    std::atomic<float> sys_loop_target_{1.0f}, sys_loop_step_{1.0f};
+    float sys_loop_gain_ = 1.0f;  // 音声スレッドだけが触る
     bool exclusive_ = false;
     uint32_t period_frames_ = 0, periods_ = 0;
     std::vector<Sample> sys_samples_;

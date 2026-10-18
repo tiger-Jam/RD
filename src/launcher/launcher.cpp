@@ -614,8 +614,9 @@ int main(int, char**) {
             }
             bool has = table_sel >= 0 && table_sel < static_cast<int>(cfg.tables.size());
             if (g.button(X + 492, by - 1, 74, 22, "登録解除", has)) cfg.tables.erase(cfg.tables.begin() + table_sel), table_sel = -1;
+            g.check(X + 20, by + 30, "選曲中に曲のプレビューを鳴らす", cfg.preview);
 #ifdef _WIN32
-            g.check(X + 20, by + 30, "コントローラーを DirectInput でも探す(起動が遅くなることがあります)", cfg.joystick_directinput);
+            g.check(X + 280, by + 30, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
 #endif
         }
         g.combo_popup();
