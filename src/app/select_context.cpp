@@ -74,7 +74,8 @@ bool SelectContext::option(int op) const {
     case 32: return !autoplay;
     case 33: return autoplay;
     case 34: return true;   // ゴースト OFF
-    case 38: return true;   // スコアグラフ OFF
+    case 39: return true;   // スコアグラフ ON（プレイでは描いている）
+    case 80: return true;   // 選曲ではタイマー40 が立たないので「読み込み中」が真（LR2 と同じ）
     case 41: return true;   // BGA ON
     case 46: return true;   // 難易度フィルタ有効
     case 50: return true;   // オフライン
@@ -199,7 +200,7 @@ std::string SelectContext::text(int id) const {
     case 68: return opt("ASSIST", 0);
     case 69: return opt("BATTLE", 0);
     case 70: return opt("FLIP", 0);
-    case 71: return opt("SCOREGRAPH", 0);
+    case 71: return opt("SCOREGRAPH", 1);
     case 72: return opt("GHOST", 0);
     case 73: return opt("LANECOVER", cfg->lane_cover ? 1 : 0);
     case 74: return cfg->hs_fix == 5 ? "MAINBPM" : opt("HSFIX", cfg->hs_fix);
@@ -235,6 +236,7 @@ int SelectContext::button(int t) const {
     case 50: case 51: return cfg->effect;
     case 55: return cfg->hs_fix;
     case 57: case 58: return 1;
+    case 70: return 1;  // スコアグラフ ON
     case 72: return 1;  // BGA ON
     case 76: return 90;
     case 80: return windowed ? 1 : 0;

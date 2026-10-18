@@ -144,6 +144,7 @@ struct Lr2Skin {
     int startinput = 0, loadstart = 0, loadend = 0, playstart = 2000, fadeout = 0, close = 0;
     int startinput_rank = 0, startinput_update = 0;  // リザルト画面：ランク表示・更新表示のあと、次の入力を受けるまで
     int scratch_side[2] = {0, 0};
+    bool flip_result = false, disable_flip = false;  // #FLIPRESULT / #DISABLEFLIP
 
     std::array<bool, 1000> op{};  // スキン読み込み時点のオプション（#IF の判定に使う。900-999 はカスタム）
     std::vector<std::string> warnings;

@@ -29,8 +29,15 @@ bool PlayContext::option(int option) const {
     case 46: return ret;
     case 47: return !ret;
     case 50: return ret;              // オフライン
-    case 80: return timers.on(40) ? !ret : ret;  // 読み込み中
-    case 81: return timers.on(40) ? ret : !ret;
+    case 80: return in_result || !timers.on(40) ? ret : !ret;  // 読み込み中（リザルトではタイマー40が立たないので真）
+    case 81: return !in_result && timers.on(40) ? ret : !ret;
+    case 54: return assist ? !ret : ret;  // 皿の自動演奏 OFF / ON
+    case 55: return assist ? ret : !ret;
+    case 308: return st && st->exscore() == 0 ? ret : !ret;  // このプレイの EX スコアが 0
+    case 318: return ret;  // 2P 側（ターゲット無し）は 0
+    case 350: return result_flip ? !ret : ret;  // リザルトのフリップ無効 / 有効
+    case 351: return result_flip ? ret : !ret;
+    case 622: return ret;  // ゴーストバトルではない
     case 82: return ret;              // リプレイ無し
     case 90: return result_clear >= 2 ? ret : !ret;  // クリア
     case 91: return result_clear < 2 ? ret : !ret;   // 失敗
@@ -76,12 +83,14 @@ bool PlayContext::option(int option) const {
         return best_clear == option - 100 ? ret : !ret;  // この譜面の自己ベストのランプ
     case 150: case 151: case 152: case 153: case 154: case 155:
         return chart && chart->meta.difficulty == option - 150 ? ret : !ret;  // 譜面の #DIFFICULTY
-    case 194: return chart && chart->meta.backbmp.empty() ? ret : !ret;
-    case 195: return chart && !chart->meta.backbmp.empty() ? ret : !ret;
+    case 190: return has_stagefile ? !ret : ret;
+    case 191: return has_stagefile ? ret : !ret;
+    case 194: return has_backbmp ? !ret : ret;
+    case 195: return has_backbmp ? ret : !ret;
     // 対戦・ゴーストバトル・コース・レーンカバーの調整中は、単曲プレイでは偽
     case 270: return cover_adjusting && lane_cover_on ? ret : !ret;
     case 10: case 11: case 12: case 13: case 271: case 280: case 281: case 282: case 283: case 284:
-    case 289: case 290: case 291: case 622: case 623:
+    case 289: case 290: case 291: case 623:
         return !ret;
     case 83: case 84: return !ret;
     case 160: return ret;             // 7KEYS
@@ -149,22 +158,24 @@ int PlayContext::number(int id) const {
     double p2_rate = n > 0 ? p2_ex * 100 / static_cast<double>(n * 2) : 0;
     switch (id) {
     case 45: case 46: case 47: case 48: case 49:
-        // 同じ曲の難易度ごとのレベル。曲の一覧がまだ無いので、この譜面の難易度のところだけ
-        return chart->meta.difficulty == id - 44 ? chart->meta.playlevel : 0;
+        // 同じフォルダの難易度ごとのレベル（無ければ -1）
+        return diff_level[id - 45];
     case 90: case 290: case 91: case 291: {
         double lo = 1e9, hi = 0;
         for (const ScrollSeg& s : chart->scroll) lo = std::min(lo, s.bpm), hi = std::max(hi, s.bpm);
         int v = static_cast<int>(id == 90 || id == 290 ? hi : lo);
         return v ? v : -1;
     }
-    case 100: return score_of(st.judge_count[kGood], st.judge_count[kGreat], st.judge_count[kPGreat]);
+    case 100:
+        if (score_print >= 0) return static_cast<int>(score_print);
+        return score_of(st.judge_count[kGood], st.judge_count[kGreat], st.judge_count[kPGreat]);
     case 101: return st.exscore();
     case 102: return static_cast<int>(rate);
     case 103: return static_cast<int>(rate * 100.0) % 100;
     case 104: return st.combo;
     case 105: return st.max_combo;
     case 106: return n;
-    case 107: return static_cast<int>(judge->gauge().hp(judge->gauge_type())) / 2 * 2;
+    case 107: return static_cast<int>(hp_print >= 0 ? hp_print : judge->gauge().hp(judge->gauge_type())) / 2 * 2;
     case 108: return st.exscore() - p2_ex;
     case 109: case 154: return rank_diff(st.exscore());
     case 110: return st.judge_count[kPGreat];
@@ -302,7 +313,7 @@ int PlayContext::button(int type) const {
     switch (type) {
     case 40: return judge ? judge->gauge_type() : gauge_type;  // ゲージの種類
     case 20: return 0;  // エフェクトの種類（エフェクト無し）
-    case 55: return 0;  // ハイスピ固定の種類（OFF）
+    case 55: return hs_fix;  // ハイスピ固定の種類
     default: return 0;
     }
 }

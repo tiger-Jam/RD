@@ -27,6 +27,14 @@ struct PlayContext {
     int lane_cover = 0;          // レーンカバーの量（0〜100）
     bool lane_cover_on = false;  // レーンカバーを使っていて、いま出している
     bool cover_adjusting = false;  // START か SELECT を押している（スキンの270：カバーの調整中）
+    bool in_result = false;      // リザルト画面を描いている（タイマー40 は立たないので op80 が真）
+    bool result_flip = false;    // リザルトで 1P と 2P を入れ替える（#FLIPRESULT。入れ替えは未実装なので今は常に偽）
+    bool assist = false;         // 皿の自動演奏（op54/55）
+    bool has_stagefile = false, has_backbmp = false;  // 画像を読めたか（op 190/191・194/195）
+    // 表示用に補間した値（LR2: score_print / HP_print）。負なら補間せず実値を使う（リザルトなど）
+    double score_print = -1, hp_print = -1;
+    int hs_fix = 0;              // ハイスピード固定（ボタン55）
+    std::array<int, 5> diff_level{-1, -1, -1, -1, -1};  // 同じフォルダの難易度ごとのレベル（数値45〜49）
     int fps = 0;
     int loaded = 0, load_total = 1;
     int judge_draw = 0;

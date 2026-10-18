@@ -1,6 +1,7 @@
 #include "app/play_session.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <map>
 #include <atomic>
 #include <cctype>
@@ -162,6 +163,23 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     PlayContext ctx;
     ctx.chart = &chart;
     ctx.autoplay = opt.autoplay;
+    ctx.assist = assist;
+    ctx.hs_fix = cfg.hs_fix;
+    {
+        // 同じフォルダの、難易度ごとの譜面のレベル（数値45〜49）
+        // 曲データベースのパスは絶対パスなので、合わせてから比べる
+        std::error_code ec;
+        std::filesystem::path abs = std::filesystem::absolute(chart_path, ec).lexically_normal();
+        std::string folder = abs.parent_path().string();
+        for (const ChartRecord& c : app.db.all_charts()) {
+            if (c.folder != folder || c.difficulty < 1 || c.difficulty > 5) continue;
+            int& lv = ctx.diff_level[c.difficulty - 1];
+            if (lv < 0 || c.path == abs.string()) lv = c.playlevel;
+        }
+        // 曲データベースに無い譜面でも、自分の難易度のところには自分のレベルを入れる
+        int d = chart.meta.difficulty;
+        if (d >= 1 && d <= 5) ctx.diff_level[d - 1] = chart.meta.playlevel;
+    }
     ctx.gauge_type = cfg.gauge;
     app.load_play_skin(ctx.load_options());
     Lr2Skin* skin = app.play_skin.get();
@@ -182,6 +200,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         if (!p.empty()) total_images++;
     }
     std::vector<SkinImage> bga_images(bga_paths.size());
+    // 譜面に書かれた STAGEFILE / BACKBMP（スキンの特別な画像 100 / 101）
+    std::string stage_path, back_path;
+    {
+        DirIndex dir(chart.base_dir);
+        if (!chart.meta.stagefile.empty()) stage_path = dir.resolve(chart.meta.stagefile, {".png", ".jpg", ".bmp"});
+        if (!chart.meta.backbmp.empty()) back_path = dir.resolve(chart.meta.backbmp, {".png", ".jpg", ".bmp"});
+    }
+    SkinImage stage_image, back_image;
     SoundBank bank;
     std::vector<std::string> load_errors;
     std::atomic<bool> loaded{false};
@@ -196,11 +222,15 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             load_skin_image(bga_paths[i], bga_images[i], black, true);
             load_done.fetch_add(1);
         }
+        if (!stage_path.empty()) load_skin_image(stage_path, stage_image, black, false);
+        if (!back_path.empty()) load_skin_image(back_path, back_image, black, false);
         loaded = true;
     });
     bool loader_joined = false;
     ctx.load_total = std::max(1, total_sounds + total_images);
     std::vector<SDL_Texture*> bga_textures;
+    SDL_Texture* stage_tex = nullptr;
+    SDL_Texture* back_tex = nullptr;
 
     // 描画の間隔。垂直同期を使わないときは、描画を待つ間も入力と判定を回す（OpenLR2のフレームリミッタと同じ考え方）
     double fps = cfg.fps == 0 ? app.refresh_hz : cfg.fps;
@@ -301,8 +331,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             // クリア・失敗の音（LR2: ProcS_Result）
             mixer.play_system(ctx.result_clear < 2 ? kSysFail : kSysClear);
             // リザルトスキンは、結果が決まってから読む（#IF でクリア・失敗などを見るスキンがあるため）
+            ctx.in_result = true;
             app.load_result_skin(ctx.load_options());
             rskin = app.result_skin.get();
+            // リザルトのスキンのカスタマイズ（op 900〜）は、リザルトのスキンの値を見る
+            if (rskin) ctx.skin = rskin;
             rtimers = SkinTimers();
             rtimers.set(0, 0);
             result_start_ns = SDL_GetTicksNS();
@@ -325,12 +358,36 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 chart_op4 = static_cast<int>(t);  // グラフを最後まで描く
             } else if (rtimers.lapse(151, t) <= rskin->startinput_rank || rtimers.on(152)) {
                 if (rtimers.lapse(152, t) > rskin->startinput_update && !rtimers.on(2)) rtimers.set(2, t);
+            } else if (!opt.save_score || opt.autoplay) {
+                // 記録しないプレイ（オートなど）は、更新の表示を飛ばしてフェードアウトへ（LR2 と同じ）
+                if (!rtimers.on(2)) rtimers.set(2, t);
             } else {
                 rtimers.set(152, t);
             }
         };
         ctx.timers.set(0, 0);
 
+        // 途中でやめるとき：タイマー2 を立てて、#FADEOUT のあいだ暗転してからリザルトへ（LR2 と同じ）
+        bool fade_quit = false;
+        // スコアとゲージの表示の補間（LR2: Play.cpp:1328）。スコアは 500ms、ゲージは変化 1% あたり 10ms かけて新しい値へ
+        struct Tween {
+            double from = 0, to = -1, t0 = 0, t1 = 0;
+            double at(double t) const {
+                if (to < 0) return 0;
+                if (t >= t1 || t1 <= t0) return to;
+                return from + (to - from) * (t - t0) / (t1 - t0);
+            }
+            void aim(double target, double t, double dur) {
+                if (target == to) return;
+                from = to < 0 ? target : at(t);
+                to = target, t0 = t, t1 = t + dur;
+            }
+        } score_tw, hp_tw;
+        auto quit_with_fade = [&] {
+            fade_quit = judge.stats().note_current < judge.stats().total_notes;
+            phase = Phase::Fadeout;
+            ctx.timers.set(2, (SDL_GetTicksNS() - scene_start) / 1e6);
+        };
         // 演奏中の START / SELECT の操作（LR2: gameloop:163-327, 384-400）
         auto play_buttons = [&](double now_ms) {
             bool held_start = input.button_held(kStart), held_select = input.button_held(kSelect);
@@ -378,7 +435,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     if (e.key.repeat) break;
                     if (e.key.key == SDLK_ESCAPE) {
                         if (phase == Phase::Result) result_input();
-                        else enter_result(judge.stats().note_current < judge.stats().total_notes);
+                        else if (phase == Phase::Play) quit_with_fade();
+                        else if (phase != Phase::Fadeout) enter_result(judge.stats().note_current < judge.stats().total_notes);
                     } else if (e.key.key == SDLK_RETURN && phase == Phase::Result) {
                         result_input();
                     } else if (e.key.key == SDLK_F5 && phase == Phase::Result) {
@@ -434,6 +492,19 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             double dt_ms = (now_ns - prev_ns) / 1e6;
             prev_ns = now_ns;
             ctx.now_ms = now_ms;
+            if (phase != Phase::Result) {
+                const PlayStats& ps0 = judge.stats();
+                double score = ps0.total_notes > 0
+                                   ? (ps0.judge_count[kGood] + (ps0.judge_count[kGreat] + ps0.judge_count[kPGreat] * 2) * 2) * 50000.0 / ps0.total_notes
+                                   : 0;
+                score_tw.aim(static_cast<int>(score), now_ms, 500);
+                double hp = judge.gauge().hp(judge.gauge_type());
+                hp_tw.aim(hp, now_ms, std::abs(hp_tw.at(now_ms) - hp) * 10);
+                ctx.score_print = score_tw.at(now_ms);
+                ctx.hp_print = hp_tw.at(now_ms);
+            } else {
+                ctx.score_print = ctx.hp_print = -1;
+            }
             ctx.hi_speed = cfg.hi_speed;
             ctx.judge_timing = cfg.judge_timing;
             ctx.lane_cover = cfg.lane_cover_v;
@@ -448,6 +519,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 for (size_t i = 0; i < bga_images.size(); ++i)
                     if (!bga_images[i].rgba.empty()) bga_textures[i] = app.skin_renderer->create_texture(bga_images[i]);
                 bga_images.clear();
+                if (!stage_image.rgba.empty()) stage_tex = app.skin_renderer->create_texture(stage_image);
+                if (!back_image.rgba.empty()) back_tex = app.skin_renderer->create_texture(back_image);
+                ctx.has_stagefile = stage_tex != nullptr;
+                ctx.has_backbmp = back_tex != nullptr;
+                for (SkinRenderer* sr : {app.skin_renderer.get(), app.result_renderer.get()}) {
+                    sr->set_image_override(100, stage_tex);
+                    sr->set_image_override(101, back_tex);
+                }
             }
 
             // 場面の進行（LR2: Scene04_Play.cpp:1748-1768）
@@ -571,6 +650,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 if (!fc_set && ps.total_notes > 0 && ps.combo == ps.total_notes) ctx.timers.set(48, now_ms), fc_set = true;
                 // ゲージのタイマー（LR2: ApplyJudgeNote の 42/44）
                 int hp = static_cast<int>(judge.gauge().hp(judge.gauge_type())) / 2 * 2;
+                // 初期値が 100% のゲージ（HARD 系）は、曲が始まった時点で MAX（LR2: タイマー41 と同時に 44）
+                if (old_hp < 0 && hp == 100) ctx.timers.set(44, now_ms);
                 if (old_hp >= 0 && hp != old_hp) {
                     if (old_hp <= 0) hp = 0, ctx.timers.reset(44);
                     else if (hp != 100) ctx.timers.reset(44);
@@ -593,8 +674,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     ctx.timers.set(2, now_ms);
                 }
             }
+            // START と SELECT を同時に押してもやめる（LR2 と同じ）
+            if (phase == Phase::Play && input.button_held(kStart) && input.button_held(kSelect)) quit_with_fade();
             if (phase == Phase::Fadeout && ctx.timers.lapse(2, now_ms) >= (skin ? skin->fadeout : 0)) {
-                enter_result(false);
+                enter_result(fade_quit);
             } else if (phase == Phase::Failed && ctx.timers.lapse(3, now_ms) >= (skin ? skin->close : 2050)) {
                 enter_result(false);
             }
@@ -694,7 +777,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.autoplay = opt.autoplay;
                 st.judge_draw = ctx.judge_draw;
                 st.combo_draw = judge.stats().combo;
-                st.gauge_hp = judge.gauge().hp(judge.gauge_type());
+                st.gauge_hp = ctx.hp_print >= 0 ? ctx.hp_print : judge.gauge().hp(judge.gauge_type());
                 st.gauge_survival = !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
                 st.scratch_angle = scratch_angle;
                 st.bga = &bga_textures;
@@ -746,6 +829,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     if (!loader_joined) loader.join();
     for (SDL_Texture* t : bga_textures)
         if (t) SDL_DestroyTexture(t);
+    for (SkinRenderer* sr : {app.skin_renderer.get(), app.result_renderer.get()})
+        sr->set_image_override(100, nullptr), sr->set_image_override(101, nullptr);
+    if (stage_tex) SDL_DestroyTexture(stage_tex);
+    if (back_tex) SDL_DestroyTexture(back_tex);
     return exit;
 }
 

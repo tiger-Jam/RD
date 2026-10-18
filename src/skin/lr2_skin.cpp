@@ -348,6 +348,10 @@ struct Loader {
             sk.fadeout = c.val(1);
         } else if (cmd == "#CLOSE" || cmd == "#SKIP") {
             sk.close = c.val(1);
+        } else if (cmd == "#FLIPRESULT") {
+            sk.flip_result = true;
+        } else if (cmd == "#DISABLEFLIP") {
+            sk.disable_flip = true;
         } else if (cmd == "#SCRATCHSIDE") {
             sk.scratch_side[0] = c.val(1);
             sk.scratch_side[1] = c.val(2);
