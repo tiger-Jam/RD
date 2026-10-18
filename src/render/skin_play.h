@@ -6,6 +6,7 @@
 #include <string>
 
 #include "chart/chart.h"
+#include "game/ghost.h"
 #include "game/judge.h"
 #include "skin/lr2_skin.h"
 #include "skin/skin_renderer.h"
@@ -28,6 +29,18 @@ struct PlayContext {
     int loaded = 0, load_total = 1;
     int judge_draw = 0;
     double last_miss_ms = -1e9;
+    // 自己ベストとターゲットのゴースト（LR2: highScore / targetScore）。2P側の表示はターゲットの種類で決まる
+    // （LR2の既定は target=0：2P側は更新しない、defaulttarget=90%）
+    Ghost best, target;
+    int target_type = 0;  // 0=更新しない, 1=自己ベスト, 2=ターゲット
+    int last_offset_ms = 0;
+    int last_fast_slow = 0;  // OpenLR2の拡張：0=PGREAT, 1=FAST, 2=SLOW
+    // 自分のノーツが1つ判定されたとき（空POORは除く）にゴーストを進める（LR2: JudgeToScore）
+    void on_judged() {
+        if (autoplay) return;
+        best.deal();
+        target.deal();
+    }
 
     bool option(int op) const;
     int number(int id) const;

@@ -12,6 +12,7 @@
 
 #include "audio/sound_bank.h"
 #include "chart/bms_parser.h"
+#include "game/ghost.h"
 #include "game/judge.h"
 #include "input/input.h"
 #include "render/play_scene.h"
@@ -156,6 +157,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.song_ms = -1;
         ctx.judge_draw = 0;
         ctx.last_miss_ms = -1e9;
+        // LR2の既定：自己ベストはまだ無く、ターゲットは90%のゴースト（Scene04_Play.cpp:1997）
+        ctx.best = Ghost{};
+        ctx.target.set_default(90, judge.stats().total_notes);
+        ctx.target_type = 0;
 
         InputMapper input(app.keycfg);
         PlayViewState view;
@@ -286,6 +291,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         if (j >= kGood) ctx.timers.set(70 + je.lane, at);
                     } else {
                         if (j >= kGreat) ctx.timers.set(50 + je.lane, at);  // ボム
+                        if (j >= kPoor) ctx.on_judged();
+                        // OpenLR2の拡張：直前の FAST/SLOW とずれ（ms）
+                        if (j == kPGreat) ctx.last_fast_slow = 0;
+                        else if (j == kEmptyPoor) ctx.last_fast_slow = 1;
+                        else if (je.has_offset) ctx.last_fast_slow = je.fast ? 1 : 2;
+                        else ctx.last_fast_slow = 2;
+                        if (je.has_offset) ctx.last_offset_ms = je.offset_ms;
                         if (j < kGood) ctx.last_miss_ms = at, last_miss_ms = at;
                         ctx.judge_draw = j;
                         ctx.timers.set(46, at);

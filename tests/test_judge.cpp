@@ -163,3 +163,24 @@ TEST(judge_deterministic) {
     };
     CHECK_EQ(run(), run());
 }
+
+#include "game/ghost.h"
+
+TEST(ghost_default_target_matches_lr2) {
+    // LR2: SetDefaultGhost(90, 100) → PG 80 / GR 20。DealJudgeFromQueue は1回目では数えない
+    Ghost g;
+    g.set_default(90, 100);
+    g.deal();
+    CHECK_EQ(g.exscore(), 0);
+    g.deal();  // (2 × 80) / 100 = 1、(2 × 20) / 100 = 0
+    CHECK_EQ(g.exscore(), 2);
+    for (int i = 0; i < 98; ++i) g.deal();
+    CHECK_EQ(g.exscore(), 180);  // 100ノーツ目で 80×2 + 20
+    Ghost aaa;
+    aaa.set_default(88, 9);  // AAA：PG 7 / GR 2
+    for (int i = 0; i < 9; ++i) aaa.deal();
+    CHECK_EQ(aaa.exscore(), 16);
+    Ghost none;  // 自己ベストが無いとき
+    none.deal();
+    CHECK_EQ(none.exscore(), 0);
+}

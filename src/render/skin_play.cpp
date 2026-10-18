@@ -1,5 +1,6 @@
 #include "render/skin_play.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace bmj {
@@ -67,49 +68,100 @@ bool PlayContext::option(int option) const {
     }
 }
 
+// LR2: SetObjectValue_Num（skinobject:1643）。知らない番号は -1、知っている番号で値が無いものは 0
 int PlayContext::number(int id) const {
-    const PlayStats* st = judge ? &judge->stats() : nullptr;
     switch (id) {
-    case 10: return hi_speed;
+    case 10: case 11: return hi_speed;
     case 12: return judge_timing;
-    case 14: return lane_cover;
+    case 13: return 90;  // defaulttarget
+    case 14: case 15: return lane_cover;
     case 20: return fps;
     default: break;
     }
-    if (!st) return -1;
+    if (!judge || !chart) return id >= 100 && id < 300 ? 0 : -1;
+    const PlayStats& st = judge->stats();
+    int n = st.total_notes;
+    // 2P側（通常のプレイではターゲットのゴースト）
+    const Ghost* p2g = target_type == 1 ? &best : target_type == 2 ? &target : nullptr;
+    int p2_ex = p2g ? p2g->exscore() : 0;
+    auto p2_judge = [&](int j) { return p2g ? p2g->judge(j) : 0; };
+    auto score_of = [&](int gd, int gr, int pg) {
+        return n > 0 ? static_cast<int>((gd + (gr + pg * 2) * 2) * 50000ull / n) : 0;
+    };
+    auto rank_diff = [&](int ex) {
+        // 次のDJ LEVELまでの差（LR2: 109/154）
+        if (ex == n * 2 || n == 0) return 0;
+        int rank = std::clamp(ex * 9 / (n * 2), 1, 8);
+        return ex - (n * 2 * (rank + 1) / 9);
+    };
+    double rate = st.note_current > 0 ? st.exscore() * 100 / static_cast<double>(st.note_current * 2) : 0;
+    double p2_rate = n > 0 ? p2_ex * 100 / static_cast<double>(n * 2) : 0;
     switch (id) {
-    case 100: return st->total_notes > 0 ? static_cast<int>((st->judge_count[kGood] + (st->judge_count[kGreat] + st->judge_count[kPGreat] * 2) * 2) * 50000ull / st->total_notes) : 0;
-    case 101: return st->exscore();
-    case 102: return st->note_current > 0 ? st->exscore() * 100 / (st->note_current * 2) : 0;
-    case 103: return st->note_current > 0 ? static_cast<int>(st->exscore() * 100.0 / (st->note_current * 2) * 100.0) % 100 : 0;
-    case 104: return st->combo;
-    case 105: return st->max_combo;
-    case 106: return st->total_notes;
+    case 45: case 46: case 47: case 48: case 49:
+        // 同じ曲の難易度ごとのレベル。曲の一覧がまだ無いので、この譜面の難易度のところだけ
+        return chart->meta.difficulty == id - 44 ? chart->meta.playlevel : 0;
+    case 90: case 290: case 91: case 291: {
+        double lo = 1e9, hi = 0;
+        for (const ScrollSeg& s : chart->scroll) lo = std::min(lo, s.bpm), hi = std::max(hi, s.bpm);
+        int v = static_cast<int>(id == 90 || id == 290 ? hi : lo);
+        return v ? v : -1;
+    }
+    case 100: return score_of(st.judge_count[kGood], st.judge_count[kGreat], st.judge_count[kPGreat]);
+    case 101: return st.exscore();
+    case 102: return static_cast<int>(rate);
+    case 103: return static_cast<int>(rate * 100.0) % 100;
+    case 104: return st.combo;
+    case 105: return st.max_combo;
+    case 106: return n;
     case 107: return static_cast<int>(judge->gauge().hp(judge->gauge_type())) / 2 * 2;
-    case 110: return st->judge_count[kPGreat];
-    case 111: return st->judge_count[kGreat];
-    case 112: return st->judge_count[kGood];
-    case 113: return st->judge_count[kBad];
-    case 114: return st->judge_count[kPoor] + st->judge_count[kEmptyPoor];
-    case 115: return st->total_notes > 0 ? st->exscore() * 100 / (st->total_notes * 2) : -1;
-    case 116: return st->total_notes > 0 ? st->exscore() * 10000 / (st->total_notes * 2) % 100 : -1;
-    case 160: return chart ? static_cast<int>(chart->bpm_at(static_cast<int64_t>(std::max(0.0, song_ms) * 1000))) : -1;
+    case 108: return st.exscore() - p2_ex;
+    case 109: case 154: return rank_diff(st.exscore());
+    case 110: return st.judge_count[kPGreat];
+    case 111: return st.judge_count[kGreat];
+    case 112: return st.judge_count[kGood];
+    case 113: return st.judge_count[kBad];
+    case 114: return st.judge_count[kPoor] + st.judge_count[kEmptyPoor];
+    case 115: return n > 0 ? st.exscore() * 100 / (n * 2) : 0;
+    case 116: return n > 0 ? st.exscore() * 10000 / (n * 2) % 100 : 0;
+    case 120: return score_of(p2_judge(3), p2_judge(4), p2_judge(5));
+    case 121: return p2_ex;
+    case 122: return static_cast<int>(p2_rate);
+    case 123: return static_cast<int>(p2_rate * 100.0) % 100;
+    case 124: return p2g ? p2g->now_note() : 0;
+    case 125: return 0;
+    case 126: return n;
+    case 127: return 0;
+    case 128: return p2_ex - st.exscore();
+    case 129: return rank_diff(p2_ex);
+    case 130: case 131: case 132: case 133: return p2_judge(5 - (id - 130));
+    case 134: return p2_judge(0) + p2_judge(1);
+    case 135: return n > 0 ? p2_ex * 100 / (n * 2) : 0;
+    case 136: return n > 0 ? p2_ex * 10000 / (n * 2) % 100 : 0;
+    case 150: return best.exscore();
+    case 151: return target.exscore();
+    case 152: return st.exscore() - best.exscore();
+    case 153: return st.exscore() - target.exscore();
+    case 155: return n > 0 ? best.exscore() * 100 / (n * 2) : 0;
+    case 156: return n > 0 ? best.exscore() * 10000 / (n * 2) % 100 : 0;
+    case 157: return n > 0 ? target.exscore() * 100 / (n * 2) : 0;
+    case 158: return n > 0 ? target.exscore() * 10000 / (n * 2) % 100 : 0;
+    case 160: return static_cast<int>(chart->bpm_at(static_cast<int64_t>(std::max(0.0, song_ms) * 1000)));
     case 161: return song_ms / 1000 > 0 ? static_cast<int>(song_ms) / 1000 / 60 : 0;
     case 162: return song_ms / 1000 > 0 ? static_cast<int>(song_ms) / 1000 % 60 : 0;
     case 163: case 164: {
-        int rest = chart ? static_cast<int>(chart->end_us / 1000 - std::max(0.0, song_ms)) : 0;
+        int rest = static_cast<int>(chart->end_us / 1000 - std::max(0.0, song_ms));
         if (rest / 1000 <= 0) return 0;
         return id == 163 ? rest / 1000 / 60 : rest / 1000 % 60;
     }
     case 165: return load_total > 0 ? loaded * 100 / load_total : 0;
-    case 210: return st->fast;  // OpenLR2の拡張：FAST/SLOWの数
-    case 211: return st->slow;
-    case 290: case 291: {
-        if (!chart || chart->scroll.empty()) return -1;
-        double lo = 1e9, hi = 0;
-        for (const ScrollSeg& s : chart->scroll) lo = std::min(lo, s.bpm), hi = std::max(hi, s.bpm);
-        return static_cast<int>(id == 290 ? hi : lo);
-    }
+    // OpenLR2の拡張（FAST/SLOW）
+    case 201: return last_offset_ms;
+    case 210: return last_fast_slow;
+    case 212: return st.fast;
+    case 214: return st.slow;
+    case 216: return st.judge_count[kBad] + st.judge_count[kPoor];
+    case 217: return n;
+    case 218: return st.note_current;
     default: return -1;
     }
 }
@@ -136,6 +188,10 @@ bool PlayContext::bargraph(int type, double& val, double& max) const {
         val = static_cast<double>(st->exscore() * n / st->note_current);
         max = n * 2;
         return true;
+    case 12: val = best.exscore(); max = n * 2; return true;
+    case 13: val = 0; max = n * 2; return true;  // 自己ベストの最終スコア（スコアの保存がまだ無い）
+    case 14: val = target.exscore(); max = n * 2; return true;
+    case 15: val = target.total_notes() > 0 ? n * 2 * 0.9 : 0; max = n * 2; return true;
     case 20: val = st->judge_count[kPGreat]; max = n; return true;
     case 21: val = st->judge_count[kGreat]; max = n; return true;
     case 22: val = st->judge_count[kGood]; max = n; return true;
