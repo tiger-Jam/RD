@@ -695,6 +695,7 @@ void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
 }
 
 void SkinRenderer::flush(const Lr2Skin& skin) {
+    view_w_ = skin.width;
     std::stable_sort(items_.begin(), items_.end(), [](const Item& a, const Item& b) { return a.sort < b.sort; });
     for (Item& it : items_) {
         if (it.is_text) draw_text(skin, it);
@@ -749,7 +750,8 @@ void SkinRenderer::draw_image(Item& it) {
     }
     bool clipped = it.clip_top >= 0;
     if (clipped) {
-        SDL_Rect cr{0, static_cast<int>(it.clip_top), 1 << 16, static_cast<int>(it.clip_bottom - it.clip_top)};
+        // 幅はスキンの幅にする（大きすぎる値は Windows の Direct3D で効かないことがある）
+        SDL_Rect cr{0, static_cast<int>(it.clip_top), view_w_, static_cast<int>(it.clip_bottom - it.clip_top)};
         SDL_SetRenderClipRect(r_, &cr);
     }
     if (d.angle != 0.0f) {

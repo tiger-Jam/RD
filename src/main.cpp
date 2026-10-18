@@ -66,7 +66,7 @@ struct Options {
     std::vector<std::string> add_song_dirs, add_tables;
     std::string import_lr2;  // LR2のスコアデータベース
     std::vector<std::pair<int, int>> skin_opts;
-    int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000;
+    int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000, effect = -1;
     bool gas = false;
     bool latency_test = false, exclusive = false;  // 開発用：音の遅れを測る
     int buffer = 0;
@@ -105,6 +105,7 @@ bool parse_args(int argc, char** argv, Options& o) {
             if (eq == std::string::npos) return false;
             o.skin_opts.push_back({std::atoi(v.substr(0, eq).c_str()), std::atoi(v.substr(eq + 1).c_str())});
         } else if (a == "--hs") o.hi_speed = std::clamp(std::atoi(next()), 10, 900);
+        else if (a == "--effect") o.effect = std::clamp(std::atoi(next()), 0, 3);
         else if (a == "--seed") o.play.seed = static_cast<uint32_t>(std::strtoul(next(), nullptr, 10));
         else if (a == "--timing") o.timing = std::clamp(std::atoi(next()), -199, 199);
         else if (a == "--gauge") {
@@ -387,6 +388,7 @@ int main(int argc, char** argv) {
         if (opt.gauge >= 0) c.gauge = opt.gauge;
         if (opt.gas) c.gas = true;
         if (opt.hi_speed > 0) c.hi_speed = opt.hi_speed;
+        if (opt.effect >= 0) c.effect = opt.effect;
         if (opt.timing != 1000) c.judge_timing = opt.timing;
         if (opt.fps != -1000) c.fps = opt.fps;
         if (opt.vsync) c.vsync = true;

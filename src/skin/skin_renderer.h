@@ -137,6 +137,7 @@ private:
         float clip_top = -1, clip_bottom = -1;  // HIDDEN / SUDDEN：この縦の範囲だけを描く（-1 なら全部）
     };
     float clip_top_ = -1, clip_bottom_ = -1;  // add() で積む物に付ける範囲
+    int view_w_ = 640;                        // 描いているスキンの幅（クリップの幅に使う）
 
     SDL_Texture* image_tex(int gr) const;
     SDL_FRect frame_rect(const SkinSrc& src, int frame) const;
