@@ -13,6 +13,21 @@ cmake --build build
 ./build/bmj_tests
 ```
 
+## ビルド（Windows）
+
+Visual Studio 2022（C++ のデスクトップ開発）と CMake があればよい。SDL3 はビルドの中でソースを取ってきて一緒にビルドする。
+
+```
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config RelWithDebInfo
+build\RelWithDebInfo\bmj_tests.exe
+build\RelWithDebInfo\bmjoy.exe --lr2-root C:\path\to\LR2
+```
+
+- HTTP は Windows では WinHTTP を使う（libcurl は不要）
+- 日本語のファイル名を扱えるように、マニフェストでコードページを UTF-8 にしている（OpenLR2 と同じ）
+- 設定・スコアは `%APPDATA%\BMjoy` に保存される
+
 ## 遊ぶ
 
 ```
