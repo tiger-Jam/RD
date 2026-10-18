@@ -348,6 +348,10 @@ struct Loader {
             sk.fadeout = c.val(1);
         } else if (cmd == "#CLOSE" || cmd == "#SKIP") {
             sk.close = c.val(1);
+        } else if (cmd == "#SCENETIME") {
+            sk.scenetime = c.val(1);
+        } else if (cmd == "#IGNOREINPUT") {
+            sk.ignore_input = c.val(1);
         } else if (cmd == "#FLIPRESULT") {
             sk.flip_result = true;
         } else if (cmd == "#DISABLEFLIP") {

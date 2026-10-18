@@ -159,7 +159,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     Mixer& mixer = app.mixer;
 
     // 決定の音（LR2では決定画面で鳴る。BMjoyには決定画面が無いので、読み込みの間に鳴らす）
-    mixer.play_system(kSysDecide);
+    if (opt.decide_sound) mixer.play_system(kSysDecide);
     PlayContext ctx;
     ctx.chart = &chart;
     ctx.autoplay = opt.autoplay;

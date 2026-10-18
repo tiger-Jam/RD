@@ -111,8 +111,8 @@ bool SelectContext::option(int op) const {
     case 183: return song && chart->rank >= 3;
     case 185: return song && chart->playlevel <= cfg->levelbar_7;
     case 186: return song && chart->playlevel > cfg->levelbar_7;
-    case 190: return !(song && !chart->stagefile.empty());
-    case 191: return song && !chart->stagefile.empty();
+    case 190: return !has_stagefile;
+    case 191: return has_stagefile;
     case 192: return !has_banner;
     case 193: return has_banner;
     case 194: return !(song && !chart->backbmp.empty());

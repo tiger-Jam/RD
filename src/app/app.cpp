@@ -49,6 +49,7 @@ App::~App() {
     skin_renderer.reset();
     result_renderer.reset();
     select_renderer.reset();
+    decide_renderer.reset();
     mixer.close();
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
@@ -77,6 +78,7 @@ bool App::init(const char* argv0) {
     skin_renderer = std::make_unique<SkinRenderer>(renderer);
     result_renderer = std::make_unique<SkinRenderer>(renderer);
     select_renderer = std::make_unique<SkinRenderer>(renderer);
+    decide_renderer = std::make_unique<SkinRenderer>(renderer);
     set_view(640, 480);
     std::printf("音声デバイスを開いています\n");
     // 音の出力（LR2 SETUP の OUTPUT TYPE とバッファ数）。排他モードが使えなければ共有モードになる
@@ -184,6 +186,14 @@ void App::load_select_skin(const std::array<bool, 1000>& options) {
         return;
     }
     select_skin = load_skin(*this, cfg.select_skin, "LR2files/Theme/LR2/Select/select.lr2skin", options, *select_renderer);
+}
+
+void App::load_decide_skin(const std::array<bool, 1000>& options) {
+    if (cfg.decide_skin == "none") {
+        decide_skin.reset();
+        return;
+    }
+    decide_skin = load_skin(*this, cfg.decide_skin, "LR2files/Theme/LR2/Decide/decide.lr2skin", options, *decide_renderer);
 }
 
 void App::load_result_skin(const std::array<bool, 1000>& options) {

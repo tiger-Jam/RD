@@ -145,6 +145,8 @@ struct Lr2Skin {
     int startinput_rank = 0, startinput_update = 0;  // リザルト画面：ランク表示・更新表示のあと、次の入力を受けるまで
     int scratch_side[2] = {0, 0};
     bool flip_result = false, disable_flip = false;  // #FLIPRESULT / #DISABLEFLIP
+    int scenetime = 0;      // 決定画面：この時間が経ったらプレイへ（#SCENETIME）
+    int ignore_input = 0;   // 決定画面：この時間まで ESC 以外の入力を受けない（#IGNOREINPUT）
 
     std::array<bool, 1000> op{};  // スキン読み込み時点のオプション（#IF の判定に使う。900-999 はカスタム）
     std::vector<std::string> warnings;

@@ -15,6 +15,7 @@ struct PlayOptions {
     std::string capture_dir;  // 開発用：描画結果を2秒ごとにBMPで保存する
     double quit_after = 0;    // 開発用：指定秒数で終了する
     bool save_score = true;
+    bool decide_sound = true;  // 決定の音を鳴らす（決定画面を出したときは、そちらで鳴らしているので鳴らさない）
 };
 
 enum class PlayExit { Back, Quit };

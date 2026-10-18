@@ -16,6 +16,7 @@
 
 #include "app/play_session.h"
 #include "app/select_context.h"
+#include "app/decide_scene.h"
 #include "util/text.h"
 #include "audio/system_sound.h"
 #include "db/difficulty_table.h"
@@ -514,6 +515,21 @@ void run_select(App& app) {
             po.autoplay = autoplay;
             std::string path = e->chart->path;
             app.mixer.stop_system(kSysSelect);
+            // 決定画面（スキンが無ければ出さない）
+            {
+                SelectContext dc = sctx;
+                dc.chart = e->chart;
+                auto it = lib->scores.find(e->chart->sha256);
+                dc.score = it != lib->scores.end() ? &it->second : nullptr;
+                DecideResult dr = run_decide(app, dc);
+                if (dr != DecideResult::Play) {
+                    if (dr == DecideResult::Quit) quit = true;
+                    app.mixer.play_system(kSysSelect, true);
+                    set_select_view();
+                    return;
+                }
+                po.decide_sound = !app.decide_skin;
+            }
             SDL_ShowCursor();
             PlayExit ex = run_play(app, path, po);
             app.save_config();  // 演奏中に変えたハイスピードやカバーを残す
