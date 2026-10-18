@@ -282,3 +282,151 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
 }
 
 }  // namespace bmj
+
+#include "render/text_cache.h"
+
+namespace bmj {
+
+namespace {
+
+bool is_key(const Binding& b) { return b.type == Binding::Type::Key; }
+
+// 割り当てを入れ替える：同じ種類（キーボード／コントローラー）の割り当てを消してから足し、ほかのボタンからは外す
+void assign(KeyConfig& cfg, int button, const Binding& b) {
+    for (int i = 0; i < kButtonCount; ++i) {
+        auto& v = cfg.buttons[i];
+        v.erase(std::remove(v.begin(), v.end(), b), v.end());
+    }
+    auto& v = cfg.buttons[button];
+    v.erase(std::remove_if(v.begin(), v.end(), [&](const Binding& x) { return is_key(x) == is_key(b); }), v.end());
+    v.push_back(b);
+}
+
+}  // namespace
+
+bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const std::string& path) {
+    KeyConfig cfg = cfg_in;
+    // 手順：0..6 = 鍵盤1〜7、7 = 皿（回す）、8 = 皿の反対向き（ボタンやキーで皿を操作するときだけ）
+    int step = 0;
+    bool scratch_by_button = false;
+    std::array<int64_t, 16> travel{};
+    std::array<int16_t, 16> prev{};
+    std::array<bool, 16> seen{};
+    std::string last;
+    uint64_t step_start = SDL_GetTicksNS();
+    auto next_step = [&](int s) {
+        step = s;
+        travel.fill(0);
+        seen.fill(false);
+        step_start = SDL_GetTicksNS();
+    };
+    auto bind_digital = [&](const Binding& b) {
+        last = describe(b);
+        if (step <= 6) {
+            assign(cfg, kKey1 + step, b);
+            next_step(step + 1);
+        } else if (step == 7) {
+            // 皿をボタンやキーで操作する：1つ目の向き。アナログの皿の設定は切る
+            assign(cfg, kScratchA, b);
+            if (!is_key(b)) cfg.analog_axis = -1;
+            scratch_by_button = true;
+            next_step(8);
+        } else if (step == 8) {
+            assign(cfg, kScratchB, b);
+            next_step(9);
+        }
+    };
+
+    bool done = false, canceled = false;
+    while (!done && !canceled) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT) canceled = true;
+            if (e.type == SDL_EVENT_JOYSTICK_ADDED) SDL_OpenJoystick(e.jdevice.which);
+            // 手順が変わった直後の入力（前の手順で押したものの離し・揺れ）は少しの間無視する
+            bool settle = SDL_GetTicksNS() - step_start < 150'000'000ull;
+            if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
+                if (e.key.scancode == SDL_SCANCODE_ESCAPE) {
+                    canceled = true;
+                } else if (e.key.scancode == SDL_SCANCODE_BACKSPACE) {
+                    next_step(step == 9 ? (scratch_by_button ? 8 : 7) : std::max(0, step - 1));
+                } else if (e.key.scancode == SDL_SCANCODE_RETURN && step == 8) {
+                    next_step(9);  // 反対向きは無しでよい
+                } else if (e.key.scancode == SDL_SCANCODE_RETURN && step == 9) {
+                    done = true;
+                } else if (!settle && step <= 8) {
+                    bind_digital({Binding::Type::Key, e.key.scancode, 0});
+                }
+            } else if (e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN && !settle) {
+                if (step == 9) done = true;
+                else bind_digital({Binding::Type::JoyButton, e.jbutton.button, 0});
+            } else if (e.type == SDL_EVENT_JOYSTICK_HAT_MOTION && e.jhat.value && !settle && step <= 8) {
+                int v = e.jhat.value;
+                int dir = v & SDL_HAT_UP ? SDL_HAT_UP : v & SDL_HAT_DOWN ? SDL_HAT_DOWN : v & SDL_HAT_LEFT ? SDL_HAT_LEFT : SDL_HAT_RIGHT;
+                bind_digital({Binding::Type::JoyHat, e.jhat.hat, dir});
+            } else if (e.type == SDL_EVENT_JOYSTICK_AXIS_MOTION && e.jaxis.axis < 16) {
+                // 軸は皿の手順でだけ見る（専用コントローラーの皿はアナログの軸として来ることが多く、鍵盤の手順で拾うと誤る）
+                int a = e.jaxis.axis;
+                if (seen[a]) {
+                    int d = std::abs(static_cast<int>(e.jaxis.value) - prev[a]);
+                    if (d > 32768) d = 65536 - d;
+                    travel[a] += d;
+                }
+                seen[a] = true;
+                prev[a] = e.jaxis.value;
+                if (step == 7 && !settle && travel[a] > 12000) {
+                    cfg.analog_axis = a;
+                    // アナログの皿にするので、軸を方向ボタンとして読む古い割り当ては外す
+                    for (int b : {kScratchA, kScratchB}) {
+                        auto& v = cfg.buttons[b];
+                        v.erase(std::remove_if(v.begin(), v.end(), [](const Binding& x) { return x.type == Binding::Type::JoyAxis; }), v.end());
+                    }
+                    char m[48];
+                    std::snprintf(m, sizeof(m), "joy:axis %d（アナログ）", a);
+                    last = m;
+                    next_step(9);
+                }
+            }
+        }
+
+        // 描画
+        SDL_SetRenderDrawColor(r, 10, 10, 18, 255);
+        SDL_RenderClear(r);
+        SDL_Color white{235, 235, 240, 255}, dim{140, 140, 155, 255}, accent{255, 210, 90, 255}, on{80, 220, 140, 255};
+        text.draw(640, 60, 26, white, "キーコンフィグ", 1);
+        std::string msg;
+        if (step <= 6) msg = std::to_string(step + 1) + " 鍵を押してください";
+        else if (step == 7) msg = "皿を回してください（ボタンやキーで操作するなら、それを押す）";
+        else if (step == 8) msg = "皿の反対向きを押してください（無ければ Enter）";
+        else msg = "設定できました。決定（Enter か コントローラーのボタン）で保存します";
+        text.draw(640, 170, 30, accent, msg, 1, 1180);
+        // 鍵盤の図：皿＋7鍵。いま聞いているところを光らせる
+        float x0 = 640 - (546 + 20) / 2.0f + 20;  // 皿の左端から7鍵の右端までを中央に
+        for (int lane = 0; lane < 8; ++lane) {
+            float x = x0 + lane * 70 + (lane == 0 ? -20 : 0);
+            float w = lane == 0 ? 80 : 56;
+            bool now = (lane == 0 && (step == 7 || step == 8)) || (lane >= 1 && step == lane - 1);
+            bool set = lane == 0 ? step >= 9 : step > lane - 1;
+            SDL_FRect rc{x, 280, w, lane == 0 ? 120.0f : (lane % 2 ? 140.0f : 100.0f)};
+            SDL_Color c = now ? accent : set ? on : SDL_Color{50, 50, 64, 255};
+            SDL_SetRenderDrawColor(r, c.r, c.g, c.b, 255);
+            SDL_RenderFillRect(r, &rc);
+            text.draw(x + w / 2, 430, 18, now ? accent : dim, lane == 0 ? "皿" : std::to_string(lane), 1);
+        }
+        if (!last.empty()) text.draw(640, 490, 18, dim, "直前に割り当てた入力：" + last, 1);
+        text.draw(640, 640, 16, dim, "Backspace：1つ戻る　　Esc：やめる（保存しない）", 1);
+        if (const char* shot = std::getenv("BMJ_WIZARD_SHOT")) {
+            // 開発用：1枚保存してやめる
+            if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
+            canceled = true;
+        }
+        SDL_RenderPresent(r);
+        SDL_DelayPrecise(4'000'000);
+    }
+    if (canceled) return false;
+    cfg_in = cfg;
+    if (cfg.save(path)) std::printf("キーコンフィグを保存した: %s\n", path.c_str());
+    return true;
+}
+
+}  // namespace bmj

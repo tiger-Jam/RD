@@ -18,6 +18,7 @@
 #include "input/input.h"
 #include "input/joystick_init.h"
 #include "input/win_rawhid.h"
+#include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
 
 namespace fs = std::filesystem;
@@ -277,6 +278,12 @@ void run_select(App& app) {
                     else quit = true;
                     break;
                 case SDLK_F5: refresh(); break;
+                case SDLK_F1:
+                    if (e.key.repeat) break;
+                    // キーコンフィグ（押した入力を順に1〜7鍵・皿に割り当てる）
+                    if (run_key_wizard(r, text, app.keycfg, keyconfig_path())) app.mixer.play_system(kSysDecide);
+                    input = InputMapper(app.keycfg);
+                    break;
                 case SDLK_F2:
                     autoplay = !autoplay;
                     app.mixer.play_system(kSysOptionChange);
@@ -459,7 +466,7 @@ void run_select(App& app) {
         if (!(SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS)) joy_text = "ウィンドウをクリックすると操作できます";
         text.draw(px, 600, 14, joystick_init().ready() ? dim : accent, joy_text, 0, 420);
         text.draw(24, 690, 14, dim,
-                  "↑↓ 選ぶ　Enter/→ 決定　Esc/← 戻る　TAB ゲージ　F2 オート　F5 更新　（コントローラ：白鍵 決定／黒鍵 戻る／皿 選ぶ）");
+                  "↑↓ 選ぶ　Enter/→ 決定　Esc/← 戻る　TAB ゲージ　F2 オート　F1 キーコンフィグ　F5 更新　（コントローラ：白鍵 決定／黒鍵 戻る／皿 選ぶ）");
         if (std::getenv("BMJ_DEBUG_LOOP")) {
             // 開発用：選曲画面の1秒あたりの描画回数と、1回にかかった時間
             static uint64_t t = SDL_GetTicksNS();
@@ -489,6 +496,7 @@ void run_select(App& app) {
                 else if (k == 'u') move(-1);
                 else if (k == 'e') decide();
                 else if (k == 'b') back();
+                else if (k == 'k') run_key_wizard(r, text, app.keycfg, keyconfig_path());
             } else {
                 if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
                 quit = true;
