@@ -355,7 +355,7 @@ void run_select(App& app) {
                 text.draw(68, y + 8, 18, accent, en.badge, 1, 60);
             }
             SDL_Color tc = en.kind == Entry::Kind::Missing ? dim : white;
-            float tx = en.kind == Entry::Kind::Folder ? 40 : 112;
+            float tx = en.kind == Entry::Kind::Folder ? 40.0f : 112.0f;
             text.draw(tx, y + 3, 20, tc, en.label, 0, 560);
             if (en.kind == Entry::Kind::Folder) {
                 char cnt[64];

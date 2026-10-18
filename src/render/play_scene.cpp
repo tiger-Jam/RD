@@ -156,7 +156,7 @@ void draw_play(SDL_Renderer* r, const Chart& chart, const JudgeEngine& judge, co
     std::snprintf(buf, sizeof(buf), "BPM %3.0f   HS %d.%02d", chart.bpm_at(static_cast<int64_t>(v.song_ms * 1000)),
                   v.hi_speed / 100, v.hi_speed % 100);
     text(r, x, 52, white, buf);
-    int y = 330;
+    float y = 330;
     std::snprintf(buf, sizeof(buf), "EX SCORE %5d   MAX COMBO %4d", st.exscore(), st.max_combo);
     text(r, x, y, white, buf);
     y += 14;

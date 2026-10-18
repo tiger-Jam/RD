@@ -19,7 +19,7 @@ static SkinDst dst_of(std::initializer_list<std::pair<int, float>> keys, int loo
 }
 
 TEST(skin_dst_interpolation) {
-    SkinDst d = dst_of({{0, 0}, {1000, 100}}, 0);
+    SkinDst d = dst_of({{0, 0.0f}, {1000, 100.0f}}, 0);
     CHECK(!eval_dst(d, -1).visible);  // タイマー停止中
     CHECK(std::abs(eval_dst(d, 500).x - 50) < 1e-3);
     // loop=0：最後まで行ったら0から繰り返す
@@ -27,28 +27,28 @@ TEST(skin_dst_interpolation) {
 }
 
 TEST(skin_dst_loop_negative_hides_after_end) {
-    SkinDst d = dst_of({{0, 0}, {1000, 100}}, -1);
+    SkinDst d = dst_of({{0, 0.0f}, {1000, 100.0f}}, -1);
     CHECK(eval_dst(d, 999).visible);
     CHECK(!eval_dst(d, 1001).visible);
 }
 
 TEST(skin_dst_loop_equal_end_holds) {
-    SkinDst d = dst_of({{0, 0}, {1000, 100}}, 1000);
+    SkinDst d = dst_of({{0, 0.0f}, {1000, 100.0f}}, 1000);
     CHECK(std::abs(eval_dst(d, 5000).x - 100) < 1e-3);
 }
 
 TEST(skin_dst_loop_partial) {
     // 500〜1000 を繰り返す
-    SkinDst d = dst_of({{0, 0}, {1000, 100}}, 500);
+    SkinDst d = dst_of({{0, 0.0f}, {1000, 100.0f}}, 500);
     CHECK(std::abs(eval_dst(d, 1200).x - 70) < 1e-3);
 }
 
 TEST(skin_dst_accel) {
-    SkinDst d = dst_of({{0, 0}, {1000, 100}}, 0, 1);
+    SkinDst d = dst_of({{0, 0.0f}, {1000, 100.0f}}, 0, 1);
     CHECK(std::abs(eval_dst(d, 500).x - 12.5) < 1e-3);  // r^3
-    SkinDst d2 = dst_of({{0, 0}, {1000, 100}}, 0, 2);
+    SkinDst d2 = dst_of({{0, 0.0f}, {1000, 100.0f}}, 0, 2);
     CHECK(std::abs(eval_dst(d2, 500).x - 87.5) < 1e-3);  // 1-(1-r)^3
-    SkinDst d3 = dst_of({{0, 0}, {1000, 100}}, 0, 3);
+    SkinDst d3 = dst_of({{0, 0.0f}, {1000, 100.0f}}, 0, 3);
     CHECK(std::abs(eval_dst(d3, 500).x - 0) < 1e-3);  // それ以外は始点のまま
 }
 
