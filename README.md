@@ -30,6 +30,15 @@ cmake --build build
 
 コントローラは LR2 の既定の割り当て（鍵盤 B4 B7 B3 B8 B2 B5 左、皿 上下）。
 
+### キーコンフィグ
+
+`./build/bmjoy --keyconfig` で設定画面を開く。設定は `~/Library/Application Support/BMjoy/keyconfig.txt` に保存される。
+
+- ↑↓で項目を選び、Enter を押してから割り当てたいキーやボタンを押す（1つの項目に複数割り当てられる）。Backspace で消す。F1 で LR2 の既定に戻す
+- ジョイスティックのボタン番号は0から数える（LR2の BUTTON 4 は `joy:button 3`）
+- **アナログ皿**：`ANALOG TT` で Enter を押してから皿を回すと、その軸を使う。回している間は押下、止まって `TT RELEASE`（既定100ms）経ったら離す。LR2は皿を方向ボタンとしてしか読まないので、これはBMjoyの拡張
+- 画面下の INPUT TEST で、押されているレーンと軸の生の値を確認できる
+
 ### スキン
 
 LR2のフォルダ（`LR2files` があるところ）を `--lr2-root` で指定すると、既定で `LR2files/Theme/LR2/Play/play_7.lr2skin` を使う。

@@ -1,6 +1,7 @@
 #include "input/input.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace bmj {
 
@@ -9,27 +10,41 @@ namespace {
 constexpr uint64_t kMinHoldNs = 16'000'000;  // LR2: sys_inputinterval の既定値16ms
 constexpr int16_t kAxisThreshold = 16384;    // 軸を方向ボタンとみなすしきい値
 
+int hat_dir_index(int dir) {
+    switch (dir) {
+    case SDL_HAT_UP: return 0;
+    case SDL_HAT_DOWN: return 1;
+    case SDL_HAT_LEFT: return 2;
+    case SDL_HAT_RIGHT: return 3;
+    default: return -1;
+    }
+}
+
 }  // namespace
 
-InputMapper::InputMapper() {
-    auto key = [&](SDL_Scancode sc, int button) { sources_[sc].button = button; };
-    // LR2の既定（1P）：Z S X D C F V、皿は左Ctrl・スペース／左Shift、START=Q、SELECT=W
-    const SDL_Scancode keys[7] = {SDL_SCANCODE_Z, SDL_SCANCODE_S, SDL_SCANCODE_X, SDL_SCANCODE_D,
-                                  SDL_SCANCODE_C, SDL_SCANCODE_F, SDL_SCANCODE_V};
-    for (int i = 0; i < 7; ++i) key(keys[i], kKey1 + i);
-    key(SDL_SCANCODE_LCTRL, kScratchA);
-    key(SDL_SCANCODE_SPACE, kScratchA);
-    key(SDL_SCANCODE_LSHIFT, kScratchB);
-    key(SDL_SCANCODE_Q, kStart);
-    key(SDL_SCANCODE_W, kSelect);
-    // ジョイスティック：LR2の BUTTON(n) はSDLのボタン n-1。鍵盤は B4 B7 B3 B8 B2 B5 と左、皿は下／上
-    const int pad_keys[6] = {4, 7, 3, 8, 2, 5};
-    for (int i = 0; i < 6; ++i) sources_[kJoyBase + pad_keys[i] - 1].button = kKey1 + i;
-    sources_[joy_axis_source(1)].button = kKey1 + 6;  // 左
-    sources_[joy_axis_source(0)].button = kScratchA;  // 下
-    sources_[joy_axis_source(3)].button = kScratchB;  // 上
-    sources_[kJoyBase + 9 - 1].button = kStart;
-    sources_[kJoyBase + 10 - 1].button = kSelect;
+int InputMapper::source_of(const Binding& b) {
+    switch (b.type) {
+    case Binding::Type::Key: return b.index >= 0 && b.index < kJoyBase ? b.index : -1;
+    case Binding::Type::JoyButton: return b.index >= 0 && b.index < kJoyButtons ? kJoyBase + b.index : -1;
+    case Binding::Type::JoyAxis: return b.index >= 0 && b.index < kAxes ? kAxisBase + b.index * 2 + (b.dir > 0 ? 1 : 0) : -1;
+    case Binding::Type::JoyHat: {
+        int d = hat_dir_index(b.dir);
+        return b.index >= 0 && b.index < kHats && d >= 0 ? kHatBase + b.index * 4 + d : -1;
+    }
+    }
+    return -1;
+}
+
+InputMapper::InputMapper(const KeyConfig& cfg) : cfg_(cfg) {
+    for (int button = 0; button < kButtonCount; ++button)
+        for (const Binding& b : cfg.buttons[button]) {
+            int s = source_of(b);
+            if (s >= 0) sources_[s].buttons.push_back(button);
+        }
+    if (cfg.analog_axis >= 0) {
+        sources_[kAnalogBase].buttons.push_back(kScratchA);
+        sources_[kAnalogBase + 1].buttons.push_back(kScratchB);
+    }
 }
 
 void InputMapper::handle(const SDL_Event& e) {
@@ -44,32 +59,57 @@ void InputMapper::handle(const SDL_Event& e) {
         if (e.jbutton.button < kJoyButtons)
             source_change(kJoyBase + e.jbutton.button, e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN, e.jbutton.timestamp);
         break;
-    case SDL_EVENT_JOYSTICK_AXIS_MOTION:
-        // LR2は軸をアナログとして扱わず、上下左右の4方向のボタンとして読む
-        if (e.jaxis.axis < 2) {
-            axis_[e.jaxis.axis] = e.jaxis.value;
-            int16_t x = axis_[0], y = axis_[1];
-            source_change(joy_axis_source(0), y > kAxisThreshold, e.jaxis.timestamp);
-            source_change(joy_axis_source(3), y < -kAxisThreshold, e.jaxis.timestamp);
-            source_change(joy_axis_source(1), x < -kAxisThreshold, e.jaxis.timestamp);
-            source_change(joy_axis_source(2), x > kAxisThreshold, e.jaxis.timestamp);
+    case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
+        int a = e.jaxis.axis;
+        if (a == cfg_.analog_axis) {
+            analog_motion(e.jaxis.value, e.jaxis.timestamp);
+            break;
         }
+        if (a >= kAxes) break;
+        // LR2は軸をアナログとして扱わず、しきい値を超えた向きのボタンとして読む
+        axis_[a] = e.jaxis.value;
+        source_change(kAxisBase + a * 2 + 1, e.jaxis.value > kAxisThreshold, e.jaxis.timestamp);
+        source_change(kAxisBase + a * 2, e.jaxis.value < -kAxisThreshold, e.jaxis.timestamp);
         break;
+    }
     case SDL_EVENT_JOYSTICK_HAT_MOTION: {
-        Uint8 h = e.jhat.value;
-        source_change(joy_axis_source(0), h & SDL_HAT_DOWN, e.jhat.timestamp);
-        source_change(joy_axis_source(3), h & SDL_HAT_UP, e.jhat.timestamp);
-        source_change(joy_axis_source(1), h & SDL_HAT_LEFT, e.jhat.timestamp);
-        source_change(joy_axis_source(2), h & SDL_HAT_RIGHT, e.jhat.timestamp);
+        int h = e.jhat.hat;
+        if (h >= kHats) break;
+        Uint8 v = e.jhat.value;
+        source_change(kHatBase + h * 4 + 0, v & SDL_HAT_UP, e.jhat.timestamp);
+        source_change(kHatBase + h * 4 + 1, v & SDL_HAT_DOWN, e.jhat.timestamp);
+        source_change(kHatBase + h * 4 + 2, v & SDL_HAT_LEFT, e.jhat.timestamp);
+        source_change(kHatBase + h * 4 + 3, v & SDL_HAT_RIGHT, e.jhat.timestamp);
         break;
     }
     default: break;
     }
 }
 
+// アナログ皿：値が動いた向きを押し、反対に回したら押し直す。止まったら collect() で離す
+void InputMapper::analog_motion(int16_t value, uint64_t ts) {
+    if (!analog_init_) {
+        analog_init_ = true;
+        analog_last_ = value;
+        return;
+    }
+    int d = static_cast<int>(value) - analog_last_;
+    // 1周で値が端から端へ戻るときの折り返し
+    if (d > 32768) d -= 65536;
+    if (d < -32768) d += 65536;
+    analog_last_ = value;
+    if (d == 0) return;
+    int dir = (d > 0) == !cfg_.analog_invert ? 1 : -1;
+    analog_move_ns_ = ts;
+    if (dir == analog_dir_) return;
+    if (analog_dir_ != 0) source_change(kAnalogBase + (analog_dir_ > 0 ? 1 : 0), false, ts);
+    analog_dir_ = dir;
+    source_change(kAnalogBase + (dir > 0 ? 1 : 0), true, ts);
+}
+
 void InputMapper::source_change(int source, bool down, uint64_t ts) {
     Source& s = sources_[source];
-    if (s.button < 0) return;
+    if (s.buttons.empty()) return;
     if (down) {
         // 保留中の「離す」を取り消す（16ms以内に押し直した）
         auto it = std::find_if(pending_release_.begin(), pending_release_.end(),
@@ -81,15 +121,17 @@ void InputMapper::source_change(int source, bool down, uint64_t ts) {
         if (s.down) return;
         s.down = true;
         s.press_ns = ts;
-        apply_button(s.button, true, ts);
+        for (int b : s.buttons) apply_button(b, true, ts);
     } else {
         if (!s.down) return;
         if (ts < s.press_ns + kMinHoldNs) {
-            pending_release_.push_back({s.press_ns + kMinHoldNs, source});
+            if (std::none_of(pending_release_.begin(), pending_release_.end(),
+                             [&](const Pending& p) { return p.source == source; }))
+                pending_release_.push_back({s.press_ns + kMinHoldNs, source});
             return;
         }
         s.down = false;
-        apply_button(s.button, false, ts);
+        for (int b : s.buttons) apply_button(b, false, ts);
     }
 }
 
@@ -113,13 +155,19 @@ void InputMapper::apply_button(int button, bool down, uint64_t ts) {
 }
 
 void InputMapper::collect(uint64_t now_ns, std::vector<LaneInput>& lanes, std::vector<ButtonInput>& buttons) {
+    // アナログ皿が止まって一定時間経ったら離す
+    if (analog_dir_ != 0 && now_ns >= analog_move_ns_ + static_cast<uint64_t>(cfg_.analog_release_ms) * 1000000ull) {
+        source_change(kAnalogBase + (analog_dir_ > 0 ? 1 : 0), false,
+                      analog_move_ns_ + static_cast<uint64_t>(cfg_.analog_release_ms) * 1000000ull);
+        analog_dir_ = 0;
+    }
     for (auto it = pending_release_.begin(); it != pending_release_.end();) {
         if (it->due_ns <= now_ns) {
             Source& s = sources_[it->source];
             s.down = false;
             uint64_t due = it->due_ns;
             it = pending_release_.erase(it);
-            apply_button(s.button, false, due);
+            for (int b : s.buttons) apply_button(b, false, due);
         } else {
             ++it;
         }

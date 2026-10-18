@@ -46,14 +46,17 @@ add_executable(bmjoy
     src/audio/sound_bank.cpp
     src/audio/mixer.cpp
     src/input/input.cpp
+    src/input/keyconfig.cpp
+    src/render/keyconfig_scene.cpp
     src/render/play_scene.cpp
     src/render/skin_play.cpp
     src/skin/skin_renderer.cpp
 )
 target_link_libraries(bmjoy PRIVATE bmj_core SDL3::SDL3)
 
-add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp)
-target_link_libraries(bmj_tests PRIVATE bmj_core)
+add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
+    tests/test_input.cpp src/input/input.cpp src/input/keyconfig.cpp)
+target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 
 foreach(t bmj_core bmjoy bmj_tests)
     if(MSVC)

@@ -23,6 +23,8 @@
 #include "chart/bms_parser.h"
 #include "game/judge.h"
 #include "input/input.h"
+#include "input/keyconfig.h"
+#include "render/keyconfig_scene.h"
 #include "render/play_scene.h"
 #include "render/skin_play.h"
 #include "skin/lr2_skin.h"
@@ -49,6 +51,7 @@ struct Options {
     std::vector<std::pair<int, int>> skin_opts;
     std::string skin_res;
     bool no_skin = false;
+    bool keyconfig = false;
     std::string capture_dir;  // 開発用：描画結果を2秒ごとにBMPで保存する
     double quit_after = 0;    // 開発用：指定秒数で終了する
 };
@@ -62,6 +65,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--simulate") o.simulate = true;
         else if (a == "--info") o.info = true;
         else if (a == "--no-skin") o.no_skin = true;
+        else if (a == "--keyconfig") o.keyconfig = true;
         else if (a == "--capture") o.capture_dir = next();
         else if (a == "--quit-after") o.quit_after = std::atof(next());
         else if (a == "--lr2-root") o.lr2_root = next();
@@ -94,7 +98,7 @@ bool parse_args(int argc, char** argv, Options& o) {
             o.chart_path = a;
         }
     }
-    return !o.chart_path.empty();
+    return o.keyconfig || !o.chart_path.empty();
 }
 
 // キー音のファイル名を解決する（LR2: FindAltSound。書かれた名前→拡張子をogg/wavに替える→1つ上のフォルダ）
@@ -192,8 +196,25 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
                      "使い方: bmjoy <譜面ファイル> [--auto] [--gauge groove|hard|death|easy|pattack|gattack] [--gas]\n"
                      "                [--hs 100] [--seed N] [--timing ms] [--lr2-root DIR] [--skin FILE]\n"
-                     "                [--skin-opt 番号=選択] [--skin-res sd|hd|fhd] [--no-skin] [--simulate] [--info]\n");
+                     "                [--skin-opt 番号=選択] [--skin-res sd|hd|fhd] [--no-skin] [--simulate] [--info]\n"
+                     "       bmjoy --keyconfig\n");
         return 2;
+    }
+
+    if (opt.keyconfig) {
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK)) return 1;
+        SDL_Window* w = SDL_CreateWindow("BMjoy KEY CONFIG", 1280, 960, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        SDL_Renderer* r = w ? SDL_CreateRenderer(w, nullptr) : nullptr;
+        if (!r) return 1;
+        SDL_SetRenderVSync(r, 1);
+        std::string path = keyconfig_path();
+        KeyConfig kc = KeyConfig::lr2_default();
+        kc.load(path);
+        run_keyconfig(w, r, kc, path);
+        SDL_DestroyRenderer(r);
+        SDL_DestroyWindow(w);
+        SDL_Quit();
+        return 0;
     }
 
     BmsParseOptions popt;
@@ -214,6 +235,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "SDLの初期化に失敗: %s\n", SDL_GetError());
         return 1;
     }
+    KeyConfig keycfg = KeyConfig::lr2_default();
+    if (keycfg.load(keyconfig_path())) std::printf("キーコンフィグ: %s\n", keyconfig_path().c_str());
 
     // スキン
     PlayContext ctx;
@@ -305,7 +328,7 @@ int main(int argc, char** argv) {
         ctx.last_miss_ms = -1e9;
         ctx.hi_speed = opt.hi_speed;
 
-        InputMapper input;
+        InputMapper input(keycfg);
         PlayViewState view;
         view.hi_speed = opt.hi_speed;
         view.autoplay = opt.autoplay;
