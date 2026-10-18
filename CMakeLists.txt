@@ -43,6 +43,7 @@ add_library(bmj_core STATIC
     src/chart/chart.cpp
     src/chart/bms_parser.cpp
     src/game/judge.cpp
+    src/game/lane_option.cpp
     src/game/gauge.cpp
     src/util/text.cpp
     src/util/path.cpp
@@ -63,12 +64,14 @@ if(APPLE)
     target_link_libraries(bmj_core PUBLIC iconv)
 endif()
 
-add_executable(bmjoy
+# 本体（LR2 の LR2body.exe に相当）。LR2 と同じくコンソールは出さない（ログはコマンドプロンプトから動かしたときだけ見える）
+add_executable(BMjoybody WIN32
     src/main.cpp
     src/app/app.cpp
     src/app/config.cpp
     src/app/play_session.cpp
     src/app/select_scene.cpp
+    src/app/select_context.cpp
     src/audio/sound_bank.cpp
     src/audio/mixer.cpp
     src/audio/system_sound.cpp
@@ -81,21 +84,29 @@ add_executable(bmjoy
     src/skin/skin_renderer.cpp
     src/render/text_cache.cpp
 )
-target_link_libraries(bmjoy PRIVATE bmj_core SDL3::SDL3)
+target_link_libraries(BMjoybody PRIVATE bmj_core SDL3::SDL3)
 if(WIN32)
     # 日本語のファイル名を扱えるように、プロセスのコードページを UTF-8 にする（OpenLR2 と同じ）
-    target_sources(bmjoy PRIVATE src/app/bmjoy.manifest)
+    target_sources(BMjoybody PRIVATE src/app/bmjoy.manifest)
     target_compile_definitions(bmj_core PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS)
 endif()
 
+# 起動前の設定アプリ（LR2 の LR2.exe に相当）。「起動」で BMjoybody を黒い画面つきで立ち上げる
+add_executable(BMjoy WIN32 src/launcher/launcher.cpp src/app/config.cpp src/render/text_cache.cpp)
+target_link_libraries(BMjoy PRIVATE bmj_core SDL3::SDL3)
+if(WIN32)
+    target_sources(BMjoy PRIVATE src/app/bmjoy.manifest)
+endif()
+
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
-    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp src/input/input.cpp src/input/keyconfig.cpp)
+    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp src/input/input.cpp src/input/keyconfig.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
+target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 if(WIN32)
     target_sources(bmj_tests PRIVATE src/app/bmjoy.manifest)
 endif()
 
-foreach(t bmj_core bmjoy bmj_tests)
+foreach(t bmj_core BMjoybody BMjoy bmj_tests)
     if(MSVC)
         target_compile_options(${t} PRIVATE /W4 /utf-8)
     else()

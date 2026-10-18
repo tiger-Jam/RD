@@ -20,6 +20,7 @@ struct ChartRecord {
     double bpm_min = 0, bpm_max = 0, bpm_main = 0;
     int length_ms = 0;
     bool scratch = true;
+    std::string banner, stagefile, backbmp;  // 譜面に書かれた画像のファイル名（譜面のフォルダからの相対）
     int64_t mtime = 0, size = 0;
 };
 
@@ -44,9 +45,11 @@ public:
 
     // 曲フォルダを読み直す。変わったファイルだけを並列にパースし、1トランザクションで書く（仕様書8章「リロード処理」）
     ScanStats scan(const std::vector<std::string>& dirs, int threads,
-                   const std::function<void(int done, int total)>& progress = nullptr);
+                   const std::function<void(int done, int total, const std::string& path)>& progress = nullptr);
 
     std::vector<ChartRecord> all_charts() const;
+    // 曲の一覧を消す（スコアは残す）。次の読み直しで全部登録し直す（LR2: 曲データベースの再作成）
+    bool clear_charts();
     std::vector<ScoreRecord> all_scores() const;
     bool find_by_md5(const std::string& md5, ChartRecord& out) const;
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）

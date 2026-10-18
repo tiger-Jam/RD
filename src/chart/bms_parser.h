@@ -6,6 +6,8 @@
 #include <string_view>
 #include <vector>
 
+#include "util/lr2_random.h"
+
 #include "chart/chart.h"
 
 namespace bmj {
@@ -19,6 +21,7 @@ struct BmsParseResult {
     std::string error;
     std::vector<std::string> warnings;
     std::vector<int> random_values;  // 評価した #RANDOM の値（出現順）。リプレイで再現するために保存する
+    Lr2Random rng;                   // #RANDOM を評価したあとの乱数（レーンのランダムはこの続きを使う。LR2 と同じ）
     Chart chart;
 };
 

@@ -7,6 +7,10 @@
 
 #include "stb_truetype.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace bmj {
 
 namespace {
@@ -32,6 +36,15 @@ SDL_Texture* make_texture(SDL_Renderer* r, int w, int h, std::vector<uint8_t>& r
     if (t) SDL_SetTextureScaleMode(t, SDL_SCALEMODE_LINEAR);
     return t;
 }
+
+#ifdef _WIN32
+std::wstring widen(const std::string& s) {
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    std::wstring w(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
+    return w;
+}
+#endif
 
 }  // namespace
 
@@ -89,18 +102,76 @@ const std::vector<uint8_t>* TextCache::font_data(int thick) {
     return nullptr;
 }
 
+#ifdef _WIN32
+// GDI で白い文字を黒い地に描いて、明るさをそのまま不透明度にする
+TextCache::Tex TextCache::get_system(int size, const std::string& s) {
+    Tex out;
+    std::wstring ws = widen(s), face = widen(system_font_);
+    HDC dc = CreateCompatibleDC(nullptr);
+    HFONT font = CreateFontW(-size, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                             CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY, DEFAULT_PITCH, face.c_str());
+    HGDIOBJ old_font = SelectObject(dc, font);
+    SIZE ext{};
+    GetTextExtentPoint32W(dc, ws.c_str(), static_cast<int>(ws.size()), &ext);
+    TEXTMETRICW tm{};
+    GetTextMetricsW(dc, &tm);
+    int w = std::max<int>(1, ext.cx), h = std::max<int>(1, tm.tmHeight);
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;  // 上から下へ
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (bmp && bits) {
+        HGDIOBJ old_bmp = SelectObject(dc, bmp);
+        std::fill_n(static_cast<uint32_t*>(bits), static_cast<size_t>(w) * h, 0u);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(255, 255, 255));
+        TextOutW(dc, 0, 0, ws.c_str(), static_cast<int>(ws.size()));
+        GdiFlush();
+        std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4, 255);
+        const uint32_t* px = static_cast<const uint32_t*>(bits);
+        for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i) rgba[i * 4 + 3] = static_cast<uint8_t>((px[i] >> 8) & 0xff);
+        out.tex = make_texture(r_, w, h, rgba);
+        if (out.tex) SDL_SetTextureScaleMode(out.tex, SDL_SCALEMODE_NEAREST);
+        out.w = w;
+        out.h = h;
+        SelectObject(dc, old_bmp);
+        DeleteObject(bmp);
+    }
+    SelectObject(dc, old_font);
+    DeleteObject(font);
+    DeleteDC(dc);
+    return out;
+}
+#else
+TextCache::Tex TextCache::get_system(int, const std::string&) { return {}; }
+#endif
+
 TextCache::Tex TextCache::get(int size, int thick, const std::string& s) {
     char keybuf[32];
-    std::snprintf(keybuf, sizeof(keybuf), "%d/%d/", size, thick);
+    std::snprintf(keybuf, sizeof(keybuf), "%d/%d/%d/", size, thick, antialias_ ? 1 : 0);
     std::string key = keybuf + s;
     if (auto it = cache_.find(key); it != cache_.end()) return it->second;
     // 使い捨ての文字列（数字など）でキャッシュが膨らみすぎたら作り直す
     if (cache_.size() > 2000) clear();
+#ifdef _WIN32
+    if (!system_font_.empty()) {
+        Tex t = get_system(size, s);
+        cache_[key] = t;
+        return t;
+    }
+#endif
     Tex out;
     const std::vector<uint8_t>* data = font_data(thick);
     if (data && size > 0) {
         stbtt_fontinfo info;
-        if (stbtt_InitFont(&info, data->data(), stbtt_GetFontOffsetForIndex(data->data(), 0))) {
+        int face = !font_path_.empty() && data == &files_[font_path_] ? font_face_ : 0;
+        int offset = stbtt_GetFontOffsetForIndex(data->data(), face);
+        if (offset < 0) offset = stbtt_GetFontOffsetForIndex(data->data(), 0);
+        if (stbtt_InitFont(&info, data->data(), offset)) {
             float scale = stbtt_ScaleForPixelHeight(&info, static_cast<float>(size));
             int ascent, descent, gap;
             stbtt_GetFontVMetrics(&info, &ascent, &descent, &gap);
@@ -135,8 +206,9 @@ TextCache::Tex TextCache::get(int size, int thick, const std::string& s) {
                 x += adv * scale;
             }
             std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4, 255);
-            for (size_t i = 0; i < alpha.size(); ++i) rgba[i * 4 + 3] = alpha[i];
+            for (size_t i = 0; i < alpha.size(); ++i) rgba[i * 4 + 3] = antialias_ ? alpha[i] : (alpha[i] >= 128 ? 255 : 0);
             out.tex = make_texture(r_, w, h, rgba);
+            if (out.tex && !antialias_) SDL_SetTextureScaleMode(out.tex, SDL_SCALEMODE_NEAREST);
             out.w = static_cast<int>(std::ceil(x));
             out.h = h;
         }

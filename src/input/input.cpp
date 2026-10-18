@@ -1,13 +1,13 @@
 #include "input/input.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 
 namespace bmj {
 
 namespace {
 
-constexpr uint64_t kMinHoldNs = 16'000'000;  // LR2: sys_inputinterval の既定値16ms
 constexpr int16_t kAxisThreshold = 16384;    // 軸を方向ボタンとみなすしきい値
 
 int hat_dir_index(int dir) {
@@ -62,7 +62,7 @@ void InputMapper::handle(const SDL_Event& e) {
     case SDL_EVENT_JOYSTICK_AXIS_MOTION: {
         int a = e.jaxis.axis;
         if (a == cfg_.analog_axis) {
-            analog_motion(e.jaxis.value, e.jaxis.timestamp);
+            analog_motion(e.jaxis.which, e.jaxis.value, e.jaxis.timestamp);
             break;
         }
         if (a >= kAxes) break;
@@ -87,19 +87,18 @@ void InputMapper::handle(const SDL_Event& e) {
 }
 
 // アナログ皿：値が動いた向きを押し、反対に回したら押し直す。止まったら collect() で離す
-void InputMapper::analog_motion(int16_t value, uint64_t ts) {
-    if (!analog_init_) {
-        analog_init_ = true;
-        analog_last_ = value;
-        return;
-    }
-    int d = static_cast<int>(value) - analog_last_;
+void InputMapper::analog_motion(uint32_t which, int16_t value, uint64_t ts) {
+    auto [it, first] = analog_last_.try_emplace(which, value);
+    if (first) return;
+    int d = static_cast<int>(value) - it->second;
     // 1周で値が端から端へ戻るときの折り返し
     if (d > 32768) d -= 65536;
     if (d < -32768) d += 65536;
-    analog_last_ = value;
+    it->second = value;
     if (d == 0) return;
     int dir = (d > 0) == !cfg_.analog_invert ? 1 : -1;
+    static const bool debug = std::getenv("BMJ_DEBUG_INPUT") != nullptr;
+    if (debug && dir != analog_dir_) std::printf("皿: 値 %d（差 %d）で向き %d → %d\n", value, d, analog_dir_, dir);
     analog_move_ns_ = ts;
     if (dir == analog_dir_) return;
     if (analog_dir_ != 0) source_change(kAnalogBase + (analog_dir_ > 0 ? 1 : 0), false, ts);
@@ -124,10 +123,10 @@ void InputMapper::source_change(int source, bool down, uint64_t ts) {
         for (int b : s.buttons) apply_button(b, true, ts);
     } else {
         if (!s.down) return;
-        if (ts < s.press_ns + kMinHoldNs) {
+        if (ts < s.press_ns + min_hold_ns_) {
             if (std::none_of(pending_release_.begin(), pending_release_.end(),
                              [&](const Pending& p) { return p.source == source; }))
-                pending_release_.push_back({s.press_ns + kMinHoldNs, source});
+                pending_release_.push_back({s.press_ns + min_hold_ns_, source});
             return;
         }
         s.down = false;

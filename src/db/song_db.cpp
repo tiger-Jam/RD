@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS chart(
     title TEXT, subtitle TEXT, artist TEXT, subartist TEXT, genre TEXT,
     playlevel INTEGER, difficulty INTEGER, notes INTEGER, ln INTEGER, rank INTEGER, total INTEGER,
     bpm_min REAL, bpm_max REAL, bpm_main REAL, length_ms INTEGER, scratch INTEGER,
-    mtime INTEGER, size INTEGER);
+    mtime INTEGER, size INTEGER, banner TEXT, stagefile TEXT, backbmp TEXT);
 CREATE INDEX IF NOT EXISTS chart_md5 ON chart(md5);
 CREATE INDEX IF NOT EXISTS chart_sha256 ON chart(sha256);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
@@ -108,12 +108,15 @@ ChartRecord read_chart_row(const Stmt& st) {
     r.scratch = st.col_i64(19) != 0;
     r.mtime = st.col_i64(20);
     r.size = st.col_i64(21);
+    r.banner = st.col_text(22);
+    r.stagefile = st.col_text(23);
+    r.backbmp = st.col_text(24);
     return r;
 }
 
 const char* kChartColumns =
     "path, folder, sha256, md5, title, subtitle, artist, subartist, genre, playlevel, difficulty, notes, ln, rank, "
-    "total, bpm_min, bpm_max, bpm_main, length_ms, scratch, mtime, size";
+    "total, bpm_min, bpm_max, bpm_main, length_ms, scratch, mtime, size, banner, stagefile, backbmp";
 
 }  // namespace
 
@@ -148,10 +151,18 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     r.bpm_main = c.main_bpm;
     r.length_ms = static_cast<int>(c.end_us / 1000);
     r.scratch = c.layout == KeyLayout::K7S;
+    r.banner = c.meta.banner;
+    r.stagefile = c.meta.stagefile;
+    r.backbmp = c.meta.backbmp;
     return true;
 }
 
 SongDb::~SongDb() { close(); }
+
+bool SongDb::clear_charts() {
+    if (!db_) return false;
+    return sqlite3_exec(db_, "DELETE FROM chart; DELETE FROM skipped;", nullptr, nullptr, nullptr) == SQLITE_OK;
+}
 
 bool SongDb::open(const std::string& path) {
     close();
@@ -164,6 +175,19 @@ bool SongDb::open(const std::string& path) {
         sqlite3_free(err);
         return false;
     }
+    // 古いデータベースに画像の欄を足す。足したら、次の読み直しで全部の譜面を読み直させる
+    bool has_banner = false;
+    {
+        Stmt info(db_, "PRAGMA table_info(chart)");
+        while (info.step())
+            if (info.col_text(1) == "banner") has_banner = true;
+    }
+    if (!has_banner) {
+        sqlite3_exec(db_,
+                     "ALTER TABLE chart ADD COLUMN banner TEXT; ALTER TABLE chart ADD COLUMN stagefile TEXT; "
+                     "ALTER TABLE chart ADD COLUMN backbmp TEXT; UPDATE chart SET mtime = 0;",
+                     nullptr, nullptr, nullptr);
+    }
     return true;
 }
 
@@ -173,7 +197,7 @@ void SongDb::close() {
 }
 
 ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
-                       const std::function<void(int, int)>& progress) {
+                       const std::function<void(int, int, const std::string&)>& progress) {
     auto t0 = std::chrono::steady_clock::now();
     ScanStats stats;
     if (!db_) return stats;
@@ -262,7 +286,8 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
         std::vector<std::thread> pool;
         for (int t = 0; t < nthreads; ++t) pool.emplace_back(parser);
         while (progress && done.load() < static_cast<int>(to_parse.size())) {
-            progress(done.load(), static_cast<int>(to_parse.size()));
+            size_t cur = std::min(next.load(), to_parse.size());
+            progress(done.load(), static_cast<int>(to_parse.size()), cur ? to_parse[cur - 1] : std::string());
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
         for (auto& th : pool) th.join();
@@ -272,7 +297,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
     sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
     {
         std::string sql = std::string("INSERT OR REPLACE INTO chart(") + kChartColumns +
-                          ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                          ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         Stmt ins(db_, sql.c_str());
         Stmt del(db_, "DELETE FROM chart WHERE path = ?");
         Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
@@ -291,7 +316,8 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
             ins.text(1, r.path).text(2, r.folder).text(3, r.sha256).text(4, r.md5).text(5, r.title).text(6, r.subtitle)
                 .text(7, r.artist).text(8, r.subartist).text(9, r.genre).i64(10, r.playlevel).i64(11, r.difficulty)
                 .i64(12, r.notes).i64(13, r.ln).i64(14, r.rank).i64(15, r.total).dbl(16, r.bpm_min).dbl(17, r.bpm_max)
-                .dbl(18, r.bpm_main).i64(19, r.length_ms).i64(20, r.scratch).i64(21, r.mtime).i64(22, r.size);
+                .dbl(18, r.bpm_main).i64(19, r.length_ms).i64(20, r.scratch).i64(21, r.mtime).i64(22, r.size)
+                .text(23, r.banner).text(24, r.stagefile).text(25, r.backbmp);
             ins.run();
         }
         for (const std::string& p : to_remove) del.text(1, p).run(), unskip.text(1, p).run();

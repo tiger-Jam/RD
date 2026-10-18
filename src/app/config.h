@@ -11,6 +11,7 @@ struct AppConfig {
     std::string lr2_root;          // LR2のフォルダ（LR2files があるところ）
     std::string play_skin;         // プレイスキンの .lr2skin（空なら LR2 の既定）
     std::string result_skin;       // リザルトスキンの .lr2skin（空なら LR2 の既定）
+    std::string select_skin;       // 選曲スキンの .lr2skin（空なら LR2 の既定。"none" なら BMjoy の仮の画面）
     std::string sound_set;         // サウンドセットの .lr2ss（空なら LR2 の既定）
     std::string skin_res;          // "", "sd", "hd", "fhd"
     std::map<std::string, std::vector<int>> skin_custom;  // スキンのパス → カスタマイズの選択
@@ -18,12 +19,39 @@ struct AppConfig {
     std::vector<std::string> tables;     // 難易度表のURL（アプリには同梱しない。ユーザーが登録する）
     int hi_speed = 100;            // LR2のハイスピ（100=1.00倍）
     int judge_timing = 0;          // LR2の判定タイミング（描画だけをずらす）
+    // ハイスピードの範囲と刻み（LR2: hsmin / hsmax / hsmargin）
+    int hs_min = 10, hs_max = 900, hs_margin = 10;
+    // ハイスピード固定（LR2: hstype）。0=OFF 1=MAX BPM 2=MIN BPM 3=AVERAGE 5=MAIN BPM（5 は OpenLR2 の拡張）。
+    // 4=CONSTANT は未対応（OFF として扱う）
+    int hs_fix = 0;
+    // レーンカバー（LR2: shuttertype / shutter / shuttermargin）。0=使わない 1=使う。量は 0〜100
+    int lane_cover = 0, lane_cover_v = 0, shutter_margin = 10;
+    // HIDDEN / SUDDEN（LR2: effect）。0=OFF 1=HIDDEN 2=SUDDEN 3=HID+SUD
+    int effect = 0;
+    // 配置（LR2: random）。0=OFF 1=MIRROR 2=RANDOM 3=S-RANDOM 4=SCATTER 5=CONVERGE
+    int random = 0;
+    bool assist = false;  // 皿の自動演奏（LR2: assist。AUTO SCRATCH）
     int gauge = 0;                 // GaugeType
     bool gas = false;
     // fps：0 はモニタのリフレッシュレート、-1 は上限なし。垂直同期は既定で使わない
     // （OpenLR2と同じく、描画を待つ間も入力と判定を回すため）
     int fps = 0;
     bool vsync = false;
+    // 画面（LR2: screenmode / screenexrate）。window_scale は % で、0 ならスキンに合わせる（SD は 2 倍）
+    bool fullscreen = false;
+    int window_scale = 0;
+    // ウインドウサイズ（LR2: windowsize_x / windowsize_y）。両方 1 以上なら、解像度や拡大率より優先する
+    int window_w = 0, window_h = 0;
+    // 曲データベースを起動時に更新するか（LR2: autoreload）。0=起動時 1=手動（選曲画面の F5）
+    int db_update = 0;
+    // LR2 の設定ツールの OPTION / JUKEBOX2 / SELECT の数値
+    int base_speed = 100;      // 基本スクロールスピード（LR2: basespeed。%）
+    int poor_bga_ms = 500;     // ミスBGA表示時間（LR2: poorbga）
+    int input_interval = 16;   // 最低連打間隔（LR2: inputinterval。ms）
+    int search_max = 1000;     // 検索最大ヒット数（LR2: searchmax。0 で無制限）
+    int levelbar_5 = 9, levelbar_7 = 12, levelbar_9 = 42;  // レベルバー最大値（LR2: levelbarflash_*）
+    // 選曲のスクロール（LR2: speedfirst / speednext。ms）
+    int select_speed_first = 300, select_speed_next = 70;
     // Windows で SDL の DirectInput を使うか。既定では使わず、コントローラーは Raw Input で直接読む
     // （DirectInput の機器の列挙に数十秒かかる環境があるため）
     bool joystick_directinput = false;

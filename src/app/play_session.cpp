@@ -1,6 +1,7 @@
 #include "app/play_session.h"
 
 #include <algorithm>
+#include <map>
 #include <atomic>
 #include <cctype>
 #include <cmath>
@@ -17,6 +18,7 @@
 #include "game/ghost.h"
 #include "game/graph.h"
 #include "game/judge.h"
+#include "game/lane_option.h"
 #include "input/input.h"
 #include "input/joystick_init.h"
 #include "render/play_scene.h"
@@ -76,9 +78,8 @@ bool is_movie_file(const std::string& p) {
 }
 
 // リザルトに入ったときに1回だけ記録する。途中でやめたときもLR2と同じくFAILEDとして記録する
-void record_score(App& app, const std::string& sha256, const JudgeEngine& j, bool quit_early) {
+void record_score(App& app, const std::string& sha256, const JudgeEngine& j, bool quit_early, int lamp) {
     const PlayStats& s = j.stats();
-    int lamp = (j.failed() || quit_early) ? 1 : j.clear();
     // 途中でやめたときは、残りのノーツもBPに入れる（LR2: statplay.cpp:659）
     int bp = s.bp() + (quit_early ? s.total_notes - s.note_current : 0);
     app.db.save_score(sha256, lamp, s.exscore(), bp, s.max_combo);
@@ -98,6 +99,38 @@ void print_result(const Chart& chart, const JudgeEngine& j) {
 
 }  // namespace
 
+// ハイスピード固定（LR2: bmsload:3314）。ノーツのある BPM を基準に、BPM 150 と同じ速さに見えるように掛ける
+double hs_fix_multiplier(const Chart& chart, int hs_fix) {
+    if (hs_fix == 0) return 1.0;
+    std::map<double, int> per_bpm;
+    double sum = 0, max_bpm = 0, min_bpm = 1e18;
+    int count = 0;
+    for (const Note& n : chart.notes) {
+        if (n.kind == NoteKind::Invisible || n.kind == NoteKind::Mine) continue;
+        double bpm = chart.bpm_at(n.time_us);
+        per_bpm[bpm]++;
+        sum += bpm;
+        count++;
+        max_bpm = std::max(max_bpm, bpm);
+        min_bpm = std::min(min_bpm, bpm);
+    }
+    if (count == 0) return 1.0;
+    switch (hs_fix) {
+    case 1: return max_bpm > 0 ? 150.0 / max_bpm : 1.0;
+    case 2: return min_bpm > 0 ? 150.0 / min_bpm : 1.0;
+    case 3: return sum > 0 ? 150.0 / (sum / count) : 1.0;
+    case 5: {
+        // ノーツがいちばん多い BPM（同数なら BPM の小さい方）。OpenLR2 の拡張
+        double main_bpm = 0;
+        int most = 0;
+        for (const auto& [bpm, c] : per_bpm)
+            if (c > most) most = c, main_bpm = bpm;
+        return main_bpm > 0 ? 150.0 / main_bpm : 1.0;
+    }
+    default: return 1.0;
+    }
+}
+
 PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     BmsParseOptions popt;
     popt.random_seed = opt.seed ? opt.seed : static_cast<uint32_t>(SDL_GetTicksNS() % 0x7fff);
@@ -106,8 +139,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         std::fprintf(stderr, "読み込めない: %s\n", parsed.error.c_str());
         return PlayExit::Back;
     }
-    const Chart& chart = parsed.chart;
     AppConfig& cfg = app.cfg;
+    // 配置のオプション（LR2: bmsload:3354）。#RANDOM を評価した乱数の続きで並べ替える
+    apply_random_option(parsed.chart, cfg.random, parsed.rng);
+    // CONVERGE のときは皿の自動演奏を切る（LR2: bmsload:2102）
+    const bool assist = cfg.assist && cfg.random != kConverge;
+    const Chart& chart = parsed.chart;
+    const double speed_multiplier = hs_fix_multiplier(chart, cfg.hs_fix);
     // スコアは譜面ファイルの原本のSHA-256で記録する（仕様書8章）
     std::string sha256;
     {
@@ -176,6 +214,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         jcfg.gauge_type = cfg.gauge;
         jcfg.gas = cfg.gas;
         jcfg.autoplay = opt.autoplay;
+        jcfg.assist_scratch = assist;
         JudgeEngine judge(chart, jcfg);
         ctx.judge = &judge;
         ctx.timers = SkinTimers();
@@ -191,6 +230,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.target_type = 0;
 
         InputMapper input(app.keycfg);
+        input.set_min_hold_ms(cfg.input_interval);
         PlayViewState view;
         view.autoplay = opt.autoplay;
         std::vector<LaneInput> lane_in;
@@ -201,6 +241,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         uint64_t prev_ns = scene_start, next_frame_ns = scene_start;
         int next_capture_s = 0;
         float scratch_angle = 0;
+        // レーンカバーを出しているか（LR2: lanecoverDisplay。START か SELECT の2度押しで切り替える）
+        bool cover_display = true;
+        double cover_dbl_ms = 0;
         int old_hp = -1;
         bool last_note_set = false, fc_set = false, done = false;
         // BGAの層（LR2: bmsload:597, 810）。#BMP00 があれば、それが最初のPOORの画像になる
@@ -235,13 +278,22 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 input.collect(SDL_GetTicksNS() + 100000000ull, li, bi);
             }
             ctx.result_clear = (quit_early || judge.failed()) ? 1 : judge.clear();
+            // SCATTER と皿の自動演奏は EASY 止まり。フルコンボは、自動演奏でなく SCATTER でない（か BPM が一定の）ときだけ残す（LR2: statplay.cpp:780）
+            if (forces_easy(cfg.random, assist) && ctx.result_clear > 2) {
+                // BPM が一定か（LR2 はノーツのある BPM の最小と最大で見る）
+                double lo = 1e18, hi = 0;
+                for (const Note& n : chart.notes)
+                    if (n.kind != NoteKind::Invisible) lo = std::min(lo, chart.bpm_at(n.time_us)), hi = std::max(hi, chart.bpm_at(n.time_us));
+                bool keep_fc = ctx.result_clear == 5 && !assist && (cfg.random != kScatter || lo == hi);
+                if (!keep_fc) ctx.result_clear = 2;
+            }
             // 比較に使う「このプレイの前の自己ベスト」は、記録する前に取っておく
             ctx.old_exscore = has_best ? best_score.exscore : 0;
             ctx.old_maxcombo = has_best ? best_score.max_combo : 0;
             ctx.old_minbp = has_best ? best_score.bp : -1;
             ctx.old_total_notes = has_best ? ps.total_notes : 0;
             if (!recorded && opt.save_score && !opt.autoplay && started) {
-                record_score(app, sha256, judge, quit_early);
+                record_score(app, sha256, judge, quit_early, ctx.result_clear);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
                 ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
             }
@@ -279,12 +331,49 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         };
         ctx.timers.set(0, 0);
 
+        // 演奏中の START / SELECT の操作（LR2: gameloop:163-327, 384-400）
+        auto play_buttons = [&](double now_ms) {
+            bool held_start = input.button_held(kStart), held_select = input.button_held(kSelect);
+            bool cover_active = cfg.lane_cover && cover_display;
+            for (const ButtonInput& b : button_in) {
+                if (!b.down) continue;
+                if (b.button == kStart || b.button == kSelect) {
+                    // 片方だけを押したときに、250ms 以内の2度押しでカバーを出し入れする
+                    bool other = b.button == kStart ? held_select : held_start;
+                    if (other) continue;
+                    if (cover_dbl_ms == 0 || now_ms - cover_dbl_ms > 250.0) {
+                        cover_dbl_ms = now_ms;
+                    } else {
+                        cover_dbl_ms = 0;
+                        cover_display = !cover_display;
+                    }
+                    continue;
+                }
+                // START か SELECT を押しながら鍵盤：1・3・5 で遅く、2・4 で速く、6・7 でカバー（カバーが無ければハイスピード）
+                bool start_or_select = (held_start && b.button != kStart) || (held_select && b.button != kSelect);
+                if (!start_or_select || b.button > kKey7) continue;
+                int key = b.button - kKey1 + 1;
+                if (key == 1 || key == 3 || key == 5) cfg.hi_speed -= cfg.hs_margin;
+                else if (key == 2 || key == 4) cfg.hi_speed += cfg.hs_margin;
+                else if (key == 6) cover_active ? cfg.lane_cover_v -= cfg.shutter_margin : cfg.hi_speed += cfg.hs_margin;
+                else if (key == 7) cover_active ? cfg.lane_cover_v += cfg.shutter_margin : cfg.hi_speed -= cfg.hs_margin;
+            }
+            cfg.lane_cover_v = std::clamp(cfg.lane_cover_v, 0, 100);
+            cfg.hi_speed = std::clamp(cfg.hi_speed, cfg.hs_min, cfg.hs_max);
+            ctx.cover_adjusting = held_start || held_select;
+        };
+
         while (!done) {
             SDL_Event e;
             while (SDL_PollEvent(&e)) {
                 switch (e.type) {
                 case SDL_EVENT_QUIT: quit = true, done = true, exit = PlayExit::Quit; break;
                 case SDL_EVENT_JOYSTICK_ADDED: SDL_OpenJoystick(e.jdevice.which); break;
+                case SDL_EVENT_MOUSE_WHEEL:
+                    // ホイールでレーンカバー（LR2: gameloop:183）
+                    if (phase == Phase::Play && cfg.lane_cover == 1)
+                        cfg.lane_cover_v = std::clamp(cfg.lane_cover_v - static_cast<int>(std::lround(e.wheel.y)), 0, 100);
+                    break;
                 case SDL_EVENT_KEY_DOWN:
                     if (e.key.repeat) break;
                     if (e.key.key == SDLK_ESCAPE) {
@@ -297,14 +386,19 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     } else if (e.key.key == SDLK_F4) {
                         bool fs = SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN;
                         SDL_SetWindowFullscreen(app.window, !fs);
-                    } else if (e.key.key == SDLK_UP) {
-                        cfg.hi_speed = std::min(900, cfg.hi_speed + 10);
-                    } else if (e.key.key == SDLK_DOWN) {
-                        cfg.hi_speed = std::max(10, cfg.hi_speed - 10);
-                    } else if (e.key.key == SDLK_RIGHT) {
-                        cfg.judge_timing = std::min(199, cfg.judge_timing + 1);
-                    } else if (e.key.key == SDLK_LEFT) {
-                        cfg.judge_timing = std::max(-199, cfg.judge_timing - 1);
+                    } else if ((e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) && (e.key.mod & SDL_KMOD_SHIFT)) {
+                        // 判定タイミング（BMjoy の拡張。LR2 はオプション画面でしか変えられない）
+                        int d = e.key.key == SDLK_RIGHT ? 1 : -1;
+                        cfg.judge_timing = std::clamp(cfg.judge_timing + d, -199, 199);
+                    } else if (e.key.key == SDLK_UP || e.key.key == SDLK_DOWN) {
+                        // ハイスピード（LR2: gameloop:477。端まで行くと反対の端へ回る）
+                        cfg.hi_speed += e.key.key == SDLK_UP ? cfg.hs_margin : -cfg.hs_margin;
+                        if (cfg.hi_speed > cfg.hs_max) cfg.hi_speed = cfg.hs_min;
+                        else if (cfg.hi_speed < cfg.hs_min) cfg.hi_speed = cfg.hs_max;
+                    } else if (e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) {
+                        // レーンカバーの量（LR2: gameloop:481）
+                        int d = e.key.key == SDLK_RIGHT ? cfg.shutter_margin : -cfg.shutter_margin;
+                        cfg.lane_cover_v = std::clamp(cfg.lane_cover_v + d, 0, 100);
                     }
                     break;
                 default: break;
@@ -342,6 +436,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.now_ms = now_ms;
             ctx.hi_speed = cfg.hi_speed;
             ctx.judge_timing = cfg.judge_timing;
+            ctx.lane_cover = cfg.lane_cover_v;
+            ctx.lane_cover_on = cfg.lane_cover && cover_display;
             ctx.loaded = load_done.load();
             if (loaded && !loader_joined) {
                 loader.join();
@@ -380,6 +476,18 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             // 曲の時刻 → シーンの時刻（タイマーは曲の出来事の瞬間に合わせて立てる）
             auto scene_ms_of = [&](int64_t t_us) { return now_ms - (song_ms - t_us / 1000.0); };
 
+            if (!started && phase == Phase::Play && ctx.timers.on(1)) {
+                // 曲が始まる前も、入力受付（タイマー1）から先は鍵盤を光らせる（LR2: LR2_gameloop.cpp:120）。判定はしない
+                lane_in.clear();
+                button_in.clear();
+                input.collect(now_ns, lane_in, button_in);
+                play_buttons(now_ms);
+                for (const LaneInput& li : lane_in) {
+                    double at = now_ms - (now_ns - li.time_ns) / 1e6;
+                    if (li.down) ctx.timers.set(100 + li.lane, at), ctx.timers.reset(120 + li.lane);
+                    else ctx.timers.reset(100 + li.lane), ctx.timers.set(120 + li.lane, at);
+                }
+            }
             if (started && phase == Phase::Play) {
                 ctx.song_ms = song_ms;
                 ctx.timers.set(41, now_ms - song_ms);
@@ -387,6 +495,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 lane_in.clear();
                 button_in.clear();
                 input.collect(now_ns, lane_in, button_in);
+                play_buttons(now_ms);
                 for (const LaneInput& li : lane_in) {
                     int64_t t = mixer.song_time_us_at(li.time_ns);
                     if (li.down) judge.press(li.lane, t);
@@ -526,10 +635,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 fps_t0 = now_ns;
             }
 
-            // 皿の回転（LR2: LR2_gameloop.cpp:349。押している向きに速く、離していればゆっくり回る）
+            // 皿の回転（LR2: LR2_gameloop.cpp:349）。押している向きに 720°/秒。
+            // 離しているときは、曲が始まってから（タイマー41）だけ 360°/秒でゆっくり回る
             if (input.button_held(kScratchA)) scratch_angle -= static_cast<float>(dt_ms * 0.72);
             else if (input.button_held(kScratchB)) scratch_angle += static_cast<float>(dt_ms * 0.72);
-            else scratch_angle += static_cast<float>(dt_ms * 0.36);
+            else if (started) scratch_angle += static_cast<float>(dt_ms * 0.36);
             scratch_angle = std::fmod(scratch_angle, 360.0f);
 
             SDL_Renderer* renderer = app.renderer;
@@ -578,6 +688,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.notes_visible = started;
                 st.render_beat = render_beat;
                 st.hi_speed = cfg.hi_speed;
+                st.speed_multiplier = speed_multiplier;
+                st.base_speed = cfg.base_speed;
+                st.effect = cfg.effect;
                 st.autoplay = opt.autoplay;
                 st.judge_draw = ctx.judge_draw;
                 st.combo_draw = judge.stats().combo;
@@ -588,7 +701,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.bga_base = bga_base;
                 st.bga_layer = bga_layer;
                 st.bga_poor = bga_poor;
-                st.bga_show_poor = now_ms - last_miss_ms < 500;  // LR2: poorbga の既定値500ms
+                st.bga_show_poor = now_ms - last_miss_ms < cfg.poor_bga_ms;  // LR2: poorbga（既定 500ms）
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
                 app.skin_renderer->draw_play(*skin, st);
@@ -598,8 +711,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 view.song_ms = song_ms;
                 view.render_beat = render_beat;
                 view.hi_speed = cfg.hi_speed;
+                view.speed_multiplier = speed_multiplier;
                 char status[128];
-                std::snprintf(status, sizeof(status), "UP/DOWN: HI-SPEED  LEFT/RIGHT: TIMING %+d ms  F4: FULLSCREEN  ESC: END",
+                std::snprintf(status, sizeof(status), "UP/DOWN: HI-SPEED  SHIFT+LEFT/RIGHT: TIMING %+d ms  F4: FULLSCREEN  ESC: END",
                               cfg.judge_timing);
                 view.status = status;
                 draw_play(renderer, chart, judge, view);

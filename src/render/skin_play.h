@@ -24,7 +24,9 @@ struct PlayContext {
     int gauge_type = kGroove;
     int hi_speed = 100;
     int judge_timing = 0;
-    int lane_cover = 0;
+    int lane_cover = 0;          // レーンカバーの量（0〜100）
+    bool lane_cover_on = false;  // レーンカバーを使っていて、いま出している
+    bool cover_adjusting = false;  // START か SELECT を押している（スキンの270：カバーの調整中）
     int fps = 0;
     int loaded = 0, load_total = 1;
     int judge_draw = 0;

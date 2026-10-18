@@ -44,6 +44,8 @@ struct JudgeConfig {
     int gauge_type = kGroove;
     bool gas = false;
     bool autoplay = false;
+    // 皿の自動演奏（LR2 の ASSIST）。皿のノーツは判定せず、時刻が来たら数だけ進めて音を鳴らす（スコア・コンボ・ゲージには入らない）
+    bool assist_scratch = false;
 };
 
 class JudgeEngine {
@@ -73,6 +75,8 @@ public:
     // LNの始点を押して保持中か
     bool ln_holding(size_t index) const { return active_[index] > 0; }
     bool lane_held(int lane) const { return held_[lane]; }
+    // 皿の自動演奏のレーンか（描画で #SRC_AUTO_NOTE などの絵を使う。全体のオートプレイでは使わない。LR2: Play.cpp:575）
+    bool is_assist_lane(int lane) const { return lane_auto(lane); }
     // そのレーンでLNを押し続けている最中か
     bool lane_ln_holding(int lane) const {
         const Lane& l = lanes_[lane];
@@ -84,7 +88,9 @@ private:
         std::vector<size_t> notes;  // chart.notes の添字（通常・LN・地雷）
         size_t cur = 0;
         uint16_t note_val = 0;      // 押したときに鳴らすキー音（LR2: noteVal）
+        size_t sound_cur = 0;       // 自動演奏のレーン：次に始点の音を鳴らすノーツ
     };
+    bool lane_auto(int lane) const { return cfg_.assist_scratch && lane == 0; }
 
     void proc(int lane, int keypress, int timing_ms, int64_t t_us);
     void proc_single(int lane, int keypress, int timing_ms, int64_t t_us);

@@ -6,6 +6,8 @@
 
 #include <array>
 #include <cstdint>
+#include <algorithm>
+#include <unordered_map>
 #include <vector>
 
 #include "input/keyconfig.h"
@@ -32,6 +34,8 @@ public:
     // now_ns までに確定した入力を取り出す（離す入力は、押してから16ms経つまで保留する）
     void collect(uint64_t now_ns, std::vector<LaneInput>& lanes, std::vector<ButtonInput>& buttons);
     bool button_held(int button) const { return held_count_[button] > 0; }
+    // 押してから離すまでの最短の時間（LR2: 最低連打間隔 inputinterval。既定 16ms）
+    void set_min_hold_ms(int ms) { min_hold_ns_ = static_cast<uint64_t>(std::max(0, ms)) * 1000000ull; }
 
     // 入力元の番号：0..511 キーボード（SDLのスキャンコード）、512以降 ジョイスティック
     static constexpr int kJoyBase = 512;
@@ -52,7 +56,7 @@ private:
     };
     void source_change(int source, bool down, uint64_t ts);
     void apply_button(int button, bool down, uint64_t ts);
-    void analog_motion(int16_t value, uint64_t ts);
+    void analog_motion(uint32_t which, int16_t value, uint64_t ts);
 
     KeyConfig cfg_;
     std::array<Source, kSourceCount> sources_{};
@@ -66,8 +70,9 @@ private:
     std::vector<ButtonInput> button_out_;
     std::array<int16_t, kAxes> axis_{};
     // アナログ皿の状態
-    bool analog_init_ = false;
-    int16_t analog_last_ = 0;
+    // 前回の値は機器ごとに持つ（同じ番号の軸を持つ機器が2台あると、交互に届いて向きが乱れる）
+    std::unordered_map<uint32_t, int16_t> analog_last_;
+    uint64_t min_hold_ns_ = 16'000'000;
     int analog_dir_ = 0;  // 0=止まっている, 1/-1=回している向き
     uint64_t analog_move_ns_ = 0;
 };

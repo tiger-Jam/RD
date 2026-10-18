@@ -120,6 +120,24 @@ struct Lr2Skin {
     std::array<SkinObject, 2> gaugechart;
     std::array<SkinObject, 3> scorechart;
 
+    // 選曲画面：曲リストのバー（本体の種類 0..29、タイトル 0..4、レベル 0..10、ランプ類 0..9）
+    struct Bar {
+        std::array<SkinSrc, 30> body;
+        std::array<SkinDst, 30> body_on, body_off;  // 画面の上から何本目か（添字）ごとの位置。選んでいる行は ON
+        std::array<SkinText, 5> title;
+        std::array<SkinObject, 11> level;
+        std::array<SkinObject, 10> lamp, my_lamp, rival_lamp, rival, rank;
+        std::array<SkinObject, 6> star;
+        SkinObject flash;
+        SkinDst stagefile;
+        int center = 0;                      // 選んでいる行（#BAR_CENTER）
+        int available_from = 0, available_to = 0;  // クリックで選べる行の範囲（#BAR_AVAILABLE）
+    } bar;
+    std::vector<SkinObject> onmouse;     // マウスを乗せたときだけ出る絵（#SRC_ONMOUSE）
+    SkinObject mousecursor;
+    std::array<SkinText, 2> readme;
+    std::vector<std::string> helpfiles;
+    bool reload_banner = false;
     std::vector<ImageFont> image_fonts;  // #LR2FONT（最大10）
     std::vector<TtfFont> ttf_fonts;      // #FONT（最大10）
 

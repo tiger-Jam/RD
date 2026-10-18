@@ -156,7 +156,7 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
                 case SDL_SCANCODE_F1:
                     cfg = KeyConfig::lr2_default();
                     rebuild();
-                    message = "RESET TO LR2 DEFAULT";
+                    message = "RESET TO DEFAULT";
                     break;
                 default: break;
                 }
@@ -203,7 +203,7 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
             } else if (i == kRowAnalog) {
                 label = "ANALOG TT";
                 char b[64];
-                if (cfg.analog_axis < 0) std::snprintf(b, sizeof(b), "OFF (LR2 STYLE)");
+                if (cfg.analog_axis < 0) std::snprintf(b, sizeof(b), "OFF");
                 else std::snprintf(b, sizeof(b), "AXIS %d%s   (LEFT/RIGHT: INVERT)", cfg.analog_axis, cfg.analog_invert ? " INVERTED" : "");
                 value = b;
             } else {
@@ -267,7 +267,7 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
         else if (joys.empty() && raw_hid().devices().empty()) text(r, 16, y, dim, "NO JOYSTICK CONNECTED"), y += 12;
         text(r, 16, y + 4, dim, "LAST: " + last_raw);
         text(r, 16, 440, hi, message);
-        text(r, 16, 456, dim, "UP/DOWN: SELECT   F1: RESET TO LR2 DEFAULT");
+        text(r, 16, 456, dim, "UP/DOWN: SELECT   F1: RESET TO DEFAULT");
         if (const char* shot = std::getenv("BMJ_KEYCONFIG_SHOT"); shot && SDL_GetTicksNS() - t0 > 1500000000ull) {
             // 開発用：1枚保存して終わる
             if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
@@ -306,18 +306,29 @@ void assign(KeyConfig& cfg, int button, const Binding& b) {
 
 bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const std::string& path) {
     KeyConfig cfg = cfg_in;
-    // 手順：0..6 = 鍵盤1〜7、7 = 皿（回す）、8 = 皿の反対向き（ボタンやキーで皿を操作するときだけ）
+    // 手順：0..6 = 鍵盤1〜7、7 = 皿の右回し（時計回り）、8 = 皿の左回し（反時計回り）、9 = 確認。
+    // 右回し = scratch_b（LR2 の key11。皿の絵が時計回りに回る）、左回し = scratch_a（key10）。
+    // アナログの皿も両方の向きを回してもらい、2回の向きが逆になっていることを確かめる
     int step = 0;
     bool scratch_by_button = false;
-    std::array<int64_t, 16> travel{};
-    std::array<int16_t, 16> prev{};
-    std::array<bool, 16> seen{};
+    uint32_t analog_which = 0;
+    int cw_sign = 0;  // 右回ししたときに軸の値が動いた向き
+    std::string warn;
+    Binding cw_binding{};
+    // 軸の動きは機器ごとに数える（同じ番号の軸を持つ機器が2台あると、混ぜたときに大きく動いたように見える）
+    struct AxisTrack {
+        int64_t travel = 0, net = 0;
+        int16_t prev = 0;
+        int small_steps = 0;  // 少しずつ動いた回数（位置を返す皿なら増える）
+        int pulses = 0, pulse_dir = 0;  // 中央から端へ跳んだ回数と向き（向きだけを送る皿）
+    };
+    std::map<std::pair<uint32_t, int>, AxisTrack> axes;
     std::string last;
     uint64_t step_start = SDL_GetTicksNS();
     auto next_step = [&](int s) {
         step = s;
-        travel.fill(0);
-        seen.fill(false);
+        warn.clear();
+        axes.clear();
         step_start = SDL_GetTicksNS();
     };
     auto bind_digital = [&](const Binding& b) {
@@ -326,13 +337,18 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
             assign(cfg, kKey1 + step, b);
             next_step(step + 1);
         } else if (step == 7) {
-            // 皿をボタンやキーで操作する：1つ目の向き。アナログの皿の設定は切る
-            assign(cfg, kScratchA, b);
+            // 皿をボタンやキーで操作する：右回し。アナログの皿の設定は切る
+            assign(cfg, kScratchB, b);
+            cw_binding = b;
             if (!is_key(b)) cfg.analog_axis = -1;
             scratch_by_button = true;
             next_step(8);
-        } else if (step == 8) {
-            assign(cfg, kScratchB, b);
+        } else if (step == 8 && scratch_by_button) {
+            if (b == cw_binding) {
+                warn = "右回しと同じ入力です。反時計回りに回してください";
+                return;
+            }
+            assign(cfg, kScratchA, b);
             next_step(9);
         }
     };
@@ -349,9 +365,11 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
                 if (e.key.scancode == SDL_SCANCODE_ESCAPE) {
                     canceled = true;
                 } else if (e.key.scancode == SDL_SCANCODE_BACKSPACE) {
-                    next_step(step == 9 ? (scratch_by_button ? 8 : 7) : std::max(0, step - 1));
+                    next_step(std::max(0, step - 1));
                 } else if (e.key.scancode == SDL_SCANCODE_RETURN && step == 8) {
-                    next_step(9);  // 反対向きは無しでよい
+                    // 左回しは無しでよい（アナログなら右回しの向きだけで決める）
+                    if (!scratch_by_button) cfg.analog_invert = cw_sign < 0;
+                    next_step(9);
                 } else if (e.key.scancode == SDL_SCANCODE_RETURN && step == 9) {
                     done = true;
                 } else if (!settle && step <= 8) {
@@ -367,24 +385,60 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
             } else if (e.type == SDL_EVENT_JOYSTICK_AXIS_MOTION && e.jaxis.axis < 16) {
                 // 軸は皿の手順でだけ見る（専用コントローラーの皿はアナログの軸として来ることが多く、鍵盤の手順で拾うと誤る）
                 int a = e.jaxis.axis;
-                if (seen[a]) {
-                    int d = std::abs(static_cast<int>(e.jaxis.value) - prev[a]);
-                    if (d > 32768) d = 65536 - d;
-                    travel[a] += d;
+                auto [it, first] = axes.try_emplace({e.jaxis.which, a});
+                AxisTrack& t = it->second;
+                if (!first) {
+                    int d = static_cast<int>(e.jaxis.value) - t.prev;
+                    // 1周で値が端から端へ戻るときの折り返し
+                    if (d > 32768) d -= 65536;
+                    if (d < -32768) d += 65536;
+                    t.travel += std::abs(d);
+                    t.net += d;
+                    if (d != 0 && std::abs(d) < 8000) t.small_steps++;
                 }
-                seen[a] = true;
-                prev[a] = e.jaxis.value;
-                if (step == 7 && !settle && travel[a] > 12000) {
+                // 中央から一気に端へ跳んだ軸は、回している向きだけを送る皿（止まると中央に戻る）。
+                // LR2 と同じく、軸を方向ボタンとして割り当てる
+                // 2回続けて同じ向きに跳んだら決める（1回だと、位置を返す皿の最初の値と区別できない）
+                if (std::abs(e.jaxis.value) > 24000 && (first || std::abs(t.prev) < 4000)) {
+                    int dir = e.jaxis.value > 0 ? 1 : -1;
+                    t.pulses = dir == t.pulse_dir ? t.pulses + 1 : 1;
+                    t.pulse_dir = dir;
+                }
+                t.prev = e.jaxis.value;
+                if ((step == 7 || (step == 8 && scratch_by_button)) && !settle && t.pulses >= 2 && t.small_steps == 0) {
+                    bind_digital({Binding::Type::JoyAxis, a, e.jaxis.value > 0 ? 1 : -1});
+                    continue;
+                }
+                // 位置を返す皿（少しずつ動く）だけをアナログとして扱う
+                bool positional = t.small_steps >= 4 && t.travel > 12000;
+                if (step == 7 && !settle && positional) {
                     cfg.analog_axis = a;
+                    analog_which = e.jaxis.which;
+                    cw_sign = t.net < 0 ? -1 : 1;
+                    scratch_by_button = false;
                     // アナログの皿にするので、軸を方向ボタンとして読む古い割り当ては外す
                     for (int b : {kScratchA, kScratchB}) {
                         auto& v = cfg.buttons[b];
                         v.erase(std::remove_if(v.begin(), v.end(), [](const Binding& x) { return x.type == Binding::Type::JoyAxis; }), v.end());
                     }
                     char m[48];
-                    std::snprintf(m, sizeof(m), "joy:axis %d（アナログ）", a);
+                    std::snprintf(m, sizeof(m), "joy:axis %d（アナログ）右回し", a);
                     last = m;
-                    next_step(9);
+                    next_step(8);
+                } else if (step == 8 && !scratch_by_button && !settle && e.jaxis.which == analog_which &&
+                           a == cfg.analog_axis && positional) {
+                    if ((t.net < 0 ? -1 : 1) == cw_sign) {
+                        // 右回しと同じ向きに回っている。数え直す
+                        warn = "右回しと同じ向きに回っています。反時計回りに回してください";
+                        axes.clear();
+                    } else {
+                        // 右に回したときに値が減る皿なら向きを反転する（右回し = scratch_b になるように）
+                        cfg.analog_invert = cw_sign < 0;
+                        char m[48];
+                        std::snprintf(m, sizeof(m), "joy:axis %d（アナログ%s）左回し", a, cfg.analog_invert ? "・反転" : "");
+                        last = m;
+                        next_step(9);
+                    }
                 }
             }
         }
@@ -396,8 +450,9 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
         text.draw(640, 60, 26, white, "キーコンフィグ", 1);
         std::string msg;
         if (step <= 6) msg = std::to_string(step + 1) + " 鍵を押してください";
-        else if (step == 7) msg = "皿を回してください（ボタンやキーで操作するなら、それを押す）";
-        else if (step == 8) msg = "皿の反対向きを押してください（無ければ Enter）";
+        else if (step == 7) msg = "皿を右（時計回り）に回してください（ボタンやキーで操作するなら、右回しに使うものを押す）";
+        else if (step == 8 && scratch_by_button) msg = "皿の左（反時計回り）に使うものを押してください（無ければ Enter）";
+        else if (step == 8) msg = "皿を左（反時計回り）に回してください";
         else msg = "設定できました。決定（Enter か コントローラーのボタン）で保存します";
         text.draw(640, 170, 30, accent, msg, 1, 1180);
         // 鍵盤の図：皿＋7鍵。いま聞いているところを光らせる
@@ -414,6 +469,7 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
             text.draw(x + w / 2, 430, 18, now ? accent : dim, lane == 0 ? "皿" : std::to_string(lane), 1);
         }
         if (!last.empty()) text.draw(640, 490, 18, dim, "直前に割り当てた入力：" + last, 1);
+        if (!warn.empty()) text.draw(640, 230, 20, SDL_Color{255, 110, 110, 255}, warn, 1, 1180);
         text.draw(640, 640, 16, dim, "Backspace：1つ戻る　　Esc：やめる（保存しない）", 1);
         if (const char* shot = std::getenv("BMJ_WIZARD_SHOT")) {
             // 開発用：1枚保存してやめる

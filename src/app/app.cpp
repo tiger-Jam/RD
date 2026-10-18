@@ -48,6 +48,7 @@ void guess_resolution(Lr2Skin& sk) {
 App::~App() {
     skin_renderer.reset();
     result_renderer.reset();
+    select_renderer.reset();
     mixer.close();
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
@@ -57,13 +58,16 @@ bool App::init(const char* argv0) {
     lr2_root = find_lr2_root(cfg.lr2_root, argv0);
     if (keycfg.load(keyconfig_path())) std::printf("キーコンフィグ: %s\n", keyconfig_path().c_str());
     std::printf("ウィンドウを作っています\n");
-    window = SDL_CreateWindow("BMjoy", 1280, 960, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    int ww, wh;
+    window_size(640, 480, ww, wh);
+    window = SDL_CreateWindow("BMjoy", ww, wh, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     renderer = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
     if (!renderer) {
         std::fprintf(stderr, "ウィンドウを作れない: %s\n", SDL_GetError());
         return false;
     }
     SDL_SetRenderVSync(renderer, cfg.vsync ? 1 : 0);
+    if (cfg.fullscreen) SDL_SetWindowFullscreen(window, true);
     // 別のプロセスから起動されたときでも、前面に出てキーボードの入力を受けられるようにする
     SDL_SetHint(SDL_HINT_FORCE_RAISEWINDOW, "1");
     SDL_RaiseWindow(window);
@@ -72,6 +76,7 @@ bool App::init(const char* argv0) {
         if (m->refresh_rate > 0) refresh_hz = m->refresh_rate;
     skin_renderer = std::make_unique<SkinRenderer>(renderer);
     result_renderer = std::make_unique<SkinRenderer>(renderer);
+    select_renderer = std::make_unique<SkinRenderer>(renderer);
     set_view(640, 480);
     std::printf("音声デバイスを開いています\n");
     if (!mixer.open(0, 128)) {
@@ -95,10 +100,31 @@ bool App::init(const char* argv0) {
     return true;
 }
 
+// ウィンドウの大きさ。解像度（SD/HD/FHD）の指定があればその大きさ、無ければスキンの大きさ（SD は 2 倍）。
+// スキンは自分の大きさで描いて、ウィンドウいっぱいに拡大する（縦横比は保つ）
+void App::window_size(int skin_w, int skin_h, int& w, int& h) const {
+    if (cfg.window_w > 0 && cfg.window_h > 0) {
+        w = cfg.window_w, h = cfg.window_h;
+        return;
+    }
+    int scale = cfg.window_scale > 0 ? cfg.window_scale : 100;
+    if (cfg.skin_res == "sd") w = 640, h = 480;
+    else if (cfg.skin_res == "hd") w = 1280, h = 720;
+    else if (cfg.skin_res == "fhd") w = 1920, h = 1080;
+    else {
+        w = skin_w, h = skin_h;
+        if (cfg.window_scale <= 0 && skin_w <= 640) scale = 200;
+    }
+    w = w * scale / 100;
+    h = h * scale / 100;
+}
+
 void App::set_view(int w, int h, bool resize_window) {
     if (resize_window && (w != view_w || h != view_h)) {
         // ウィンドウの大きさもスキンに合わせる（SDは2倍）
-        if (!(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN)) SDL_SetWindowSize(window, w <= 640 ? w * 2 : w, w <= 640 ? h * 2 : h);
+        int ww, wh;
+        window_size(w, h, ww, wh);
+        if (!(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN)) SDL_SetWindowSize(window, ww, wh);
     }
     view_w = w;
     view_h = h;
@@ -131,9 +157,6 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
         return nullptr;
     }
     if (!header.has_resolution) guess_resolution(*skin);
-    if (app.cfg.skin_res == "sd") skin->width = 640, skin->height = 480;
-    else if (app.cfg.skin_res == "hd") skin->width = 1280, skin->height = 720;
-    else if (app.cfg.skin_res == "fhd") skin->width = 1920, skin->height = 1080;
     for (const auto& w : skin->warnings)
         if (w.find(".dummy") == std::string::npos) std::printf("  スキン警告: %s\n", w.c_str());
     renderer.upload(*skin);
@@ -145,6 +168,14 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
 void App::load_play_skin(const std::array<bool, 1000>& options) {
     play_skin = load_skin(*this, cfg.play_skin, "LR2files/Theme/LR2/Play/play_7.lr2skin", options, *skin_renderer);
     if (!play_skin) std::printf("LR2スキンが見つからないので、仮の画面で遊ぶ（--lr2-root でLR2のフォルダを指定できる）\n");
+}
+
+void App::load_select_skin(const std::array<bool, 1000>& options) {
+    if (cfg.select_skin == "none") {
+        select_skin.reset();
+        return;
+    }
+    select_skin = load_skin(*this, cfg.select_skin, "LR2files/Theme/LR2/Select/select.lr2skin", options, *select_renderer);
 }
 
 void App::load_result_skin(const std::array<bool, 1000>& options) {

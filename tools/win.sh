@@ -2,7 +2,7 @@
 # Mac から Windows 機（ssh win）で BMjoy をビルド・起動する。
 #
 #   tools/win.sh sync             いまの作業ツリーを送ってビルドする
-#   tools/win.sh run [引数...]     Windows のデスクトップで bmjoy.exe を起動する（ログイン中の画面に出る）
+#   tools/win.sh run [引数...]     Windows のデスクトップで BMjoybody.exe を起動する（ログイン中の画面に出る）
 #   tools/win.sh test             Windows でユニットテストを動かす
 #   tools/win.sh log              最後に起動したときのログを見る
 #   tools/win.sh shot [引数...]    起動して画面を1枚撮り、Mac に持ってくる（開発用）
@@ -13,7 +13,7 @@ HOST=${BMJ_WIN_HOST:-win}
 DIR=${BMJ_WIN_DIR:-bmjoy_mac_build}
 cd "$(dirname "$0")/.."
 WINDIR=$(ssh -o BatchMode=yes "$HOST" '$env:USERPROFILE' | tr -d '\r')"\\$DIR"
-EXE="$WINDIR\\build\\RelWithDebInfo\\bmjoy.exe"
+EXE="$WINDIR\\build\\RelWithDebInfo\\BMjoybody.exe"
 
 ps() { ssh -o BatchMode=yes "$HOST" "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $1"; }
 # 引数が空のときは -ArgLine を付けない（powershell -File は空の文字列を「引数なし」とみなして失敗する）

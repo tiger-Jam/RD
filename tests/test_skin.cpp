@@ -1,4 +1,6 @@
 #include <cmath>
+#include <cstdio>
+#include <string>
 
 #include "skin/lr2_skin.h"
 #include "test.h"
@@ -62,4 +64,23 @@ TEST(skin_src_frame) {
     CHECK_EQ(src_frame(s, 799), 7);
     CHECK_EQ(src_frame(s, 800), 0);
     CHECK_EQ(src_frame(s, -1), 0);
+}
+
+// 手元に WMIX_HD があるときだけ：選曲スキンのバーとマウスの部品が読めること
+TEST(skin_wmix_select_bar) {
+    std::string root = std::string(BMJ_SOURCE_DIR) + "/参考に/LR2beta3 2";
+    std::string path = root + "/LR2files/Theme/WMIX_HD/select/select.lr2skin";
+    SkinHeader h;
+    if (!read_skin_header(root, path, h)) return;
+    Lr2Skin sk;
+    std::string err;
+    std::array<bool, 1000> op{};
+    CHECK(load_lr2_skin(root, path, h, op, sk, err));
+    int bodies = 0, on = 0;
+    for (int i = 0; i < 30; ++i) bodies += sk.bar.body[i].valid, on += !sk.bar.body_on[i].empty();
+    CHECK(bodies >= 5);
+    CHECK(on >= 10);
+    CHECK(!sk.bar.title[0].dst.empty());
+    CHECK(!sk.onmouse.empty());
+    std::printf("  WMIX 選曲: バー本体 %d 種類、行 %d、中心 %d、マウス %zu\n", bodies, on, sk.bar.center, sk.onmouse.size());
 }

@@ -12,9 +12,14 @@
 // 指定したオプションは設定ファイル（config.txt）に保存され、次からは指定しなくても使われる
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include <algorithm>
 #include <filesystem>
+#include <future>
+#include <optional>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -31,6 +36,7 @@
 #include "input/joystick_init.h"
 #include "input/win_rawhid.h"
 #include "render/keyconfig_scene.h"
+#include "render/text_cache.h"
 #include "skin/lr2_skin.h"
 
 using namespace bmj;
@@ -142,12 +148,117 @@ int simulate(const Chart& chart, int gauge, bool gas) {
     return 0;
 }
 
+// 起動の画面（LR2: Main.cpp の起動処理）。真っ黒な画面の左上に白い文字を足していく。
+//   曲データベースの更新中は「Now Loading...」と読み込み中の譜面のパス（1件ごとに描き直す）、
+//   難易度表の取得中は表ごとの状態を出し、最後に版の名前と「PUSH ANY KEY」を出して入力を待つ。押すと「READY」。
+// 閉じられたら false
+bool startup_screen(App& app, bool update) {
+    // LR2（DxLib の printfDx）と同じく、拡大せずにウィンドウの画素にそのまま、ぼかさない 16px の文字で描く
+    SDL_SetRenderLogicalPresentation(app.renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+    app.view_w = app.view_h = 0;  // 次の set_view で必ず設定し直す
+    const float px = std::max(1.0f, SDL_GetWindowPixelDensity(app.window));
+    const int font = static_cast<int>(16 * px);
+    TextCache text(app.renderer);
+    text.set_antialias(false);
+#ifdef _WIN32
+    // LR2（DxLib）の既定の文字と同じ MS ゴシック
+    text.set_system_font("MS Gothic");
+#endif
+    const SDL_Color white{255, 255, 255, 255};
+    std::vector<std::string> lines;  // 画面に残っていく行
+    bool closed = false;
+    const char* startup_shot = nullptr;
+    auto draw = [&](const std::vector<std::string>& temp) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e))
+            if (e.type == SDL_EVENT_QUIT) closed = true;
+        SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+        SDL_RenderClear(app.renderer);
+        float y = 0;
+        for (const std::string& l : lines) text.draw(0, y, font, white, l, 0, 0, 0), y += font;
+        for (const std::string& l : temp) text.draw(0, y, font, white, l, 0, 0, 0), y += font;
+        if (const char* shot = std::getenv("BMJ_LOADING_SHOT"); shot && !temp.empty()) {
+            // 開発用：読み込み中の画面を1枚保存する
+            static bool saved = false;
+            if (!saved)
+                if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf), saved = true;
+        }
+        if (startup_shot)
+            if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, startup_shot), SDL_DestroySurface(sf);
+        SDL_RenderPresent(app.renderer);
+    };
+    draw({});
+    if (update) {
+        SongDb db;
+        if (db.open(song_db_path())) {
+            if (std::getenv("BMJ_FORCE_RESCAN")) db.clear_charts();  // 開発用：全部読み直す
+            int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
+            ScanStats s = db.scan(app.cfg.song_dirs, threads, [&](int, int, const std::string& path) {
+                if (!path.empty()) draw({"Now Loading...", path});
+            });
+            std::printf("曲データベースを更新した：%d 譜面（追加 %d／変更 %d／削除 %d／読めない %d）%.1f 秒\n", s.found,
+                        s.added, s.updated, s.removed, s.failed, s.seconds);
+        } else {
+            std::printf("曲データベースを開けない: %s\n", song_db_path().c_str());
+        }
+        // 難易度表はまとめて並べて取りに行く（応答の無いサイトがあっても、待つのは1つぶんで済む）
+        const std::vector<std::string>& urls = app.cfg.tables;
+        std::vector<std::future<DifficultyTable>> jobs;
+        for (const std::string& u : urls) jobs.push_back(std::async(std::launch::async, [u] { return update_table(table_cache_dir(), u); }));
+        std::vector<std::optional<DifficultyTable>> got(jobs.size());
+        for (int tick = 0;; ++tick) {
+            bool all = true;
+            std::vector<std::string> temp{"Loading difficulty tables:"};
+            for (size_t i = 0; i < jobs.size(); ++i) {
+                if (!got[i] && jobs[i].wait_for(std::chrono::seconds(0)) == std::future_status::ready) got[i] = jobs[i].get();
+                if (!got[i]) all = false;
+                temp.push_back("[" + urls[i] + "]: " + (got[i] ? "done" : std::string(1 + tick / 10 % 3, '.')));
+            }
+            if (all || jobs.empty()) break;
+            draw(temp);
+            SDL_Delay(16);
+        }
+        for (size_t i = 0; i < got.size(); ++i) {
+            const DifficultyTable& t = *got[i];
+            std::string name = t.name.empty() ? urls[i] : t.name;
+            std::string res = t.warning.empty() ? std::to_string(t.charts.size()) + " charts" : t.from_cache ? "failed (using cache)" : "failed";
+            lines.push_back("[" + name + "]: " + res);
+            std::printf("難易度表 %s：%zu 譜面%s\n", name.c_str(), t.charts.size(), t.warning.empty() ? "" : ("（" + t.warning + "）").c_str());
+        }
+    }
+    lines.push_back("");
+    lines.push_back("BMjoy version 0.1.0");
+    lines.push_back("PUSH ANY KEY");
+    startup_shot = std::getenv("BMJ_STARTUP_SHOT");  // 開発用：入力待ちの画面を1枚保存して終わる
+    draw({});
+    if (startup_shot) return false;
+    // 何か押されるまで待つ（キーボード・コントローラーのボタン・マウス）。開発用の撮影中は待たない
+    bool pushed = std::getenv("BMJ_SELECT_SHOT") != nullptr;
+    while (!pushed && !closed) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT) closed = true;
+            if ((e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) || e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN ||
+                e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+                pushed = true;
+            if (e.type == SDL_EVENT_JOYSTICK_ADDED) SDL_OpenJoystick(e.jdevice.which);
+        }
+        SDL_Delay(5);
+    }
+    if (closed) return false;
+    lines.push_back("READY");
+    draw({});
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     // ログをファイルに流しても、落ちたり止まったりしたときに残るようにする
 #if defined(_WIN32)
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    // コマンドプロンプトから動かしたときに、日本語のログを読めるようにする
+    SetConsoleOutputCP(CP_UTF8);
 #else
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
 #endif
@@ -225,6 +336,12 @@ int main(int argc, char** argv) {
         joystick_init().start(c.joystick_directinput);
         raw_hid().start();
         if (!app.init(argv[0])) return 1;
+        // LR2 と同じ起動の画面。曲データベースと難易度表の更新もここで行う（設定で「手動」なら選曲画面の F5 だけ）
+        if (opt.chart_path.empty() && !opt.keyconfig) {
+            bool update = c.db_update == 0;
+            if (!startup_screen(app, update)) return 0;
+            app.updated_at_start = update;
+        }
         if (opt.no_skin) app.lr2_root.clear();
         if (!opt.skin_opts.empty()) {
             // カスタマイズの指定は、使うスキンのパスに結びつけて保存する

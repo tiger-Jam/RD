@@ -433,6 +433,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     for (const Note& n : chart.notes) end = std::max(end, std::max(n.time_us, n.end_us) + 2000000);
     for (const BgmEvent& b : chart.bgm) end = std::max(end, b.time_us);
     chart.end_us = end;
+    res.rng = rng;
     return res.ok = true, res;
 }
 

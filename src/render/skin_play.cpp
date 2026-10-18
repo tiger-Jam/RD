@@ -79,7 +79,8 @@ bool PlayContext::option(int option) const {
     case 194: return chart && chart->meta.backbmp.empty() ? ret : !ret;
     case 195: return chart && !chart->meta.backbmp.empty() ? ret : !ret;
     // 対戦・ゴーストバトル・コース・レーンカバーの調整中は、単曲プレイでは偽
-    case 10: case 11: case 12: case 13: case 270: case 271: case 280: case 281: case 282: case 283: case 284:
+    case 270: return cover_adjusting && lane_cover_on ? ret : !ret;
+    case 10: case 11: case 12: case 13: case 271: case 280: case 281: case 282: case 283: case 284:
     case 289: case 290: case 291: case 622: case 623:
         return !ret;
     case 83: case 84: return !ret;
@@ -266,7 +267,7 @@ bool PlayContext::bargraph(int type, double& val, double& max) const {
 bool PlayContext::slider(int type, int& val, int& lo, int& hi) const {
     switch (type) {
     case 2: val = hi_speed, lo = 10, hi = 990; return true;
-    case 4: val = lane_cover, lo = 0, hi = 100; return true;
+    case 4: val = lane_cover_on ? lane_cover : 0, lo = 0, hi = 100; return true;
     case 6:
         if (song_ms >= 0 && chart) val = static_cast<int>(song_ms), lo = 0, hi = static_cast<int>(chart->end_us / 1000);
         else val = 0, lo = 0, hi = 1;

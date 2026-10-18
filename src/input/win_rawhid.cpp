@@ -16,6 +16,8 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <cstdio>
+#include <cstdlib>
 
 namespace bmj {
 
@@ -27,7 +29,8 @@ constexpr uint32_t kIdBase = 0x7f000000;
 struct ValueCap {
     USAGE usage;
     LONG lmin, lmax;
-    int index;  // 軸ならSDLの軸番号、ハットなら -1
+    int index;
+    int bits = 0;  // 軸ならSDLの軸番号、ハットなら -1
 };
 
 struct Device {
@@ -51,7 +54,10 @@ std::string narrow(const wchar_t* w) {
 void push_event(SDL_Event& e, uint64_t ts) {
     // timestamp を入力が届いた瞬間にしておく（判定はこの時刻で行う）
     e.common.timestamp = ts;
-    SDL_PushEvent(&e);
+    bool ok = SDL_PushEvent(&e);
+    static int logged = 0;
+    if (std::getenv("BMJ_DEBUG_INPUT") && logged < 20)
+        std::printf("RawHid: イベント %u を送った（%s）%s\n", e.type, ok ? "成功" : "失敗", ok ? "" : SDL_GetError()), ++logged;
 }
 
 }  // namespace
@@ -113,7 +119,8 @@ struct RawHid::Impl {
                     // 論理値の範囲が符号なしのとき、LogicalMax が負に見えることがある
                     LONG lmax = v.LogicalMax;
                     if (lmax < v.LogicalMin && v.BitSize < 32) lmax = (1L << v.BitSize) - 1;
-                    d.values.push_back({u, v.LogicalMin, lmax, d.axes++});
+                    std::printf("RawHid: 軸 %d = usage 0x%x、論理値 %ld〜%ld（%d ビット）\n", d.axes, u, v.LogicalMin, lmax, v.BitSize);
+                    d.values.push_back({u, v.LogicalMin, lmax, d.axes++, v.BitSize});
                 }
             }
         }
@@ -189,10 +196,17 @@ struct RawHid::Impl {
                 }
                 // 軸：論理値の範囲を -32768〜32767 に広げる
                 double range = static_cast<double>(v.lmax) - v.lmin;
-                double t = range > 0 ? (static_cast<double>(static_cast<LONG>(val)) - v.lmin) / range : 0.5;
+                // HidP_GetUsageValue は生のビット列を返すので、論理値の範囲が負を含むときは符号を広げる
+                // （専用コントローラーの皿は -127〜127 のことがあり、そのままだと半周ごとに値が跳んで逆回転に見える）
+                LONG sv = static_cast<LONG>(val);
+                if (v.lmin < 0 && v.bits > 0 && v.bits < 32 && (val & (1UL << (v.bits - 1)))) sv -= 1L << v.bits;
+                double t = range > 0 ? (static_cast<double>(sv) - v.lmin) / range : 0.5;
                 int16_t a = static_cast<int16_t>(std::clamp(t * 65535.0 - 32768.0, -32768.0, 32767.0));
                 if (a == d->axis_state[v.index]) continue;
                 d->axis_state[v.index] = a;
+                static int axis_logged = 0;
+                if (std::getenv("BMJ_DEBUG_INPUT") && axis_logged < 300)
+                    std::printf("RawHid: 軸 %d 生 %lu → %d\n", v.index, val, a), ++axis_logged;
                 SDL_Event e{};
                 e.type = SDL_EVENT_JOYSTICK_AXIS_MOTION;
                 e.jaxis.which = d->id;
@@ -206,6 +220,8 @@ struct RawHid::Impl {
     static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         auto self = reinterpret_cast<Impl*>(GetWindowLongPtrW(h, GWLP_USERDATA));
         if (msg == WM_INPUT && self) {
+            static int logged = 0;
+            if (std::getenv("BMJ_DEBUG_INPUT") && logged < 10) std::printf("RawHid: WM_INPUT を受け取った（%d）\n", ++logged);
             self->on_input(reinterpret_cast<HRAWINPUT>(lp), SDL_GetTicksNS());
         } else if (msg == WM_INPUT_DEVICE_CHANGE && self && wp == GIDC_REMOVAL) {
             std::lock_guard<std::mutex> lock(self->mu);
@@ -230,7 +246,10 @@ struct RawHid::Impl {
             {HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_JOYSTICK, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwnd},
             {HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_GAMEPAD, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwnd},
         };
-        RegisterRawInputDevices(rid, 2, sizeof(RAWINPUTDEVICE));
+        if (!RegisterRawInputDevices(rid, 2, sizeof(RAWINPUTDEVICE)))
+            std::printf("RawHid: RegisterRawInputDevices に失敗した（%lu）\n", GetLastError());
+        else
+            std::printf("RawHid: ジョイスティック・ゲームパッドの Raw Input を登録した\n");
         // 最初からつながっている機器を先に調べておく（キーコンフィグ画面に名前を出すため）
         UINT count = 0;
         GetRawInputDeviceList(nullptr, &count, sizeof(RAWINPUTDEVICELIST));

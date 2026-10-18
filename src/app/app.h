@@ -24,10 +24,11 @@ struct App {
     AppConfig cfg;
     std::string cfg_path;
     std::string lr2_root;  // 実際に使うLR2のフォルダ（見つからなければ空）
-    std::unique_ptr<Lr2Skin> play_skin, result_skin;
-    std::unique_ptr<SkinRenderer> skin_renderer, result_renderer;
+    std::unique_ptr<Lr2Skin> play_skin, result_skin, select_skin;
+    std::unique_ptr<SkinRenderer> skin_renderer, result_renderer, select_renderer;
     int view_w = 640, view_h = 480;
     double refresh_hz = 60.0;
+    bool updated_at_start = false;  // 起動の画面で曲データベースと難易度表を更新した（選曲画面では読み直さない）
     double last_draw_ms = -1, last_present_ms = 0;  // 開発用の計測
 
     ~App();
@@ -35,8 +36,10 @@ struct App {
     // プレイスキンを読む。options はスキン読み込み時の #IF の判定に使う値
     void load_play_skin(const std::array<bool, 1000>& options);
     void load_result_skin(const std::array<bool, 1000>& options);
+    void load_select_skin(const std::array<bool, 1000>& options);
     // 描画の論理解像度を変える。resize_window ならウィンドウの大きさも合わせる
     void set_view(int w, int h, bool resize_window = true);
+    void window_size(int skin_w, int skin_h, int& w, int& h) const;
     void save_config() const { cfg.save(cfg_path); }
 };
 

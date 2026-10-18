@@ -100,6 +100,21 @@ void JudgeEngine::advance(int64_t t_us) {
             if (l.cur >= l.notes.size()) break;
             size_t before = l.cur;
             int before_count = stats_.note_current;
+            if (lane_auto(lane) && !cfg_.autoplay) {
+                // 皿の自動演奏（LR2: Play.cpp の bmsobj_note.autoplay）。始点で音を鳴らし、終点（LN）で数だけ進める
+                while (l.sound_cur < l.notes.size() && chart_.notes[l.notes[l.sound_cur]].time_us <= t_us) {
+                    const Note& s = chart_.notes[l.notes[l.sound_cur++]];
+                    if (s.kind != NoteKind::Mine && s.sound > 0) play_.push_back(s.sound);
+                }
+                const Note& n = chart_.notes[l.notes[l.cur]];
+                int64_t due = n.kind == NoteKind::Long ? n.end_us : n.time_us;
+                if (due > t_us) break;
+                if (n.kind != NoteKind::Mine) stats_.note_current++;
+                done_[l.notes[l.cur]] = true;
+                l.note_val = n.sound;
+                l.cur++;
+                continue;
+            }
             if (cfg_.autoplay) {
                 const Note& n = chart_.notes[l.notes[l.cur]];
                 int64_t due = n.kind == NoteKind::Long ? n.end_us : n.time_us;
@@ -120,7 +135,7 @@ void JudgeEngine::press(int lane, int64_t t_us) {
     if (lane < 0 || lane >= kLaneCount) return;
     advance(t_us);
     held_[lane] = true;
-    if (cfg_.autoplay) return;
+    if (cfg_.autoplay || lane_auto(lane)) return;  // 自動演奏のレーンは押しても何もしない（LR2: Play.cpp:1138）
     Lane& l = lanes_[lane];
     if (l.cur >= l.notes.size()) {
         if (l.note_val > 0) play_.push_back(l.note_val);
@@ -133,7 +148,7 @@ void JudgeEngine::release(int lane, int64_t t_us) {
     if (lane < 0 || lane >= kLaneCount) return;
     advance(t_us);
     held_[lane] = false;
-    if (cfg_.autoplay) return;
+    if (cfg_.autoplay || lane_auto(lane)) return;
     Lane& l = lanes_[lane];
     if (l.cur >= l.notes.size()) return;
     proc(lane, 3, to_ms(t_us), t_us);

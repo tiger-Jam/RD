@@ -168,6 +168,17 @@ SkinSrc read_src(const Csv& c, const Lr2Skin& sk) {
     return s;
 }
 
+// 文字の SRC（#SRC_TEXT / #SRC_BAR_TITLE / #SRC_README）：番号, フォント, 文字列ID, 寄せ, op...
+SkinTextSrc read_text_src(const Csv& c) {
+    SkinTextSrc t;
+    t.n = c.val(1);
+    t.font = c.val(2);
+    t.st = c.val(3);
+    t.align = c.val(4);
+    for (int i = 0; i < 5; ++i) t.op[i] = c.val(5 + i);
+    return t;
+}
+
 // LR2: ReadDST。番号・ループ・タイマー・オプションは最初の行だけから読む
 void read_dst(SkinDst& d, const Csv& c, int order) {
     if (d.keys.empty()) {
@@ -374,11 +385,7 @@ struct Loader {
             t_skin++;
         } else if (cmd == "#SRC_TEXT") {
             SkinText t;
-            t.src.n = c.val(1);
-            t.src.font = c.val(2);
-            t.src.st = c.val(3);
-            t.src.align = c.val(4);
-            for (int i = 0; i < 5; ++i) t.src.op[i] = c.val(5 + i);
+            t.src = read_text_src(c);
             sk.texts.push_back(t);
         } else if (cmd == "#DST_TEXT") {
             if (!sk.texts.empty()) read_dst(sk.texts.back().dst, c, t_skin);
@@ -444,8 +451,72 @@ struct Loader {
             if (i < 0) return;
             auto& arr = cmd == "#DST_GROOVEGAUGE" ? sk.gauge : cmd == "#DST_LINE" ? sk.line : sk.judgeline;
             read_dst(arr[i].dst, c, t_skin);
+        } else {
+            select_command(cmd, c, t_skin);
         }
         (void)path;
+    }
+
+    // 選曲画面だけで使う命令
+    void select_command(const std::string& cmd, const Csv& c, int t_skin) {
+        auto idx = [&](int max) {
+            int i = c.val(1);
+            return (i >= 0 && i <= max) ? i : -1;
+        };
+        Lr2Skin::Bar& b = sk.bar;
+        // 添字つきの SRC/DST の組（#SRC_BAR_LAMP,i,... と #DST_BAR_LAMP,i,...）
+        struct Pair { const char* name; SkinObject* arr; int max; };
+        const Pair pairs[] = {{"BAR_LEVEL", b.level.data(), 10},  {"BAR_LAMP", b.lamp.data(), 9},
+                              {"BAR_MY_LAMP", b.my_lamp.data(), 9}, {"BAR_RIVAL_LAMP", b.rival_lamp.data(), 9},
+                              {"BAR_RIVAL", b.rival.data(), 9},   {"BAR_RANK", b.rank.data(), 9},
+                              {"BAR_STAR", b.star.data(), 5}};
+        for (const Pair& p : pairs) {
+            if (cmd == std::string("#SRC_") + p.name) {
+                if (int i = idx(p.max); i >= 0) p.arr[i].src = read_src(c, sk);
+                return;
+            }
+            if (cmd == std::string("#DST_") + p.name) {
+                if (int i = idx(p.max); i >= 0) read_dst(p.arr[i].dst, c, t_skin);
+                return;
+            }
+        }
+        if (cmd == "#SRC_BAR_BODY") {
+            if (int i = idx(29); i >= 0) b.body[i] = read_src(c, sk);
+        } else if (cmd == "#DST_BAR_BODY_ON" || cmd == "#DST_BAR_BODY_OFF") {
+            if (int i = idx(29); i >= 0) read_dst(cmd == "#DST_BAR_BODY_ON" ? b.body_on[i] : b.body_off[i], c, t_skin);
+        } else if (cmd == "#BAR_CENTER") {
+            if (idx(29) >= 0) b.center = c.val(1);
+        } else if (cmd == "#BAR_AVAILABLE") {
+            b.available_from = c.val(1);
+            b.available_to = c.val(2);
+        } else if (cmd == "#SRC_BAR_TITLE") {
+            if (int i = idx(4); i >= 0) b.title[i].src = read_text_src(c);
+        } else if (cmd == "#DST_BAR_TITLE") {
+            if (int i = idx(4); i >= 0) read_dst(b.title[i].dst, c, t_skin);
+        } else if (cmd == "#SRC_BAR_FLASH") {
+            b.flash.src = read_src(c, sk);
+        } else if (cmd == "#DST_BAR_FLASH") {
+            read_dst(b.flash.dst, c, t_skin);
+        } else if (cmd == "#DST_BAR_STAGEFILE") {
+            read_dst(b.stagefile, c, t_skin);
+        } else if (cmd == "#SRC_ONMOUSE") {
+            sk.onmouse.emplace_back();
+            sk.onmouse.back().src = read_src(c, sk);
+        } else if (cmd == "#DST_ONMOUSE") {
+            if (!sk.onmouse.empty()) read_dst(sk.onmouse.back().dst, c, t_skin);
+        } else if (cmd == "#SRC_MOUSECURSOR") {
+            sk.mousecursor.src = read_src(c, sk);
+        } else if (cmd == "#DST_MOUSECURSOR") {
+            read_dst(sk.mousecursor.dst, c, t_skin);
+        } else if (cmd == "#SRC_README") {
+            if (int i = idx(1); i >= 0) sk.readme[i].src = read_text_src(c);
+        } else if (cmd == "#DST_README") {
+            if (int i = idx(1); i >= 0) read_dst(sk.readme[i].dst, c, t_skin);
+        } else if (cmd == "#HELPFILE") {
+            if (sk.helpfiles.size() < 10) sk.helpfiles.push_back(c.s(1));
+        } else if (cmd == "#RELOADBANNER") {
+            sk.reload_banner = true;
+        }
     }
 
     // LR2: ReadImageFont（skinload:443）

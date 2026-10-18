@@ -62,7 +62,13 @@ void SkinRenderer::upload(const Lr2Skin& skin) {
     }
 }
 
+void SkinRenderer::set_image_override(int gr, SDL_Texture* tex) {
+    if (tex) overrides_[gr] = tex;
+    else overrides_.erase(gr);
+}
+
 SDL_Texture* SkinRenderer::image_tex(int gr) const {
+    if (auto it = overrides_.find(gr); it != overrides_.end()) return it->second;
     if (gr < 0 || gr >= static_cast<int>(textures_.size())) return nullptr;
     return textures_[gr];
 }
@@ -93,8 +99,19 @@ void SkinRenderer::add(const SkinSrc& src, SkinDraw d, double t) {
     Item it;
     it.sort = d.sort;
     it.tex = tex;
-    it.src = frame_rect(src, src_frame(src, t));
+    if (src.w < 0 || src.h < 0) {
+        // 大きさが -1（画像全体）で、画像が後から差し替わるもの（バナーなど）
+        float tw = 0, th = 0;
+        SDL_GetTextureSize(tex, &tw, &th);
+        SkinSrc full = src;
+        full.w = static_cast<int>(tw), full.h = static_cast<int>(th);
+        it.src = frame_rect(full, src_frame(full, t));
+    } else {
+        it.src = frame_rect(src, src_frame(src, t));
+    }
     it.d = d;
+    it.clip_top = clip_top_;
+    it.clip_bottom = clip_bottom_;
     items_.push_back(it);
 }
 
@@ -210,7 +227,7 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
     const Chart& chart = *st.chart;
     const JudgeEngine& judge = *st.judge;
     // 1拍=480（LR2の1小節=1920）。y = (今 − ノーツ) × ハイスピ / 600
-    double k = 480.0 * st.speed_multiplier * st.hi_speed / 600.0;
+    double k = 480.0 * st.speed_multiplier * st.hi_speed * (st.base_speed / 100.0) / 600.0;
     float draw_start = 0;
     if (!skin.note_dst[1].empty()) draw_start = -skin.note_dst[1].keys.front().h;
 
@@ -229,6 +246,12 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
         const SkinDst& dst = skin.note_dst[lane];
         if (dst.empty()) continue;
         float dst_y = dst.keys.front().y;
+        // HIDDEN / SUDDEN（LR2: Play.cpp:328）。判定ラインまでの高さの 60% を境に隠す。
+        // OpenLR2 はここでスキンの行番号（sortID）を高さとして使っているが、移植の誤りと見て判定ラインの位置を使う
+        clip_top_ = clip_bottom_ = -1;
+        if (st.effect == 1) clip_top_ = 0, clip_bottom_ = dst_y * 0.6f;
+        else if (st.effect == 2) clip_top_ = dst_y * 0.6f, clip_bottom_ = static_cast<float>(skin.height);
+        else if (st.effect == 3) clip_top_ = dst_y * 0.55f, clip_bottom_ = dst_y * 0.65f;
         for (size_t i = 0; i < chart.notes.size(); ++i) {
             const Note& n = chart.notes[i];
             if (n.lane != lane || n.kind == NoteKind::Invisible) continue;
@@ -242,10 +265,19 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
             int note_l = static_cast<int>((st.render_beat - end_pos) * k);
             if (note_y > 0) note_y = 0;
             if (note_l > 0) note_l = 0;
+            // 皿の自動演奏のレーンは AUTO 用の絵（スキンに無ければふだんの絵）
+            bool assist = judge.is_assist_lane(lane);
+            auto pick = [&](const std::array<SkinSrc, 20>& a, const std::array<SkinSrc, 20>& b) -> const SkinSrc& {
+                return assist && a[lane].valid ? a[lane] : b[lane];
+            };
             if (n.kind == NoteKind::Mine) {
-                add_play_area(skin.mine[lane], dst, st, 0, static_cast<float>(note_y), 255);
+                add_play_area(pick(skin.auto_mine, skin.mine), dst, st, 0, static_cast<float>(note_y), 255);
             } else if (!is_ln) {
-                add_play_area(skin.note[lane], dst, st, 0, static_cast<float>(note_y), 255);
+                add_play_area(pick(skin.auto_note, skin.note), dst, st, 0, static_cast<float>(note_y), 255);
+            } else if (assist && skin.auto_ln_start[lane].valid) {
+                bool on = n.pos <= st.render_beat && end_pos > st.render_beat;
+                add_ln(skin.auto_ln_start[lane], skin.auto_ln_end[lane], skin.auto_ln_body[lane], dst, st,
+                       static_cast<float>(note_y), static_cast<float>(note_l), on ? 5 : 0);
             } else {
                 int active;
                 if (st.autoplay) active = (n.pos <= st.render_beat && end_pos > st.render_beat) ? 5 : 0;
@@ -255,6 +287,7 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
             }
         }
     }
+    clip_top_ = clip_bottom_ = -1;
 }
 
 // LR2: AddDrawingBuffer_Gauge（skindraw:389）
@@ -420,6 +453,131 @@ void SkinRenderer::draw_result(const Lr2Skin& skin, const PlaySkinState& st) {
     flush(skin);
 }
 
+// 選曲画面（docs/lr2_select_spec.md）
+void SkinRenderer::draw_select(const Lr2Skin& skin, const PlaySkinState& st) {
+    items_.clear();
+    if (st.select) add_bars(skin, st);
+    add_common(skin, st);
+    if (st.select) add_onmouse(skin, st), add_readme(skin, st);
+    flush(skin);
+}
+
+namespace {
+SkinDraw lerp_draw(const SkinDraw& a, const SkinDraw& b, float r) {
+    SkinDraw d = a;
+    auto mix = [r](float x, float y) { return x + (y - x) * r; };
+    auto mixi = [r](int x, int y) { return static_cast<int>(x + (y - x) * r); };
+    d.x = mix(a.x, b.x), d.y = mix(a.y, b.y), d.w = mix(a.w, b.w), d.h = mix(a.h, b.h);
+    d.a = mixi(a.a, b.a), d.r = mixi(a.r, b.r), d.g = mixi(a.g, b.g), d.b = mixi(a.b, b.b);
+    d.angle = mix(a.angle, b.angle);
+    d.sort = mix(a.sort, b.sort);
+    return d;
+}
+}  // namespace
+
+void SkinRenderer::add_text(const SkinText& t, const PlaySkinState& st, const std::string& str, float dx, float dy) {
+    if (t.dst.empty() || str.empty()) return;
+    SkinDraw d = eval_dst(t.dst, st.timers->lapse(t.dst.timer, st.now_ms));
+    if (!d.visible) return;
+    d.x += dx;
+    d.y += dy;
+    Item it;
+    it.sort = d.sort;
+    it.is_text = true;
+    it.str = str;
+    it.font = t.src.font;
+    it.align = t.src.align;
+    it.d = d;
+    items_.push_back(it);
+}
+
+// 曲リスト（仕様 3.2, 3.3）。行 i は、行 i と行 i-1 の配置の間を、スクロールの端数で補間した位置に描く
+void SkinRenderer::add_bars(const Lr2Skin& skin, const PlaySkinState& st) {
+    const SelectSkinState& ss = *st.select;
+    const Lr2Skin::Bar& b = skin.bar;
+    if (ss.count <= 0 || !ss.bar) return;
+    double t0 = st.timers->lapse(0, st.now_ms);  // バーの配置は常にシーン開始からの時間で決まる
+    int frac = ss.lcb % 1000, base = ss.lcb / 1000;
+    auto row = [&](int i) -> const SkinDst& { return i == ss.sel && !b.body_on[i].empty() ? b.body_on[i] : b.body_off[i]; };
+    for (int i = 1; i < 30; ++i) {
+        if (b.body_off[i - 1].empty() || b.body_off[i].empty()) continue;
+        SkinDraw a = eval_dst(row(i), t0);
+        SkinDraw p = eval_dst(row(i - 1), t0);
+        if (!a.visible || (frac != 0 && !p.visible)) continue;
+        SkinDraw d = frac ? lerp_draw(a, p, frac / 1000.0f) : a;
+        int idx = ((base - b.center + i) % ss.count + ss.count) % ss.count;
+        SelectBar bar = ss.bar(idx);
+        if (bar.type >= 0 && bar.type < 10) add(b.body[bar.type], d, st.timers->lapse(b.body[bar.type].timer, st.now_ms));
+        if (i == ss.sel && b.flash.src.valid && !b.flash.dst.empty()) {
+            // フラッシュは選んでいる行の位置に留まる（スクロールで動かない）
+            SkinDraw o = eval_dst(row(ss.sel), t0);
+            add_object(b.flash, st, o.x, o.y);
+        }
+        add_text(b.title[bar.is_new ? 1 : 0], st, bar.title, d.x, d.y);
+        if ((bar.type == 0 || bar.type == 5) && bar.level_index >= 0 && bar.level_index <= 10) {
+            const SkinObject& lv = b.level[bar.level_index];
+            if (lv.src.valid && !lv.dst.empty()) add_numbers(lv.src, lv.dst, st, bar.level, d.x, d.y);
+        }
+        if (bar.lamp >= 0 && bar.lamp < 10 && b.lamp[bar.lamp].src.valid) add_object(b.lamp[bar.lamp], st, d.x, d.y);
+    }
+}
+
+// テキストビューア（仕様 2.13）。各行を「DST の位置 + 行の高さ×行 + スクロール量」に描く。画面の外の行は描かない
+void SkinRenderer::add_readme(const Lr2Skin& skin, const PlaySkinState& st) {
+    const SelectSkinState& ss = *st.select;
+    if (!ss.readme || ss.readme->empty()) return;
+    for (const SkinText& t : skin.readme) {
+        if (t.dst.empty()) continue;
+        SkinDraw d = eval_dst(t.dst, st.timers->lapse(t.dst.timer, st.now_ms));
+        if (!d.visible) continue;
+        float lh = static_cast<float>(t.src.op[0] > 0 ? t.src.op[0] : 20);
+        for (size_t i = 0; i < ss.readme->size(); ++i) {
+            float y = d.y + lh * static_cast<float>(i) + ss.readme_y;
+            if (y < -lh) continue;
+            if (y > skin.height) break;
+            const std::string& line = (*ss.readme)[i];
+            if (line.empty()) continue;
+            Item it;
+            it.sort = d.sort;
+            it.is_text = true;
+            it.str = line;
+            it.font = t.src.font;
+            it.align = t.src.align;
+            it.d = d;
+            it.d.x += ss.readme_x;
+            it.d.y = y;
+            items_.push_back(it);
+        }
+    }
+}
+
+// マウスを乗せたときだけの絵（仕様 2.12）と、マウスカーソル（2.14）
+void SkinRenderer::add_onmouse(const Lr2Skin& skin, const PlaySkinState& st) {
+    const SelectSkinState& ss = *st.select;
+    for (const SkinObject& o : skin.onmouse) {
+        if (ss.readme_open) break;  // テキストを見ている間は出さない
+        if (!dst_on(o.dst, st) || !o.src.valid) continue;
+        int panel = o.src.op[0];
+        if (panel != 0 && panel != ss.panel) continue;
+        SkinDraw d = eval_dst(o.dst, st.timers->lapse(o.dst.timer, st.now_ms));
+        if (!d.visible) continue;
+        float hx = d.x + o.src.op[1], hy = d.y + o.src.op[2];
+        if (ss.mouse_x < hx || ss.mouse_x >= hx + o.src.op[3] || ss.mouse_y < hy || ss.mouse_y >= hy + o.src.op[4]) continue;
+        add(o.src, d, src_time(o.src, o.dst, st));
+    }
+    const SkinObject& c = skin.mousecursor;
+    if (c.src.valid && !c.dst.empty() && ss.mouse_idle_ms < 10500) {
+        SkinDraw d = eval_dst(c.dst, st.timers->lapse(c.dst.timer, st.now_ms));
+        if (d.visible) {
+            d.x += ss.mouse_x;
+            d.y += ss.mouse_y;
+            if (ss.mouse_idle_ms > 10000) d.a = static_cast<int>(d.a * (10500 - ss.mouse_idle_ms) / 500), d.blend = 1;
+            d.sort = 1e9f;  // 一番手前
+            add(c.src, d, src_time(c.src, c.dst, st));
+        }
+    }
+}
+
 // プレイ画面とリザルト画面で共通のオブジェクト
 void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
     for (const SkinObject& o : skin.image_objs) {
@@ -560,6 +718,11 @@ void SkinRenderer::draw_image(Item& it) {
         SDL_SetRenderDrawColor(r_, 0, 0, 0, 255);
         SDL_RenderFillRect(r_, &dst);
     }
+    bool clipped = it.clip_top >= 0;
+    if (clipped) {
+        SDL_Rect cr{0, static_cast<int>(it.clip_top), 1 << 16, static_cast<int>(it.clip_bottom - it.clip_top)};
+        SDL_SetRenderClipRect(r_, &cr);
+    }
     if (d.angle != 0.0f) {
         SDL_FPoint c;
         float w = dst.w, h = dst.h;
@@ -578,6 +741,7 @@ void SkinRenderer::draw_image(Item& it) {
     } else {
         SDL_RenderTexture(r_, t, &it.src, &dst);
     }
+    if (clipped) SDL_SetRenderClipRect(r_, nullptr);
 }
 
 // LR2: LRDrawText（skindraw:847）。画像フォントがあればそれを、無ければTTFで描く

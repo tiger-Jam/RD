@@ -45,6 +45,8 @@ public:
     void set_system_sounds(std::vector<Sample> sounds) { sys_samples_ = std::move(sounds); }
     void play_system(int id, bool loop = false) { push_command(kSysBase + id + (loop ? kSysLoop : 0)); }
     void stop_system(int id) { push_command(kSysBase + id + kSysStop); }
+    // そのシステム音がサウンドセットにあるか（無いときは別の音で代わりに鳴らす）
+    bool has_system(int id) const { return id >= 0 && id < static_cast<int>(sys_samples_.size()) && !sys_samples_[id].pcm.empty(); }
 
     // 譜面上の時刻（マイクロ秒）。wall_ns は SDL_GetTicksNS() と同じ基準の時刻。
     // スピーカーから実際に出ている位置を返す（出力遅延を差し引く）

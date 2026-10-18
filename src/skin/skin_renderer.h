@@ -41,6 +41,29 @@ private:
 };
 
 // プレイ画面の描画に必要な、その時点のゲームの状態
+// 選曲画面の曲リスト（docs/lr2_select_spec.md 3章）
+struct SelectBar {
+    int type = 0;            // バーの種類（0=曲 1=フォルダ 2=カスタムフォルダ …。#SRC_BAR_BODY の添字）
+    std::string title;
+    bool is_new = false;     // 新曲（#SRC_BAR_TITLE の 1 番で描く）
+    int level_index = -1;    // #SRC_BAR_LEVEL の添字（-1 なら描かない）
+    int level = 0;
+    int lamp = 0;            // クリアランプ（#SRC_BAR_LAMP の添字）
+};
+struct SelectSkinState {
+    int count = 0;           // 一覧の数
+    int lcb = 0;             // スクロール位置（1曲=1000、0..count*1000）
+    int sel = 0;             // 選んでいる行
+    std::function<SelectBar(int)> bar;  // 一覧の添字 → バーの中身
+    int panel = -1;          // 開いているパネル（-1 なら無し）
+    float mouse_x = -1, mouse_y = -1;
+    double mouse_idle_ms = 1e9;  // 最後にマウスが動いてからの時間
+    // テキストビューア（readme・ヘルプ。仕様 2.13 / 5.4）。閉じても行は残す（閉じるときのフェード用）
+    const std::vector<std::string>* readme = nullptr;
+    bool readme_open = false;
+    float readme_x = 0, readme_y = 0;  // スクロール量
+};
+
 struct PlaySkinState {
     double now_ms = 0;  // シーンの時刻（タイマーの基準）
     const SkinTimers* timers = nullptr;
@@ -57,6 +80,8 @@ struct PlaySkinState {
     double render_beat = 0;      // 描画用のスクロール位置（拍）
     double hi_speed = 100;
     double speed_multiplier = 1.0;
+    double base_speed = 100;     // 基本スクロールスピード（LR2: basespeed。%）
+    int effect = 0;              // HIDDEN / SUDDEN（LR2: m_HIDSUD。0=OFF 1=HIDDEN 2=SUDDEN 3=HID+SUD）
     bool autoplay = false;
     int judge_draw = 0;          // 直近の判定（0=空POOR..5=PGREAT）
     int combo_draw = 0;
@@ -71,6 +96,7 @@ struct PlaySkinState {
     const PlayGraph* graph = nullptr;
     int graph_gauge = 0;
     int total_notes = 0;
+    const SelectSkinState* select = nullptr;  // 選曲画面のとき
     int chart_op3 = 0, chart_op4 = 0;  // グラフを描き進める時間（LR2: src_GAUGECHART の op3/op4。入力で op4 が早まる）
     double chart_length(int full, double t0) const {
         // LR2: ChangeValueByTime(0, op1, op3, op4, 経過, 0)
@@ -89,8 +115,11 @@ public:
     void upload(const Lr2Skin& skin);
     void draw_play(const Lr2Skin& skin, const PlaySkinState& st);
     void draw_result(const Lr2Skin& skin, const PlaySkinState& st);
+    void draw_select(const Lr2Skin& skin, const PlaySkinState& st);
     // 画像からテクスチャを作る（破棄は呼び出し側）
     SDL_Texture* create_texture(const SkinImage& img);
+    // 特別な番号の画像（LR2: 100=STAGEFILE 101=BACKBMP 102=BANNER）を差し替える。tex が null なら外す（破棄は呼び出し側）
+    void set_image_override(int gr, SDL_Texture* tex);
 
 private:
     struct Item {
@@ -104,7 +133,9 @@ private:
         int font = 0;
         int align = 0;
         bool backbox = false;  // 画像の下に黒い箱を敷く（BGAの一番下の層）
+        float clip_top = -1, clip_bottom = -1;  // HIDDEN / SUDDEN：この縦の範囲だけを描く（-1 なら全部）
     };
+    float clip_top_ = -1, clip_bottom_ = -1;  // add() で積む物に付ける範囲
 
     SDL_Texture* image_tex(int gr) const;
     SDL_FRect frame_rect(const SkinSrc& src, int frame) const;
@@ -121,6 +152,10 @@ private:
     void add_common(const Lr2Skin& skin, const PlaySkinState& st);
     void add_gauge_chart(const Lr2Skin& skin, const PlaySkinState& st);
     void add_score_chart(const Lr2Skin& skin, const PlaySkinState& st);
+    void add_bars(const Lr2Skin& skin, const PlaySkinState& st);
+    void add_onmouse(const Lr2Skin& skin, const PlaySkinState& st);
+    void add_readme(const Lr2Skin& skin, const PlaySkinState& st);
+    void add_text(const SkinText& t, const PlaySkinState& st, const std::string& str, float dx, float dy);
     void flush(const Lr2Skin& skin);
     void draw_image(Item& it);
     void draw_text(const Lr2Skin& skin, Item& it);
@@ -129,6 +164,7 @@ private:
 
 
     SDL_Renderer* r_;
+    std::map<int, SDL_Texture*> overrides_;
     std::vector<SDL_Texture*> textures_;
     std::vector<std::vector<SDL_Texture*>> font_textures_;  // 画像フォントごとの画像
     std::vector<Item> items_;
