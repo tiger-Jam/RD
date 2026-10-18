@@ -258,7 +258,7 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
         float base_y = skin.line[0].dst.keys.front().y;
         for (const BarLine& bar : chart.bars) {
             if (bar.pos < st.render_beat) continue;
-            float y = static_cast<float>((st.render_beat - bar.pos) * k);
+            float y = static_cast<float>((st.render_beat - bar.pos) * k) - st.lift_px;
             if (base_y + y <= draw_start) break;
             add_play_area(skin.line[0].src, skin.line[0].dst, st, 0, y, 255);
         }
@@ -282,11 +282,13 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
             // 判定が終わって、判定ラインも過ぎたものは描かない
             if (judge.note_done(i) && n.pos <= st.render_beat && end_pos <= st.render_beat) continue;
             double raw = (st.render_beat - n.pos) * k;
-            if (dst_y + raw <= draw_start && n.pos > st.render_beat) break;  // 画面より上
+            if (dst_y + raw - st.lift_px <= draw_start && n.pos > st.render_beat) break;  // 画面より上
             int note_y = static_cast<int>(raw);
             int note_l = static_cast<int>((st.render_beat - end_pos) * k);
             if (note_y > 0) note_y = 0;
             if (note_l > 0) note_l = 0;
+            note_y -= static_cast<int>(st.lift_px);
+            note_l -= static_cast<int>(st.lift_px);
             // 皿の自動演奏のレーンは AUTO 用の絵（スキンに無ければふだんの絵）
             bool assist = judge.is_assist_lane(lane);
             auto pick = [&](const std::array<SkinSrc, 20>& a, const std::array<SkinSrc, 20>& b) -> const SkinSrc& {
@@ -363,10 +365,10 @@ void SkinRenderer::add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st)
     SkinDraw cd = eval_dst(c.dst, jt);
     if (j.src.op[0] == 0 && combo > 0) pos = -(digit * cd.w * 0.5f);
     else posn = -((digit - 1) * cd.w * 0.5f);
-    add_object(j, st, pos, 0);
+    add_object(j, st, pos, -st.lift_px);
     if (combo > 0) {
         SkinDraw jd = eval_dst(j.dst, jt);
-        add_numbers(c.src, c.dst, st, combo, pos + posn + jd.x, jd.y);
+        add_numbers(c.src, c.dst, st, combo, pos + posn + jd.x, jd.y - st.lift_px);
     }
 }
 

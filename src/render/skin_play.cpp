@@ -142,6 +142,9 @@ int PlayContext::number(int id) const {
     case 13: return 90;  // defaulttarget
     case 14: case 15: return lane_cover;
     case 20: return fps;
+    case 312: return visible_ms;
+    case 313: return green_number;
+    case 314: case 421: case 422: return lift;  // 421・422 は OpenLR2 の LIFT
     default: break;
     }
     if (int v; course_number(course, id, v)) return v;

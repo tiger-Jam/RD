@@ -385,7 +385,10 @@ OpenLR2 では 500 を超える番号は常に未起動扱い（WMIX の DP ス�
 |---|---|---|---|---|
 | 201,210-218（P/R） | FAST/SLOW 拡張（ずれ ms・FAST/SLOW・FAST 数・SLOW 数・CB・残り/判定済みノーツ）。「LR2 with Fast/Slow」由来。WMIX が play で 210、result で 212/214 を使う | P,R | L:— / W:— | BMjoy 実装済み（201,210,212,214,216-218）。211,213 は 2P |
 | 295, 418 | LR2OOL のランダム配置表示 | P | L:— / W:— | 未実装 |
-| 421, 422 | OpenLR2 リフト量 | P | L:— / W:— | 未実装 |
+| 421, 422 | OpenLR2 リフト量 | P | L:— / W:— | 実装（LIFT の量 %） |
+| 312 | 見えている時間（ms。beatoraja と同じ番号） | P | L:— / W:— | BMjoy の拡張 |
+| 313 | 緑数字（1/600 秒。beatoraja と同じ番号） | P | L:— / W:— | BMjoy の拡張 |
+| 314 | LIFT の量（%。beatoraja と同じ番号） | P | L:— / W:— | BMjoy の拡張 |
 | 300-382 の一部 | LR2 標準 select が参照するが資料・OpenLR2 とも未定義（IR ランキング表用と推定 [?]） | S | L:— / W:— | OpenLR2 では -1（非表示）。BMjoy も -1 |
 
 ### 2.4 文字列（`#SRC_TEXT` の st）

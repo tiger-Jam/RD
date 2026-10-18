@@ -81,6 +81,7 @@ struct PlaySkinState {
     double hi_speed = 100;
     double speed_multiplier = 1.0;
     double base_speed = 100;     // 基本スクロールスピード（LR2: basespeed。%）
+    float lift_px = 0;           // LIFT：判定ラインを持ち上げる量（スキンの座標）。ノーツと判定の表示をこの分だけ上げる
     int effect = 0;              // HIDDEN / SUDDEN（LR2: m_HIDSUD。0=OFF 1=HIDDEN 2=SUDDEN 3=HID+SUD）
     bool autoplay = false;
     int judge_draw = 0;          // 直近の判定（0=空POOR..5=PGREAT）

@@ -416,12 +416,12 @@ int main(int, char**) {
         g.label(6, 3, "Language");
 
         // タブ（クラシック：選んでいるタブは少し大きく、ページとつながる）
-        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY"};
+        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY", "SPEED"};
         const SDL_FRect page{10, 56, 590, 368};
         g.fill(page, kFace);
         g.raised(page);
         float tx = 12;
-        for (int i = 0; i < 7; ++i) {
+        for (int i = 0; i < 8; ++i) {
             float w = text.get(g.font, 0, tabs[i]).w + 10.0f;
             bool on = i == tab;
             SDL_FRect rc{on ? tx - 2 : tx, on ? 38.0f : 40.0f, on ? w + 4 : w, on ? 19.0f : 16.0f};
@@ -569,7 +569,7 @@ int main(int, char**) {
             g.edit_int(cfg.audio_buffer, X + 462, Y + 226, 58, 22, true, 0, 4096);
             g.check(X + 48, Y + 268, "FMOD Exを使用しない(どうしても発音遅延やノイズが気になるならチェックを入れてください)", d_true, false);
             g.check(X + 22, Y + 328, "高精度なタイマーを使用する(基本的に外して下さい)", d_true, false);
-        } else {
+        } else if (tab == 6) {
             // BMjoy だけの設定（LR2 SETUP には無い）
             if (g.button(X + 420, Y + 10, 146, 22, "曲データベースの再作成")) {
                 SongDb db;
@@ -619,6 +619,25 @@ int main(int, char**) {
 #ifdef _WIN32
             g.check(X + 280, by + 30, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
 #endif
+        } else {
+            // ハイスピ（仕様書6章）
+            g.label(X + 28, Y + 30, "ハイスピのモード");
+            g.combo(&cfg.hs_mode, X + 182, Y + 22, 200, 22, {"クラシック", "フローティング"}, std::clamp(cfg.hs_mode, 0, 1),
+                    [&](int i) { cfg.hs_mode = i; });
+            bool fl = cfg.hs_mode == 1;
+            g.group(X + 10, Y + 62, 558, 150, "フローティング");
+            g.label(X + 38, Y + 92, "緑数字", fl);
+            g.edit_int(cfg.fhs_green, X + 182, Y + 84, 58, 20, fl, 50, 3000);
+            g.label(X + 38, Y + 124, "基準の BPM", fl);
+            g.combo(&cfg.fhs_base, X + 182, Y + 116, 200, 22, {"開始", "最大", "最小", "一番長く使われる BPM"},
+                    std::clamp(cfg.fhs_base, 0, 3), [&](int i) { cfg.fhs_base = i; }, fl);
+            g.label(X + 38, Y + 156, "ギアチェン", fl);
+            g.combo(&cfg.gear_mode, X + 182, Y + 148, 200, 22, {"カバー追従", "緑数字に戻す"}, std::clamp(cfg.gear_mode, 0, 1),
+                    [&](int i) { cfg.gear_mode = i; }, fl);
+            g.group(X + 10, Y + 226, 558, 70, "LIFT");
+            g.check(X + 38, Y + 258, "LIFT を使う", cfg.lift);
+            g.label(X + 182, Y + 258, "量", cfg.lift);
+            g.edit_int(cfg.lift_v, X + 210, Y + 250, 58, 20, cfg.lift, 0, 100);
         }
         g.combo_popup();
 

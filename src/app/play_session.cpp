@@ -19,6 +19,7 @@
 #include "chart/bms_parser.h"
 #include "game/ghost.h"
 #include "game/graph.h"
+#include "game/hispeed.h"
 #include "game/judge.h"
 #include "game/lane_option.h"
 #include "input/input.h"
@@ -120,28 +121,15 @@ void print_result(const Chart& chart, const JudgeEngine& j) {
 
 }  // namespace
 
-// 譜面の BPM の幅（LR2 の minBPM / maxBPM）。譜面の頭の #BPM から始めて、ノーツのある BPM で広げる
-static void note_bpm_range(const Chart& chart, double& lo, double& hi) {
-    lo = hi = chart.initial_bpm;
-    for (const Note& n : chart.notes) {
-        if (n.kind == NoteKind::Invisible || n.kind == NoteKind::Mine) continue;
-        double bpm = chart.bpm_at(n.time_us);
-        lo = std::min(lo, bpm), hi = std::max(hi, bpm);
-    }
-}
-
 // ハイスピード固定（LR2: bmsload:3314）。ノーツのある BPM を基準に、BPM 150 と同じ速さに見えるように掛ける
 double hs_fix_multiplier(const Chart& chart, int hs_fix) {
     if (hs_fix == 0) return 1.0;
-    std::map<double, int> per_bpm;
     double sum = 0, max_bpm, min_bpm;
     note_bpm_range(chart, min_bpm, max_bpm);
     int count = 0;
     for (const Note& n : chart.notes) {
         if (n.kind == NoteKind::Invisible || n.kind == NoteKind::Mine) continue;
-        double bpm = chart.bpm_at(n.time_us);
-        per_bpm[bpm]++;
-        sum += bpm;
+        sum += chart.bpm_at(n.time_us);
         count++;
     }
     if (count == 0) return 1.0;
@@ -150,12 +138,9 @@ double hs_fix_multiplier(const Chart& chart, int hs_fix) {
     case 2: return min_bpm > 0 ? 150.0 / min_bpm : 1.0;
     case 3: return sum > 0 ? 150.0 / (sum / count) : 1.0;
     case 5: {
-        // ノーツがいちばん多い BPM（同数なら BPM の小さい方）。OpenLR2 の拡張
-        double main_bpm = 0;
-        int most = 0;
-        for (const auto& [bpm, c] : per_bpm)
-            if (c > most) most = c, main_bpm = bpm;
-        return main_bpm > 0 ? 150.0 / main_bpm : 1.0;
+        // ノーツがいちばん多い BPM（OpenLR2 の拡張）
+        double m = main_bpm(chart);
+        return m > 0 ? 150.0 / m : 1.0;
     }
     default: return 1.0;
     }
@@ -185,7 +170,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         opt.save_score = false;
     }
     const Chart& chart = parsed.chart;
-    const double speed_multiplier = hs_fix_multiplier(chart, cfg.hs_fix);
+    // ハイスピのモード（仕様書6章）。フローティングは HS-FIX の倍率を使わず、基準の BPM で緑数字を合わせる
+    const bool floating = cfg.hs_mode == 1;
+    const double speed_multiplier = floating ? 1.0 : hs_fix_multiplier(chart, cfg.hs_fix);
+    const double fhs_bpm = constant ? 150.0 : floating_base_bpm(chart, cfg.fhs_base);
+    int fhs = 100;  // フローティングのハイスピ（100 = 1.00）
+    int& hs = floating ? fhs : cfg.hi_speed;
+    int start_green = cfg.fhs_green;  // 曲の始まりの緑数字（ギアチェンの「緑数字に戻す」で使う）
     // スコアは譜面ファイルの原本のSHA-256で記録する（仕様書8章）
     std::string sha256;
     {
@@ -231,6 +222,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     app.load_play_skin(ctx.load_options());
     Lr2Skin* skin = app.play_skin.get();
     ctx.skin = skin;
+    // 判定ラインまでのレーンの長さ（スキンの座標）。緑数字と LIFT の計算に使う
+    const double lane_px = skin && !skin->note_dst[1].empty() ? skin->note_dst[1].keys.front().y : 480.0;
     if (skin) app.set_view(skin->width, skin->height);
     else app.set_view(640, 480);
 
@@ -456,6 +449,23 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             phase = Phase::Fadeout;
             ctx.timers.set(2, (SDL_GetTicksNS() - scene_start) / 1e6);
         };
+        // ハイスピとカバー（仕様書6章）。見えている割合は、カバーと LIFT の分を引いたもの
+        auto visible = [&] {
+            double v = 1.0;
+            if (cfg.lane_cover && cover_display) v -= cfg.lane_cover_v / 100.0;
+            if (cfg.lift) v -= cfg.lift_v / 100.0;
+            return std::max(0.01, v);
+        };
+        // フローティング：今のハイスピの、基準の BPM での緑数字。ハイスピを変えたら、それを次の曲にも持ち越す
+        auto green_at_base = [&] { return green_number(lane_px, visible(), hs, fhs_bpm, cfg.base_speed); };
+        auto keep_green = [&](double g) { hs = hs_for_green(lane_px, visible(), g, fhs_bpm, cfg.base_speed); };
+        auto hs_changed = [&] {
+            if (floating) cfg.fhs_green = static_cast<int>(std::lround(green_at_base()));
+        };
+        // カバーと LIFT を動かせるか。ギアチェンが「緑数字に戻す」のときは、曲が始まる前と最後のノーツの後だけ
+        auto cover_movable = [&] { return !floating || cfg.gear_mode == 0 || !started || judge.finished(); };
+        if (floating) keep_green(cfg.fhs_green);
+        start_green = cfg.fhs_green;
         // 演奏中の START / SELECT の操作（LR2: gameloop:163-327, 384-400）
         auto play_buttons = [&](double now_ms) {
             bool held_start = input.button_held(kStart), held_select = input.button_held(kSelect);
@@ -463,28 +473,61 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             for (const ButtonInput& b : button_in) {
                 if (!b.down) continue;
                 if (b.button == kStart || b.button == kSelect) {
-                    // 片方だけを押したときに、250ms 以内の2度押しでカバーを出し入れする
+                    // 片方だけを押したときに、250ms 以内の2度押しでカバーを出し入れする。
+                    // フローティングでは緑数字が変わらないようにハイスピを決め直す。ギアチェンが「緑数字に戻す」なら、
+                    // カバーは動かさず、曲の始まりの緑数字に戻す
                     bool other = b.button == kStart ? held_select : held_start;
                     if (other) continue;
                     if (cover_dbl_ms == 0 || now_ms - cover_dbl_ms > 250.0) {
                         cover_dbl_ms = now_ms;
                     } else {
                         cover_dbl_ms = 0;
-                        cover_display = !cover_display;
+                        if (floating && cfg.gear_mode == 1) {
+                            cfg.fhs_green = start_green;
+                            keep_green(start_green);
+                        } else {
+                            cover_display = !cover_display;
+                            if (floating) keep_green(cfg.fhs_green);
+                        }
                     }
                     continue;
                 }
-                // START か SELECT を押しながら鍵盤：1・3・5 で遅く、2・4 で速く、6・7 でカバー（カバーが無ければハイスピード）
                 bool start_or_select = (held_start && b.button != kStart) || (held_select && b.button != kSelect);
-                if (!start_or_select || b.button > kKey7) continue;
+                if (!start_or_select) continue;
+                if (b.button == kScratchA || b.button == kScratchB) {
+                    // START か SELECT を押しながら皿（時計回りで + ）。
+                    // フローティング：カバーがあればカバーを動かし、緑数字が変わらないようにハイスピを決め直す（ギアチェン）。
+                    // LIFT を使っていてカバーが無ければ LIFT。どちらも無ければハイスピの微調整（0.01）。
+                    // クラシック：LIFT を使っていてカバーが無ければ LIFT（OpenLR2 と同じ）
+                    int d = b.button == kScratchB ? 1 : -1;
+                    if (floating && cover_active && cover_movable()) {
+                        cfg.lane_cover_v = std::clamp(cfg.lane_cover_v + d, 0, 100);
+                        keep_green(cfg.fhs_green);
+                    } else if (cfg.lift && !cover_active && cover_movable()) {
+                        cfg.lift_v = std::clamp(cfg.lift_v + d, 0, 100);
+                        if (floating) keep_green(cfg.fhs_green);
+                    } else if (floating) {
+                        hs = std::clamp(hs + d, kFloatingHsMin, kFloatingHsMax);
+                        hs_changed();
+                    }
+                    continue;
+                }
+                if (b.button > kKey7) continue;
                 int key = b.button - kKey1 + 1;
+                if (floating) {
+                    // フローティング：白鍵で 0.50 下げ、黒鍵で 0.50 上げる（今の値から足し引きし、端で止まる）
+                    hs = std::clamp(hs + (key % 2 ? -50 : 50), kFloatingHsMin, kFloatingHsMax);
+                    hs_changed();
+                    continue;
+                }
+                // クラシック：1・3・5 で遅く、2・4 で速く、6・7 でカバー（カバーが無ければハイスピード）
                 if (key == 1 || key == 3 || key == 5) cfg.hi_speed -= cfg.hs_margin;
                 else if (key == 2 || key == 4) cfg.hi_speed += cfg.hs_margin;
                 else if (key == 6) cover_active ? cfg.lane_cover_v -= cfg.shutter_margin : cfg.hi_speed += cfg.hs_margin;
                 else if (key == 7) cover_active ? cfg.lane_cover_v += cfg.shutter_margin : cfg.hi_speed -= cfg.hs_margin;
             }
             cfg.lane_cover_v = std::clamp(cfg.lane_cover_v, 0, 100);
-            cfg.hi_speed = std::clamp(cfg.hi_speed, cfg.hs_min, cfg.hs_max);
+            if (!floating) cfg.hi_speed = std::clamp(cfg.hi_speed, cfg.hs_min, cfg.hs_max);
             ctx.cover_adjusting = held_start || held_select;
         };
 
@@ -496,8 +539,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 case SDL_EVENT_JOYSTICK_ADDED: SDL_OpenJoystick(e.jdevice.which); break;
                 case SDL_EVENT_MOUSE_WHEEL:
                     // ホイールでレーンカバー（LR2: gameloop:183）
-                    if (phase == Phase::Play && cfg.lane_cover == 1)
+                    if (phase == Phase::Play && cfg.lane_cover == 1 && cover_movable()) {
                         cfg.lane_cover_v = std::clamp(cfg.lane_cover_v - static_cast<int>(std::lround(e.wheel.y)), 0, 100);
+                        if (floating) keep_green(cfg.fhs_green);
+                    }
                     break;
                 case SDL_EVENT_KEY_DOWN:
                     if (e.key.repeat) break;
@@ -517,14 +562,22 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         int d = e.key.key == SDLK_RIGHT ? 1 : -1;
                         cfg.judge_timing = std::clamp(cfg.judge_timing + d, -199, 199);
                     } else if (e.key.key == SDLK_UP || e.key.key == SDLK_DOWN) {
-                        // ハイスピード（LR2: gameloop:477。端まで行くと反対の端へ回る）
-                        cfg.hi_speed += e.key.key == SDLK_UP ? cfg.hs_margin : -cfg.hs_margin;
-                        if (cfg.hi_speed > cfg.hs_max) cfg.hi_speed = cfg.hs_min;
-                        else if (cfg.hi_speed < cfg.hs_min) cfg.hi_speed = cfg.hs_max;
+                        // ハイスピード（LR2: gameloop:477。端まで行くと反対の端へ回る）。フローティングは 0.50 ずつで、端で止まる
+                        if (floating) {
+                            hs = std::clamp(hs + (e.key.key == SDLK_UP ? 50 : -50), kFloatingHsMin, kFloatingHsMax);
+                            hs_changed();
+                        } else {
+                            cfg.hi_speed += e.key.key == SDLK_UP ? cfg.hs_margin : -cfg.hs_margin;
+                            if (cfg.hi_speed > cfg.hs_max) cfg.hi_speed = cfg.hs_min;
+                            else if (cfg.hi_speed < cfg.hs_min) cfg.hi_speed = cfg.hs_max;
+                        }
                     } else if (e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) {
                         // レーンカバーの量（LR2: gameloop:481）
                         int d = e.key.key == SDLK_RIGHT ? cfg.shutter_margin : -cfg.shutter_margin;
-                        cfg.lane_cover_v = std::clamp(cfg.lane_cover_v + d, 0, 100);
+                        if (cover_movable()) {
+                            cfg.lane_cover_v = std::clamp(cfg.lane_cover_v + d, 0, 100);
+                            if (floating) keep_green(cfg.fhs_green);
+                        }
                     }
                     break;
                 default: break;
@@ -573,7 +626,16 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             } else {
                 ctx.score_print = ctx.hp_print = -1;
             }
-            ctx.hi_speed = cfg.hi_speed;
+            ctx.hi_speed = hs;
+            {
+                // 緑数字（いまの BPM での値）と、見えている時間（ms）
+                double bpm = chart.bpm_at(started ? mixer.song_time_us_at(now_ns) : 0) * speed_multiplier;
+                if (constant) bpm = 150.0;
+                double g = green_number(lane_px, visible(), hs, bpm, cfg.base_speed);
+                ctx.green_number = static_cast<int>(std::lround(g));
+                ctx.visible_ms = static_cast<int>(std::lround(g / 0.6));
+                ctx.lift = cfg.lift ? cfg.lift_v : 0;
+            }
             ctx.judge_timing = cfg.judge_timing;
             ctx.lane_cover = cfg.lane_cover_v;
             ctx.lane_cover_on = cfg.lane_cover && cover_display;
@@ -839,8 +901,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.judge = &judge;
                 st.notes_visible = started;
                 st.render_beat = render_beat;
-                st.hi_speed = cfg.hi_speed;
+                st.hi_speed = hs;
                 st.speed_multiplier = speed_multiplier;
+                st.lift_px = cfg.lift ? static_cast<float>(lane_px * cfg.lift_v / 100.0) : 0.0f;
                 st.base_speed = cfg.base_speed;
                 st.effect = cfg.effect;
                 st.autoplay = opt.autoplay;
@@ -862,7 +925,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             } else {
                 view.song_ms = song_ms;
                 view.render_beat = render_beat;
-                view.hi_speed = cfg.hi_speed;
+                view.hi_speed = hs;
                 view.speed_multiplier = speed_multiplier;
                 char status[128];
                 std::snprintf(status, sizeof(status), "UP/DOWN: HI-SPEED  SHIFT+LEFT/RIGHT: TIMING %+d ms  F4: FULLSCREEN  ESC: END",

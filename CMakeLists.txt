@@ -45,6 +45,7 @@ add_library(bmj_core STATIC
     src/game/judge.cpp
     src/game/lane_option.cpp
     src/game/gauge.cpp
+    src/game/hispeed.cpp
     src/util/text.cpp
     src/util/path.cpp
     src/util/dxa.cpp

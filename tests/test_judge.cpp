@@ -232,3 +232,24 @@ TEST(chart_constant_speed) {
     CHECK(std::abs(c.notes[0].pos - 2.0 * 2.5) < 1e-6);  // 2 秒の位置
     CHECK(std::abs(c.pos_at(c.notes[1].time_us) - c.notes[1].pos) < 1e-9);
 }
+
+#include "game/hispeed.h"
+
+TEST(hispeed_green_number) {
+    // レーン 400、ハイスピ 1.00、BPM 150：1 拍 80 → 1 ミリ秒 0.2 → 2000 ms → 緑数字 1200
+    CHECK(std::abs(green_number(400, 1.0, 100, 150, 100) - 1200.0) < 1e-6);
+    // カバーで半分隠すと半分
+    CHECK(std::abs(green_number(400, 0.5, 100, 150, 100) - 600.0) < 1e-6);
+    // 逆算
+    CHECK_EQ(hs_for_green(400, 1.0, 1200, 150, 100), 100);
+    CHECK_EQ(hs_for_green(400, 1.0, 300, 150, 100), 400);
+    // 範囲 0.50〜10.00 に収める
+    CHECK_EQ(hs_for_green(400, 1.0, 1e6, 150, 100), kFloatingHsMin);
+    CHECK_EQ(hs_for_green(400, 1.0, 1, 150, 100), kFloatingHsMax);
+    // 基準の BPM
+    Chart c = chart_of("#BPM 120\n#00103:F0\n#00111:01\n#00211:0101\n");
+    CHECK_EQ(floating_base_bpm(c, 0), 120.0);
+    CHECK_EQ(floating_base_bpm(c, 1), 240.0);
+    CHECK_EQ(floating_base_bpm(c, 2), 120.0);
+    CHECK_EQ(floating_base_bpm(c, 3), 240.0);  // ノーツが多いのは BPM 240
+}

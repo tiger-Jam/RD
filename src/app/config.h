@@ -23,11 +23,20 @@ struct AppConfig {
     int judge_timing = 0;          // LR2の判定タイミング（描画だけをずらす）
     // ハイスピードの範囲と刻み（LR2: hsmin / hsmax / hsmargin）
     int hs_min = 10, hs_max = 900, hs_margin = 10;
-    // ハイスピード固定（LR2: hstype）。0=OFF 1=MAX BPM 2=MIN BPM 3=AVERAGE 5=MAIN BPM（5 は OpenLR2 の拡張）。
-    // 4=CONSTANT は未対応（OFF として扱う）
+    // ハイスピード固定（LR2: hstype）。0=OFF 1=MAX BPM 2=MIN BPM 3=AVERAGE 4=CONSTANT 5=MAIN BPM（5 は OpenLR2 の拡張）。
+    // フローティングでは CONSTANT（一定速度）だけを見る
     int hs_fix = 0;
     // レーンカバー（LR2: shuttertype / shutter / shuttermargin）。0=使わない 1=使う。量は 0〜100
     int lane_cover = 0, lane_cover_v = 0, shutter_margin = 10;
+    // ハイスピのモード（仕様書6章）：0 = クラシック（LR2 と同じ）、1 = フローティング
+    int hs_mode = 0;
+    // フローティング：緑数字（1/600 秒）。曲を読み込むたびに、基準の BPM でこの緑数字になるようにハイスピを決める
+    int fhs_green = 300;
+    int fhs_base = 3;   // 基準の BPM：0 = 開始 1 = 最大 2 = 最小 3 = 一番長く使われる BPM
+    int gear_mode = 0;  // ギアチェン：0 = カバー追従（皿で）、1 = 緑数字に戻す（START の 2 回押しで）
+    // LIFT（判定ラインを持ち上げる）。lift_v はレーンの高さに対する %
+    bool lift = false;
+    int lift_v = 0;
     // HIDDEN / SUDDEN（LR2: effect）。0=OFF 1=HIDDEN 2=SUDDEN 3=HID+SUD
     int effect = 0;
     // 配置（LR2: random）。0=OFF 1=MIRROR 2=RANDOM 3=S-RANDOM 4=SCATTER 5=CONVERGE

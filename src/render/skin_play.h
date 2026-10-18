@@ -43,6 +43,8 @@ struct PlayContext {
     // 表示用に補間した値（LR2: score_print / HP_print）。負なら補間せず実値を使う（リザルトなど）
     double score_print = -1, hp_print = -1;
     int hs_fix = 0;              // ハイスピード固定（ボタン55）
+    // 緑数字（1/600 秒）と見えている時間（ms）、LIFT の量（%）。番号は beatoraja と同じ（数値 312・313・314）
+    int green_number = 0, visible_ms = 0, lift = 0;
     std::array<int, 5> diff_level{-1, -1, -1, -1, -1};  // 同じフォルダの難易度ごとのレベル（数値45〜49）
     int fps = 0;
     int loaded = 0, load_total = 1;
