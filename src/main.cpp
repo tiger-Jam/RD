@@ -133,6 +133,12 @@ int simulate(const Chart& chart, int gauge, bool gas) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // ログをファイルに流しても、落ちたり止まったりしたときに残るようにする
+#if defined(_WIN32)
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+#else
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+#endif
     Options opt;
     if (!parse_args(argc, argv, opt)) {
         std::fprintf(stderr,
@@ -175,6 +181,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    std::printf("SDLを初期化しています\n");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK)) {
         std::fprintf(stderr, "SDLの初期化に失敗: %s\n", SDL_GetError());
         return 1;

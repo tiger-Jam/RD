@@ -56,6 +56,7 @@ App::~App() {
 bool App::init(const char* argv0) {
     lr2_root = find_lr2_root(cfg.lr2_root, argv0);
     if (keycfg.load(keyconfig_path())) std::printf("キーコンフィグ: %s\n", keyconfig_path().c_str());
+    std::printf("ウィンドウを作っています\n");
     window = SDL_CreateWindow("BMjoy", 1280, 960, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     renderer = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
     if (!renderer) {
@@ -68,6 +69,7 @@ bool App::init(const char* argv0) {
     skin_renderer = std::make_unique<SkinRenderer>(renderer);
     result_renderer = std::make_unique<SkinRenderer>(renderer);
     set_view(640, 480);
+    std::printf("音声デバイスを開いています\n");
     if (!mixer.open(0, 128)) {
         std::fprintf(stderr, "音声デバイスを開けない\n");
         return false;
