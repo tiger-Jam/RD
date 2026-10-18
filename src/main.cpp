@@ -28,10 +28,16 @@
 #include "db/difficulty_table.h"
 #include "db/song_db.h"
 #include "game/judge.h"
+#include "input/joystick_init.h"
 #include "render/keyconfig_scene.h"
 #include "skin/lr2_skin.h"
 
 using namespace bmj;
+
+JoystickInit& bmj::joystick_init() {
+    static JoystickInit j;
+    return j;
+}
 
 namespace {
 
@@ -181,11 +187,12 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    std::printf("SDLを初期化しています\n");
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK)) {
+    std::printf("SDLを初期化しています（映像）\n");
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::fprintf(stderr, "SDLの初期化に失敗: %s\n", SDL_GetError());
         return 1;
     }
+    joystick_init().start();
     int rc = 0;
     {
         App app;
@@ -243,6 +250,8 @@ int main(int argc, char** argv) {
         }
         if (!opt.no_skin) app.save_config();
     }
+    if (!joystick_init().ready()) std::printf("コントローラーの準備が終わるのを待っています\n");
+    joystick_init().join();
     SDL_Quit();
     return rc;
 }

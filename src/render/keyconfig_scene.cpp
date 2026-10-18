@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "input/input.h"
+#include "input/joystick_init.h"
 
 namespace bmj {
 
@@ -237,7 +238,8 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
             }
             y += ((axes + 3) / 4) * 14.0f + 4;
         }
-        if (joys.empty()) text(r, 16, y, dim, "NO JOYSTICK CONNECTED"), y += 12;
+        if (!joystick_init().ready()) text(r, 16, y, hi, "PREPARING CONTROLLERS..."), y += 12;
+        else if (joys.empty()) text(r, 16, y, dim, "NO JOYSTICK CONNECTED"), y += 12;
         text(r, 16, y + 4, dim, "LAST: " + last_raw);
         text(r, 16, 440, hi, message);
         text(r, 16, 456, dim, "UP/DOWN: SELECT   F1: RESET TO LR2 DEFAULT");
