@@ -35,6 +35,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "gas") gas = iv != 0;
         else if (key == "fps") fps = iv;
         else if (key == "vsync") vsync = iv != 0;
+        else if (key == "joystick_directinput") joystick_directinput = iv != 0;
         else if (key.rfind("skin_custom ", 0) == 0) {
             // skin_custom <スキンのパス> = 選択,選択,...
             std::vector<int> sel;
@@ -64,6 +65,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "gas = " << (gas ? 1 : 0) << "\n";
     f << "fps = " << fps << "  # 0=モニタに合わせる -1=上限なし それ以外=その値\n";
     f << "vsync = " << (vsync ? 1 : 0) << "\n";
+    f << "joystick_directinput = " << (joystick_directinput ? 1 : 0) << "  # Windows：1 にすると SDL の DirectInput も使う（起動が遅くなる環境がある）\n";
     for (const auto& [skin, sel] : skin_custom) {
         f << "skin_custom " << skin << " =";
         for (size_t i = 0; i < sel.size(); ++i) f << (i ? "," : " ") << sel[i];

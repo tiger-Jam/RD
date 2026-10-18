@@ -55,7 +55,7 @@ add_library(bmj_core STATIC
 target_include_directories(bmj_core PUBLIC src)
 target_link_libraries(bmj_core PUBLIC bmj_third_party)
 if(WIN32)
-    target_link_libraries(bmj_core PUBLIC winhttp)
+    target_link_libraries(bmj_core PUBLIC winhttp hid)
 else()
     target_link_libraries(bmj_core PUBLIC CURL::libcurl)
 endif()
@@ -74,6 +74,7 @@ add_executable(bmjoy
     src/audio/system_sound.cpp
     src/input/input.cpp
     src/input/keyconfig.cpp
+    src/input/win_rawhid.cpp
     src/render/keyconfig_scene.cpp
     src/render/play_scene.cpp
     src/render/skin_play.cpp

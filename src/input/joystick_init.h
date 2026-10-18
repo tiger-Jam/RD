@@ -13,7 +13,9 @@ namespace bmj {
 
 class JoystickInit {
 public:
-    void start() {
+    // use_directinput：Windows で SDL の DirectInput を使うか。使わないときは、専用コントローラーは
+    // RawHid（win_rawhid.h）で直接読み、SDL の準備は一瞬で終わる
+    void start(bool use_directinput = false) {
         auto init = [this] {
             uint64_t t0 = SDL_GetTicksNS();
             ok_ = SDL_InitSubSystem(SDL_INIT_JOYSTICK);
@@ -21,13 +23,22 @@ public:
             ready_ = true;
         };
 #if defined(_WIN32)
-        // 準備中はイベントの受け取りでジョイスティックを更新しない（準備のロックを待ってメインスレッドが止まるため）
+        // SDL の RawInput の読み取りは切る（Raw Input の受け取り先はプロセスに1つで、RawHid と取り合うため）
+        SDL_SetHint(SDL_HINT_JOYSTICK_RAWINPUT, "0");
+        if (!use_directinput) {
+            SDL_SetHint(SDL_HINT_JOYSTICK_DIRECTINPUT, "0");
+            init();
+            return;
+        }
+        // DirectInput を使うときは準備を裏で行う。準備中はイベントの受け取りでジョイスティックを更新しない
+        // （準備のロックを待ってメインスレッドが止まるため）
         SDL_SetHint(SDL_HINT_AUTO_UPDATE_JOYSTICKS, "0");
         thread_ = std::thread([this, init] {
             init();
             SDL_SetHint(SDL_HINT_AUTO_UPDATE_JOYSTICKS, "1");
         });
 #else
+        (void)use_directinput;
         init();  // macOS のコントローラーはメインスレッドで準備する必要がある
 #endif
     }

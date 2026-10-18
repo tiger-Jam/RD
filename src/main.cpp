@@ -29,6 +29,7 @@
 #include "db/song_db.h"
 #include "game/judge.h"
 #include "input/joystick_init.h"
+#include "input/win_rawhid.h"
 #include "render/keyconfig_scene.h"
 #include "skin/lr2_skin.h"
 
@@ -37,6 +38,11 @@ using namespace bmj;
 JoystickInit& bmj::joystick_init() {
     static JoystickInit j;
     return j;
+}
+
+RawHid& bmj::raw_hid() {
+    static RawHid r;
+    return r;
 }
 
 namespace {
@@ -192,7 +198,6 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "SDLの初期化に失敗: %s\n", SDL_GetError());
         return 1;
     }
-    joystick_init().start();
     int rc = 0;
     {
         App app;
@@ -217,6 +222,8 @@ int main(int argc, char** argv) {
         }
         for (const std::string& t : opt.add_tables)
             if (std::find(c.tables.begin(), c.tables.end(), t) == c.tables.end()) c.tables.push_back(t);
+        joystick_init().start(c.joystick_directinput);
+        raw_hid().start();
         if (!app.init(argv[0])) return 1;
         if (opt.no_skin) app.lr2_root.clear();
         if (!opt.skin_opts.empty()) {
@@ -250,6 +257,7 @@ int main(int argc, char** argv) {
         }
         if (!opt.no_skin) app.save_config();
     }
+    raw_hid().stop();
     if (!joystick_init().ready()) {
         // 準備中（Windows の DirectInput の列挙中）なら、待たずにそのまま終わる。設定やスコアは保存済み
         std::fflush(stdout);

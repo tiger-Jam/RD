@@ -24,6 +24,9 @@ struct AppConfig {
     // （OpenLR2と同じく、描画を待つ間も入力と判定を回すため）
     int fps = 0;
     bool vsync = false;
+    // Windows で SDL の DirectInput を使うか。既定では使わず、コントローラーは Raw Input で直接読む
+    // （DirectInput の機器の列挙に数十秒かかる環境があるため）
+    bool joystick_directinput = false;
 
     bool load(const std::string& path);
     bool save(const std::string& path) const;

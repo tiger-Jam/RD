@@ -17,6 +17,7 @@
 #include "game/gauge.h"
 #include "input/input.h"
 #include "input/joystick_init.h"
+#include "input/win_rawhid.h"
 #include "render/text_cache.h"
 
 namespace fs = std::filesystem;
@@ -444,6 +445,7 @@ void run_select(App& app) {
         // コントローラーの状態（Windows では準備に時間がかかることがある）
         std::string joy_text;
         if (!joystick_init().ready()) joy_text = "コントローラーを準備中…（キーボードは使える）";
+        else if (joy_names.empty() && !raw_hid().devices().empty()) joy_text = "コントローラー：" + raw_hid().devices().front().name;
         else if (joy_names.empty()) joy_text = "コントローラー：なし";
         else joy_text = "コントローラー：" + joy_names.front() + (joy_names.size() > 1 ? " ほか" : "");
         for (const std::string& nm : joystick_init().open_new()) {

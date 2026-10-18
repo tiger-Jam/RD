@@ -10,6 +10,7 @@
 
 #include "input/input.h"
 #include "input/joystick_init.h"
+#include "input/win_rawhid.h"
 
 namespace bmj {
 
@@ -247,12 +248,27 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
             }
             y += ((axes + 3) / 4) * 14.0f + 4;
         }
+        // Windows：Raw Input で直接読んでいる機器
+        for (const RawHidDevice& d : raw_hid().devices()) {
+            std::snprintf(b, sizeof(b), "JOY (RAW): %s  (%d BUTTONS, %d AXES, %d HATS)", d.name.c_str(), d.buttons, d.axes, d.hats);
+            text(r, 16, y, dim, b);
+            y += 12;
+            for (int a = 0; a < std::min<int>(8, static_cast<int>(d.axis_values.size())); ++a) {
+                int16_t v = d.axis_values[a];
+                float bx = 16 + (a % 4) * 156.0f, by = y + (a / 4) * 14.0f;
+                fill(r, bx + 40, by, 100, 8, {40, 40, 50, 255});
+                fill(r, bx + 40 + (v + 32768) / 65536.0f * 96, by, 4, 8, a == cfg.analog_axis ? hi : on);
+                std::snprintf(b, sizeof(b), "A%d", a);
+                text(r, bx, by, dim, b);
+            }
+            y += ((std::min<int>(8, static_cast<int>(d.axis_values.size())) + 3) / 4) * 14.0f + 4;
+        }
         if (!joystick_init().ready()) text(r, 16, y, hi, "PREPARING CONTROLLERS..."), y += 12;
-        else if (joys.empty()) text(r, 16, y, dim, "NO JOYSTICK CONNECTED"), y += 12;
+        else if (joys.empty() && raw_hid().devices().empty()) text(r, 16, y, dim, "NO JOYSTICK CONNECTED"), y += 12;
         text(r, 16, y + 4, dim, "LAST: " + last_raw);
         text(r, 16, 440, hi, message);
         text(r, 16, 456, dim, "UP/DOWN: SELECT   F1: RESET TO LR2 DEFAULT");
-        if (const char* shot = std::getenv("BMJ_KEYCONFIG_SHOT")) {
+        if (const char* shot = std::getenv("BMJ_KEYCONFIG_SHOT"); shot && SDL_GetTicksNS() - t0 > 1500000000ull) {
             // 開発用：1枚保存して終わる
             if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             quit = true;
