@@ -21,6 +21,7 @@
 #include "app/app.h"
 #include "app/play_session.h"
 #include "chart/bms_parser.h"
+#include "db/difficulty_table.h"
 #include "db/song_db.h"
 #include "game/judge.h"
 #include "render/keyconfig_scene.h"
@@ -37,6 +38,7 @@ struct Options {
     std::string lr2_root, skin, skin_res;
     std::vector<std::string> scan_dirs;  // 開発用：曲フォルダを読んで結果を表示する
     std::string db_path;
+    std::vector<std::string> table_urls;  // 開発用：難易度表を取得して表示する
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000;
     bool gas = false;
@@ -61,6 +63,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--fps") o.fps = std::atoi(next());
         else if (a == "--scan") o.scan_dirs.push_back(next());
         else if (a == "--db") o.db_path = next();
+        else if (a == "--table") o.table_urls.push_back(next());
         else if (a == "--skin-opt") {
             std::string v = next();
             size_t eq = v.find('=');
@@ -88,7 +91,7 @@ bool parse_args(int argc, char** argv, Options& o) {
             o.chart_path = a;
         }
     }
-    return o.keyconfig || !o.scan_dirs.empty() || !o.chart_path.empty();
+    return o.keyconfig || !o.scan_dirs.empty() || !o.table_urls.empty() || !o.chart_path.empty();
 }
 
 void print_info(const Chart& c, const BmsParseResult& r) {
@@ -129,6 +132,17 @@ int main(int argc, char** argv) {
                      "                [--simulate] [--info]\n"
                      "       bmjoy --keyconfig\n");
         return 2;
+    }
+    if (!opt.table_urls.empty()) {
+        std::string cache = opt.db_path.empty() ? "tables_test" : opt.db_path;
+        for (const std::string& u : opt.table_urls) {
+            DifficultyTable t = update_table(cache, u);
+            std::printf("%s [%s] %zu 譜面、%zu レベル%s\n", t.name.empty() ? u.c_str() : t.name.c_str(), t.symbol.c_str(),
+                        t.charts.size(), t.levels.size(), t.from_cache ? "（手元の版）" : "");
+            if (!t.warning.empty()) std::printf("  %s\n", t.warning.c_str());
+            if (!t.levels.empty()) std::printf("  レベル: %s 〜 %s\n", t.levels.front().c_str(), t.levels.back().c_str());
+        }
+        return 0;
     }
     if (!opt.scan_dirs.empty()) {
         SongDb db;

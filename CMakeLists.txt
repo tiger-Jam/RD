@@ -39,9 +39,10 @@ add_library(bmj_core STATIC
     src/skin/lr2_skin.cpp
     src/util/hash.cpp
     src/db/song_db.cpp
+    src/db/difficulty_table.cpp
 )
 target_include_directories(bmj_core PUBLIC src)
-target_link_libraries(bmj_core PUBLIC bmj_third_party)
+target_link_libraries(bmj_core PUBLIC bmj_third_party CURL::libcurl)
 if(APPLE)
     target_link_libraries(bmj_core PUBLIC iconv)
 endif()
@@ -63,7 +64,7 @@ add_executable(bmjoy
 target_link_libraries(bmjoy PRIVATE bmj_core SDL3::SDL3)
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
-    tests/test_input.cpp tests/test_db.cpp src/input/input.cpp src/input/keyconfig.cpp)
+    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp src/input/input.cpp src/input/keyconfig.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 
 foreach(t bmj_core bmjoy bmj_tests)
