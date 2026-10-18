@@ -431,18 +431,23 @@ void run_select(App& app) {
         text.draw(px, 644, 14, dim, st_text, 0, 420);
         text.draw(24, 690, 14, dim,
                   "↑↓ 選ぶ　Enter/→ 決定　Esc/← 戻る　TAB ゲージ　F2 オート　F5 更新　（コントローラ：白鍵 決定／黒鍵 戻る／皿 選ぶ）");
-        if (const char* shot = std::getenv("BMJ_SELECT_SHOT")) {
+        bool settled;
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            settled = !busy && !pending;
+        }
+        if (const char* shot = std::getenv("BMJ_SELECT_SHOT"); shot && settled) {
             // 開発用：更新が終わってから1枚保存して終わる。BMJ_SELECT_KEYS の文字で操作してから撮る（d=下 e=決定）
             static size_t step = 0;
             const char* keys = std::getenv("BMJ_SELECT_KEYS");
-            if (!busy && keys && keys[step]) {
+            if (keys && keys[step]) {
                 char k = keys[step++];
                 if (k == 'd') move(1);
                 else if (k == 'D') move(10);
                 else if (k == 'u') move(-1);
                 else if (k == 'e') decide();
                 else if (k == 'b') back();
-            } else if (!busy) {
+            } else {
                 if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
                 quit = true;
             }

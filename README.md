@@ -28,6 +28,19 @@ build\RelWithDebInfo\bmjoy.exe --lr2-root C:\path\to\LR2
 - 日本語のファイル名を扱えるように、マニフェストでコードページを UTF-8 にしている（OpenLR2 と同じ）
 - 設定・スコアは `%APPDATA%\BMjoy` に保存される
 
+### Mac から Windows 機でビルド・起動する
+
+`ssh win` で入れる Windows 機があれば、Mac から操作できる（Windows 側は `%USERPROFILE%\bmjoy_mac_build` を使う）。
+
+```
+tools/win.sh sync               # いまの作業ツリーを送ってビルド
+tools/win.sh test               # Windows でユニットテスト
+tools/win.sh run [引数...]       # Windows のデスクトップで起動（ログイン中の画面に出る）
+tools/win.sh log                # 最後に起動したときのログ
+```
+
+SSH から直接起動すると画面の無いセッションで動いてしまうので、`run` はタスク スケジューラ経由でログイン中のユーザーの画面に起動する。
+
 ## 遊ぶ
 
 ```

@@ -250,7 +250,11 @@ int main(int argc, char** argv) {
         }
         if (!opt.no_skin) app.save_config();
     }
-    if (!joystick_init().ready()) std::printf("コントローラーの準備が終わるのを待っています\n");
+    if (!joystick_init().ready()) {
+        // 準備中（Windows の DirectInput の列挙中）なら、待たずにそのまま終わる。設定やスコアは保存済み
+        std::fflush(stdout);
+        std::_Exit(rc);
+    }
     joystick_init().join();
     SDL_Quit();
     return rc;
