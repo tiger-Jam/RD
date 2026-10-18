@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,21 @@ struct ScoreRecord {
     int exscore = 0, bp = -1, max_combo = 0;
     int playcount = 0, clearcount = 0;
     int64_t last_played = 0;
+    std::array<int, 5> judge{};  // ベストの EX スコアを出したときの PGREAT, GREAT, GOOD, BAD, POOR の数
+    uint32_t op_history = 0;     // クリアしたときのオプションの履歴（LR2: op_history のビット。スキンの op 118〜149）
+};
+
+// 1 回のプレイの結果（記録する値）
+struct PlayRecord {
+    int clear = 0, exscore = 0, bp = 0, max_combo = 0;
+    std::array<int, 5> judge{};
+    uint32_t op_history = 0;
+};
+
+// プレイヤーの累計（LR2: player 表。スキンの数値 30〜37）
+struct PlayerStats {
+    int playcount = 0, clear = 0, fail = 0;
+    std::array<int64_t, 5> judge{};
 };
 
 struct ScanStats {
@@ -54,6 +70,8 @@ public:
     bool find_by_md5(const std::string& md5, ChartRecord& out) const;
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）
     void save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo);
+    void save_score(const std::string& sha256, const PlayRecord& r);
+    PlayerStats player_stats() const;
     bool get_score(const std::string& sha256, ScoreRecord& out) const;
     // LR2のスコアデータベース（LR2files/Database/Score/<名前>.db）を取り込む。取り込んだ件数を返す（失敗なら -1）。
     // 手元に無い譜面のスコアも MD5 のまま残し、表示するときに BMjoy の記録と合わせて良いほうを使う

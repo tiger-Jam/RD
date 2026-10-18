@@ -66,6 +66,22 @@ TEST(song_db_scan_diff) {
         CHECK_EQ(sc.bp, 5);
         CHECK_EQ(sc.max_combo, 60);
         CHECK_EQ(sc.playcount, 2);
+        // 判定の内訳は EX を更新したときだけ入れ替え、オプションの履歴は積み重ねる。プレイヤーの累計も数える
+        PlayRecord p1;
+        p1.clear = 4, p1.exscore = 120, p1.bp = 3, p1.max_combo = 70, p1.judge = {50, 20, 3, 1, 2}, p1.op_history = 0x2;
+        db.save_score(r.sha256, p1);
+        PlayRecord p2 = p1;
+        p2.exscore = 90, p2.judge = {40, 10, 0, 0, 0}, p2.op_history = 0x100;
+        db.save_score(r.sha256, p2);
+        CHECK(db.get_score(r.sha256, sc));
+        CHECK_EQ(sc.judge[0], 50);
+        CHECK_EQ(sc.judge[4], 2);
+        CHECK_EQ(static_cast<int>(sc.op_history), 0x102);
+        PlayerStats ps = db.player_stats();
+        CHECK_EQ(ps.playcount, 4);
+        CHECK_EQ(ps.clear, 3);
+        CHECK_EQ(ps.fail, 1);
+        CHECK_EQ(static_cast<int>(ps.judge[0]), 90);
     }
     db.close();
     fs::remove_all(dir);

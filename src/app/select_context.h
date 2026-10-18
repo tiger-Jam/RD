@@ -35,6 +35,8 @@ struct SelectContext {
     std::string mode_name = "ALL", sort_name = "OFF";  // beatoraja と同じ並びの名前（文字列 60 / 61）
     bool has_banner = false;  // バナーを読み込めた（op 193）
     bool has_stagefile = false;  // 決定画面：STAGEFILE を読み込めた（op 191）
+    bool has_text = false;       // 曲のフォルダに .txt がある（op 174/175）
+    PlayerStats player;          // プレイヤーの累計（数値 30〜37）
     bool autoplay = false;
     bool windowed = true;
     int list_count = 0, list_pos = 0;  // 曲リストの数と、スクロール位置（1曲=1000。スライダー1）

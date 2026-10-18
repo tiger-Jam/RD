@@ -101,7 +101,8 @@ bool SelectContext::option(int op) const {
     case 170: return true;  // BGA の有無は選曲では見ない
     case 172: return song && chart->ln == 0;
     case 173: return song && chart->ln > 0;
-    case 174: return true;
+    case 174: return !has_text;
+    case 175: return has_text;
     case 176: return song && chart->bpm_min == chart->bpm_max;
     case 177: return song && chart->bpm_min != chart->bpm_max;
     case 178: return true;
@@ -127,6 +128,13 @@ bool SelectContext::option(int op) const {
     case 620: case 622: case 624: return true;
     default: break;
     }
+    if (op >= 118 && op <= 149) return song && score && (score->op_history >> (op - 118) & 1);  // クリア時のオプション履歴
+    if (op >= 70 && op <= 79) {
+        // 同じフォルダの難易度 0..4 のレベルがレベルバーの上限以下（70〜74）／超える（75〜79）
+        int d = (op - 70) % 5;
+        if (!song || diff_count[d] == 0) return false;
+        return op < 75 ? diff_level[d] <= cfg->levelbar_7 : diff_level[d] > cfg->levelbar_7;
+    }
     if (op >= 520 && op <= 565) {
         // 難易度 d のランプが v（op = 520 + d*10 + v）
         int d = (op - 520) / 10, v = (op - 520) % 10;
@@ -151,7 +159,8 @@ int SelectContext::number(int id) const {
     case 10: case 11: return cfg->hi_speed;
     case 12: return cfg->judge_timing;
     case 13: return 90;
-    case 14: case 15: return cfg->lane_cover_v;
+    case 14: return cfg->lane_cover_v;
+    case 15: return 0;  // 2P 側は設定を持たないので既定値
     case 21: return tm.tm_year + 1900;
     case 22: return tm.tm_mon + 1;
     case 23: return tm.tm_mday;
@@ -169,7 +178,13 @@ int SelectContext::number(int id) const {
     case 77: return s ? s->playcount : 0;
     case 78: return s ? s->clearcount : 0;
     case 79: return s ? s->playcount - s->clearcount : 0;
-    case 80: case 81: case 82: case 83: case 84: case 85: case 86: case 87: case 88: case 89: return 0;
+    case 80: case 81: case 82: case 83: case 84: return s ? s->judge[id - 80] : 0;  // ベストの PG〜PR の数
+    case 85: case 86: case 87: case 88: case 89: return s && notes > 0 ? s->judge[id - 85] * 100 / notes : 0;  // 同じく割合
+    case 30: return player.playcount;
+    case 31: return player.clear;
+    case 32: return player.fail;
+    case 33: case 34: case 35: case 36: case 37: return static_cast<int>(player.judge[id - 33]);
+    case 38: case 39: return 0;  // ランニングコンボ（記録していない）
     case 90: return song && chart->bpm_max > 0 ? static_cast<int>(chart->bpm_max) : -1;
     case 91: return song && chart->bpm_min > 0 ? static_cast<int>(chart->bpm_min) : -1;
     default: return -1;
@@ -195,7 +210,8 @@ std::string SelectContext::text(int id) const {
     case 62: return opt("DIFFICULTY", difficulty_filter);
     case 63: return opt("RANDOM", cfg->random);
     case 64: return opt("RANDOM", 0);
-    case 65: case 66: return opt("GAUGE", cfg->gauge);
+    case 65: return opt("GAUGE", cfg->gauge);
+    case 66: return opt("GAUGE", 0);
     case 67: return opt("ASSIST", cfg->assist ? 1 : 0);
     case 68: return opt("ASSIST", 0);
     case 69: return opt("BATTLE", 0);
@@ -210,7 +226,8 @@ std::string SelectContext::text(int id) const {
     case 79: return opt("SCREEN", windowed ? 1 : 0);
     case 80: return opt("AUTOADJUST", 0);
     case 81: return opt("REPLAYSAVE", 0);
-    case 84: case 85: return opt("EFFECT", cfg->effect);
+    case 84: return opt("EFFECT", cfg->effect);
+    case 85: return opt("EFFECT", 0);
     default: return {};
     }
 }
@@ -229,11 +246,13 @@ int SelectContext::button(int t) const {
         static const int lr2[] = {0, 1, 0, 0, 0, 2, 4, 5, 0};
         return sort_mode >= 0 && sort_mode < 9 ? lr2[sort_mode] : 0;
     }
-    case 40: case 41: return cfg->gauge;
+    case 40: return cfg->gauge;
+    case 41: return 0;
     case 46: return cfg->lane_cover ? 1 : 0;
     case 42: return cfg->random;
     case 44: return cfg->assist ? 1 : 0;
-    case 50: case 51: return cfg->effect;
+    case 50: return cfg->effect;
+    case 51: return 0;
     case 55: return cfg->hs_fix;
     case 57: case 58: return 1;
     case 70: return 1;  // スコアグラフ ON

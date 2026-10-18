@@ -377,6 +377,8 @@ void run_select(App& app) {
     }
     Lr2Skin* sk = app.select_skin.get();
     sctx.skin = sk;
+    sctx.player = app.db.player_stats();
+    std::unordered_map<std::string, bool> folder_has_text;  // 曲のフォルダに .txt があるか（op 175）
     auto set_select_view = [&] {
         if (sk) app.set_view(sk->width, sk->height);
         else app.set_view(1280, 720);
@@ -536,8 +538,9 @@ void run_select(App& app) {
             app.mixer.play_system(kSysSelect, true);
             set_select_view();
             input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
-            // スコアを読み直す
+            // スコアとプレイヤーの累計を読み直す
             for (const ScoreRecord& s : app.db.all_scores()) lib->scores[s.sha256] = s;
+            sctx.player = app.db.player_stats();
             if (ex == PlayExit::Quit) quit = true;
         } else {
             std::lock_guard<std::mutex> lock(mu);
@@ -1101,6 +1104,19 @@ void run_select(App& app) {
                 }
             }
             sctx.has_banner = banner_tex != nullptr;
+            sctx.has_text = false;
+            if (sctx.chart) {
+                auto [it, fresh] = folder_has_text.try_emplace(sctx.chart->folder, false);
+                if (fresh) {
+                    std::error_code ec;
+                    for (const auto& de : fs::directory_iterator(sctx.chart->folder, ec)) {
+                        std::string ext = de.path().extension().string();
+                        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+                        if (ext == ".txt") it->second = true;
+                    }
+                }
+                sctx.has_text = it->second;
+            }
             sctx.folder_name = editing ? edit_buf + "|" : stack.size() > 1 ? lv.name : "検索語句を入力";
             sctx.panel = panel;
             sctx.difficulty_filter = difficulty_filter;

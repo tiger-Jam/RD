@@ -291,6 +291,7 @@ std::string PlayContext::text(int id) const {
     if (!chart) return {};
     const ChartMeta& m = chart->meta;
     switch (id) {
+    case 1: return "NO TARGET";  // ターゲット名（ターゲット機能は無い）
     case 10: return m.title;
     case 11: return m.subtitle;
     case 12: return m.subtitle.empty() ? m.title : m.title + " " + m.subtitle;

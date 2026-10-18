@@ -79,11 +79,25 @@ bool is_movie_file(const std::string& p) {
 }
 
 // リザルトに入ったときに1回だけ記録する。途中でやめたときもLR2と同じくFAILEDとして記録する
-void record_score(App& app, const std::string& sha256, const JudgeEngine& j, bool quit_early, int lamp) {
+void record_score(App& app, const std::string& sha256, const JudgeEngine& j, bool quit_early, int lamp, const AppConfig& cfg,
+                  bool assist) {
     const PlayStats& s = j.stats();
+    PlayRecord rec;
+    rec.clear = lamp, rec.exscore = s.exscore(), rec.max_combo = s.max_combo;
+    rec.judge = {s.judge_count[kPGreat], s.judge_count[kGreat], s.judge_count[kGood], s.judge_count[kBad], s.judge_count[kPoor]};
+    // クリアしたときのオプションの履歴（LR2: statplay.cpp ConvertOptionHistory）。
+    // 皿の自動演奏でのクリアは 1 ビットだけ。EASY ランプは EASY ゲージのときだけ。それより上のランプはゲージ・ランダム・HIDDEN/SUDDEN を残す
+    if (assist) {
+        if (lamp > 1) rec.op_history = 0x1000000;
+    } else if (lamp == 2) {
+        if (j.gauge_type() == kEasy) rec.op_history = 8;
+    } else if (lamp > 2) {
+        rec.op_history = (1u << j.gauge_type()) | (0x100u << std::clamp(cfg.random, 0, 7)) | (0x10000u << std::clamp(cfg.effect, 0, 3));
+    }
     // 途中でやめたときは、残りのノーツもBPに入れる（LR2: statplay.cpp:659）
     int bp = s.bp() + (quit_early ? s.total_notes - s.note_current : 0);
-    app.db.save_score(sha256, lamp, s.exscore(), bp, s.max_combo);
+    rec.bp = bp;
+    app.db.save_score(sha256, rec);
 }
 
 void print_result(const Chart& chart, const JudgeEngine& j) {
@@ -323,7 +337,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.old_minbp = has_best ? best_score.bp : -1;
             ctx.old_total_notes = has_best ? ps.total_notes : 0;
             if (!recorded && opt.save_score && !opt.autoplay && started) {
-                record_score(app, sha256, judge, quit_early, ctx.result_clear);
+                record_score(app, sha256, judge, quit_early, ctx.result_clear, cfg, assist);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
                 ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
             }
