@@ -4,8 +4,10 @@
 
 namespace bmj {
 
-void GaugeSet::init(int total, int notes) {
+void GaugeSet::init(int total, int notes, int course) {
+    course_ = course >= 0;
     hp_ = {20.0, 100.0, 100.0, 20.0, 100.0, 100.0};
+    if (course_) hp_[kGroove] = hp_[kEasy] = 100.0;
     if (notes <= 0) return;
 
     // HARD系のダメージ係数（LR2: bmsload:3853）
@@ -39,16 +41,31 @@ void GaugeSet::init(int total, int notes) {
     };
     for (int g = 0; g < kGaugeCount; ++g)
         for (int j = 0; j < 6; ++j) table_[g][j] = t[g][j];
+    // コースの固定の増減（空POOR, POOR, BAD, GOOD, GREAT, PGREAT）
+    auto set = [&](int g, std::array<double, 6> v) {
+        for (int j = 0; j < 6; ++j) table_[g][j] = v[j];
+    };
+    if (course == 2) {
+        // 段位認定
+        set(kGroove, {-2.0, -3.0, -2.0, 0.04, 0.1, 0.1});
+        set(kEasy, {-2.0, -3.0, -2.0, 0.04, 0.1, 0.1});
+        table_[kHard][kGood] = 0.04;
+    } else if (course >= 0) {
+        // エキスパート・ノンストップ
+        set(kGroove, {-1.5, -2.0, -1.5, 0.04, 0.1, 0.1});
+        set(kEasy, {-1.2, -1.6, -1.2, 0.048, 0.12, 0.12});
+    }
 }
 
 void GaugeSet::apply_judge(int judge) {
     for (int g = 0; g < kGaugeCount; ++g) {
         int hp = (static_cast<int>(hp_[g]) / 2) * 2;
         double damage = table_[g][judge];
-        // 残り30%以下ではダメージを0.6倍にする（単曲ではGROOVE/EASY以外）
-        if (hp <= 30 && !(g == kGroove || g == kEasy) && judge <= kBad) damage *= 0.6;
+        // 残り30%以下ではダメージを0.6倍にする（単曲ではGROOVE/EASY以外。コースでは全部）
+        if (hp <= 30 && (!(g == kGroove || g == kEasy) || course_) && judge <= kBad) damage *= 0.6;
         hp_[g] += damage;
-        if (hp_[g] <= 2.0 && (g == kGroove || g == kEasy)) hp_[g] = 2.0;
+        // GROOVE/EASY は 2% で止まる（コースでは止まらない）
+        if (!course_ && hp_[g] <= 2.0 && (g == kGroove || g == kEasy)) hp_[g] = 2.0;
         hp_[g] = std::clamp(hp_[g], 0.0, 100.0);
         if (hp <= 0) hp_[g] = 0;  // 一度0になったゲージは戻らない
     }
@@ -57,6 +74,7 @@ void GaugeSet::apply_judge(int judge) {
 void GaugeSet::apply_mine(int damage) {
     for (int g = 0; g < kGaugeCount; ++g) {
         hp_[g] -= damage;
+        // 地雷ではコース中も 2% で止まる（LR2 と同じ）
         if (hp_[g] <= 2.0 && (g == kGroove || g == kEasy)) hp_[g] = 2.0;
         hp_[g] = std::clamp(hp_[g], 0.0, 100.0);
     }
@@ -75,13 +93,13 @@ int gas_select(const GaugeSet& g, int configured) {
     return kEasy;
 }
 
-int clear_type(const GaugeSet& g, int gauge_type, int total_notes, int note_current, int max_combo, int good) {
+int clear_type(const GaugeSet& g, int gauge_type, int total_notes, int note_current, int max_combo, int good, bool course) {
     if (total_notes == max_combo) return good == 0 ? 6 : 5;
     if (gauge_type == kHard || gauge_type == kGAttack || gauge_type == kPAttack) {
         if (note_current == total_notes && g.hp(gauge_type) >= 2.0) return 4;
         return 1;
     }
-    if (note_current == total_notes && g.hp(gauge_type) >= 80.0) return gauge_type != kEasy ? 3 : 2;
+    if (note_current == total_notes && g.hp(gauge_type) >= (course ? 2.0 : 80.0)) return gauge_type != kEasy ? 3 : 2;
     return 1;
 }
 

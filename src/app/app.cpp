@@ -197,7 +197,15 @@ void App::load_decide_skin(const std::array<bool, 1000>& options) {
 }
 
 void App::load_result_skin(const std::array<bool, 1000>& options) {
+    courseresult_skin.reset();
     result_skin = load_skin(*this, cfg.result_skin, "LR2files/Theme/LR2/Result/result.lr2skin", options, *result_renderer);
+}
+
+// コースリザルトは、リザルトと同じ描画器を使う（同時には出さないので）
+void App::load_courseresult_skin(const std::array<bool, 1000>& options) {
+    result_skin.reset();
+    courseresult_skin = load_skin(*this, cfg.courseresult_skin, "LR2files/Theme/LR2/CourseResult/courseresult.lr2skin", options,
+                                  *result_renderer);
 }
 
 }  // namespace bmj

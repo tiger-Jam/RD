@@ -34,12 +34,17 @@ JudgeEngine::JudgeEngine(const Chart& chart, const JudgeConfig& cfg)
     for (Lane& l : lanes_)
         if (!l.notes.empty()) l.note_val = chart.notes[l.notes.front()].sound;
     stats_.total_notes = chart.judgeable_notes();
-    gauge_.init(static_cast<int>(chart.total), stats_.total_notes);
+    gauge_.init(static_cast<int>(chart.total), stats_.total_notes, cfg.course);
+    if (cfg.course >= 0 && cfg.carry) {
+        gauge_.set_hp(cfg.carry_hp);
+        stats_.course_combo = cfg.carry_combo;
+        stats_.course_max_combo = cfg.carry_max_combo;
+    }
 }
 
 int JudgeEngine::clear() const {
     return clear_type(gauge_, gauge_type_, stats_.total_notes, stats_.note_current, stats_.max_combo,
-                      stats_.judge_count[kGood]);
+                      stats_.judge_count[kGood], cfg_.course >= 0);
 }
 
 void JudgeEngine::apply_judge(int judge) {
@@ -67,12 +72,14 @@ void JudgeEngine::judge_to_score(int judge, int lane, int64_t t_us, int offset_m
     apply_judge(judge);
     switch (judge) {
     case kPoor:
-    case kBad: stats_.combo = 0; break;
+    case kBad: stats_.combo = 0, stats_.course_combo = 0; break;
     case kGood:
     case kGreat:
     case kPGreat:
         stats_.combo++;
         if (stats_.combo > stats_.max_combo) stats_.max_combo = stats_.combo;
+        stats_.course_combo++;
+        if (stats_.course_combo > stats_.course_max_combo) stats_.course_max_combo = stats_.course_combo;
         break;
     default: break;
     }

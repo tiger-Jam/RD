@@ -24,7 +24,7 @@ struct App {
     AppConfig cfg;
     std::string cfg_path;
     std::string lr2_root;  // 実際に使うLR2のフォルダ（見つからなければ空）
-    std::unique_ptr<Lr2Skin> play_skin, result_skin, select_skin, decide_skin;
+    std::unique_ptr<Lr2Skin> play_skin, result_skin, select_skin, decide_skin, courseresult_skin;
     std::unique_ptr<SkinRenderer> skin_renderer, result_renderer, select_renderer, decide_renderer;
     int view_w = 640, view_h = 480;
     double refresh_hz = 60.0;
@@ -36,6 +36,7 @@ struct App {
     // プレイスキンを読む。options はスキン読み込み時の #IF の判定に使う値
     void load_play_skin(const std::array<bool, 1000>& options);
     void load_result_skin(const std::array<bool, 1000>& options);
+    void load_courseresult_skin(const std::array<bool, 1000>& options);
     void load_select_skin(const std::array<bool, 1000>& options);
     void load_decide_skin(const std::array<bool, 1000>& options);
     // 描画の論理解像度を変える。resize_window ならウィンドウの大きさも合わせる

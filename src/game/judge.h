@@ -34,6 +34,8 @@ struct PlayStats {
     int empty_poor = 0;
     int fast = 0, slow = 0;
     int combo = 0, max_combo = 0;
+    // コース通しのコンボ（LR2: now_combo_course / max_combo_course）。単曲では combo / max_combo と同じ
+    int course_combo = 0, course_max_combo = 0;
     int note_current = 0;  // 判定済みのノーツ数
     int total_notes = 0;
     int exscore() const { return judge_count[kGreat] + judge_count[kPGreat] * 2; }
@@ -46,6 +48,11 @@ struct JudgeConfig {
     bool autoplay = false;
     // 皿の自動演奏（LR2 の ASSIST）。皿のノーツは判定せず、時刻が来たら数だけ進めて音を鳴らす（スコア・コンボ・ゲージには入らない）
     bool assist_scratch = false;
+    // コース（0 エキスパート 1 ノンストップ 2 段位、-1 は単曲）。2 ステージ目からは前のステージのゲージとコンボを引き継ぐ
+    int course = -1;
+    bool carry = false;
+    std::array<double, kGaugeCount> carry_hp{};
+    int carry_combo = 0, carry_max_combo = 0;
 };
 
 class JudgeEngine {
@@ -66,6 +73,7 @@ public:
     const GaugeSet& gauge() const { return gauge_; }
     int gauge_type() const { return gauge_type_; }
     bool failed() const { return gauge_failed(gauge_, gauge_type_); }
+    bool in_course() const { return cfg_.course >= 0; }
     bool finished() const { return stats_.note_current >= stats_.total_notes; }
     int clear() const;
     const JudgeWindows& windows() const { return win_; }

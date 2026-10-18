@@ -130,6 +130,68 @@ std::string strip_bom(std::string s) {
     return s;
 }
 
+void lower_hex(std::string& s) {
+    for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+}
+
+// コース 1 件。charts（譜面のオブジェクト）が無ければ md5 の文字列の並びを読む
+bool read_course(yyjson_val* v, const std::vector<std::string>& default_constraints, TableCourse& c) {
+    if (!yyjson_is_obj(v)) return false;
+    c.name = json_str(v, "name");
+    c.constraints = default_constraints;
+    if (yyjson_val* con = yyjson_obj_get(v, "constraint"); yyjson_is_arr(con)) {
+        c.constraints.clear();
+        size_t i, n;
+        yyjson_val* s;
+        yyjson_arr_foreach(con, i, n, s) if (yyjson_is_str(s)) c.constraints.push_back(yyjson_get_str(s));
+    }
+    size_t i, n;
+    yyjson_val* e;
+    if (yyjson_val* charts = yyjson_obj_get(v, "charts"); yyjson_is_arr(charts)) {
+        yyjson_arr_foreach(charts, i, n, e) {
+            if (!yyjson_is_obj(e)) continue;
+            TableChart t;
+            t.md5 = json_str(e, "md5"), t.sha256 = json_str(e, "sha256");
+            t.title = json_str(e, "title"), t.artist = json_str(e, "artist");
+            lower_hex(t.md5), lower_hex(t.sha256);
+            c.charts.push_back(std::move(t));
+        }
+    } else if (yyjson_val* md5 = yyjson_obj_get(v, "md5"); yyjson_is_arr(md5)) {
+        yyjson_arr_foreach(md5, i, n, e) {
+            if (!yyjson_is_str(e)) continue;
+            TableChart t;
+            t.md5 = yyjson_get_str(e);
+            lower_hex(t.md5);
+            c.charts.push_back(std::move(t));
+        }
+    }
+    return !c.charts.empty();
+}
+
+// ヘッダの course（コースの並び、または並びの並び）。無ければ古い形の grade（制約は段位・MIRROR 可・LR2 のゲージ）
+void read_courses(yyjson_val* header, std::vector<TableCourse>& out) {
+    out.clear();
+    auto read_list = [&](yyjson_val* arr, const std::vector<std::string>& def) {
+        size_t i, n;
+        yyjson_val* v;
+        yyjson_arr_foreach(arr, i, n, v) {
+            if (yyjson_is_arr(v)) {
+                size_t j, m;
+                yyjson_val* w;
+                yyjson_arr_foreach(v, j, m, w) {
+                    TableCourse c;
+                    if (read_course(w, def, c)) out.push_back(std::move(c));
+                }
+            } else {
+                TableCourse c;
+                if (read_course(v, def, c)) out.push_back(std::move(c));
+            }
+        }
+    };
+    if (yyjson_val* c = yyjson_obj_get(header, "course"); yyjson_is_arr(c)) read_list(c, {});
+    else if (yyjson_val* g = yyjson_obj_get(header, "grade"); yyjson_is_arr(g)) read_list(g, {"grade_mirror", "gauge_lr2"});
+}
+
 bool looks_like_json(const std::string& s) {
     for (char c : s) {
         if (std::isspace(static_cast<unsigned char>(c))) continue;
@@ -213,6 +275,7 @@ bool parse_table(const std::string& header_json, const std::string& data_json, D
         out.symbol = json_str(hr, "symbol");
         out.charts.clear();
         out.levels.clear();
+        read_courses(hr, out.courses);
         yyjson_val* order = yyjson_obj_get(hr, "level_order");
         if (yyjson_is_arr(order)) {
             size_t i, n;

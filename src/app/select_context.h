@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/config.h"
+#include "app/course.h"
 #include "app/skin_catalog.h"
 #include "db/song_db.h"
 #include "skin/lr2_skin.h"
@@ -29,7 +30,8 @@ struct SelectContext {
     // カーソルの要素
     int type = 1;                       // バーの種類（0=曲 1=フォルダ …）
     const ChartRecord* chart = nullptr;  // 曲のとき
-    const ScoreRecord* score = nullptr;  // 記録があるとき
+    const ScoreRecord* score = nullptr;  // 記録があるとき（コースのときはコースの記録）
+    const Course* course = nullptr;      // コース（種類 8）のとき
     std::string folder_name;            // いまいるフォルダの名前（文字列30）
     int panel = -1;
     int difficulty_filter = 0, mode_filter = 0, sort_mode = 0;

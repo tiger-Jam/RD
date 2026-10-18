@@ -44,10 +44,12 @@ const char* const kModeNames[kModeCount] = {"ALL", "7KEY", "14KEY", "9KEY", "5KE
 const bool kModeShows7[kModeCount] = {true, true, false, false, false, false, true, false};
 
 struct Entry {
-    enum class Kind { Folder, Chart, Missing } kind = Kind::Folder;
+    enum class Kind { Folder, Chart, Missing, Course } kind = Kind::Folder;
     std::string label, sub, badge;  // badge はレベルの表示（例：sl5）
     const ChartRecord* chart = nullptr;
     TableChart missing;
+    std::shared_ptr<Course> course;  // コースのとき
+    bool course_folder = false;      // コースを集めたフォルダ（バーの種類 6）
     std::vector<Entry> children;
     int owned = 0, total = 0;  // フォルダの中で持っている譜面の数
 };
@@ -78,8 +80,8 @@ const char* lamp_name(int lamp) {
 
 // 一覧の木を作る：難易度表（レベル別）と曲フォルダ
 std::vector<Entry> build_tree(const Library& lib) {
-    std::unordered_map<std::string, const ChartRecord*> by_md5;
-    for (const ChartRecord& c : lib.charts) by_md5.emplace(c.md5, &c);
+    std::unordered_map<std::string, const ChartRecord*> by_md5, by_sha256;
+    for (const ChartRecord& c : lib.charts) by_md5.emplace(c.md5, &c), by_sha256.emplace(c.sha256, &c);
     auto chart_entry = [&](const ChartRecord* c, const std::string& badge) {
         Entry e;
         e.kind = Entry::Kind::Chart;
@@ -94,6 +96,24 @@ std::vector<Entry> build_tree(const Library& lib) {
         Entry tf;
         tf.label = t.name.empty() ? t.url : t.name;
         tf.sub = t.warning.empty() ? (t.from_cache ? "手元の版" : "") : t.warning;
+        // 表に書かれたコース（段位など）は、表のフォルダの先頭に 1 つのフォルダにまとめる
+        if (!t.courses.empty()) {
+            Entry cf;
+            cf.course_folder = true;
+            bool all_grade = true;
+            for (const TableCourse& tc : t.courses) {
+                Entry ce;
+                ce.kind = Entry::Kind::Course;
+                ce.course = std::make_shared<Course>(make_table_course(tc, by_md5, by_sha256));
+                ce.label = ce.course->name;
+                all_grade = all_grade && ce.course->type == 2;
+                cf.owned += ce.course->playable();
+                cf.total++;
+                cf.children.push_back(std::move(ce));
+            }
+            cf.label = all_grade ? "段位認定" : "COURSE";
+            tf.children.push_back(std::move(cf));
+        }
         for (const std::string& lv : t.levels) {
             Entry lf;
             lf.badge = t.symbol + lv;
@@ -296,7 +316,7 @@ void run_select(App& app) {
         if (difficulty_filter != 0 || !kModeShows7[mode_filter] || sort_mode != 0) {
             auto v = std::make_shared<std::vector<Entry>>();
             for (const Entry& e : *full) {
-                if (e.kind != Entry::Kind::Folder) {
+                if (e.kind != Entry::Kind::Folder && e.kind != Entry::Kind::Course) {
                     if (!kModeShows7[mode_filter]) continue;
                     if (difficulty_filter != 0 && (e.kind != Entry::Kind::Chart || e.chart->difficulty != difficulty_filter)) continue;
                 }
@@ -306,7 +326,8 @@ void run_select(App& app) {
             // 記録で並べるもの（CLEAR / SCORE / MISSCOUNT）は、記録の無い譜面を後ろに回す。同じならタイトル順
             if (sort_mode != 0)
                 std::stable_sort(v->begin(), v->end(), [&](const Entry& a, const Entry& b) {
-                    bool fa = a.kind == Entry::Kind::Folder, fb = b.kind == Entry::Kind::Folder;
+                    bool fa = a.kind == Entry::Kind::Folder || a.kind == Entry::Kind::Course,
+                         fb = b.kind == Entry::Kind::Folder || b.kind == Entry::Kind::Course;
                     if (fa || fb) return fa && !fb;
                     const ChartRecord* ca = a.kind == Entry::Kind::Chart ? a.chart : nullptr;
                     const ChartRecord* cb = b.kind == Entry::Kind::Chart ? b.chart : nullptr;
@@ -551,10 +572,13 @@ void run_select(App& app) {
             stack.push_back(make_level(&e->children, 0, e->label));
             snap();
             app.mixer.play_system(kSysFolderOpen);
-        } else if (e->kind == Entry::Kind::Chart) {
+        } else if (e->kind == Entry::Kind::Chart || (e->kind == Entry::Kind::Course && e->course->playable())) {
+            // 遊べないコース（譜面が欠けている）は、決定しても何も起きない（LR2 と同じ）
             PlayOptions po;
             po.autoplay = autoplay;
-            std::string path = e->chart->path;
+            if (const char* cap = std::getenv("BMJ_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
+            std::string path = e->chart ? e->chart->path : "";
+            std::shared_ptr<Course> course = e->course;
             stop_preview(false);
             if (preview_load.valid()) stale_loads.push_back(std::move(preview_load));
             app.mixer.fade_system_loop(1.0f, 0);
@@ -563,7 +587,9 @@ void run_select(App& app) {
             {
                 SelectContext dc = sctx;
                 dc.chart = e->chart;
-                auto it = lib->scores.find(e->chart->sha256);
+                dc.course = course.get();
+                dc.type = course ? 8 : 0;
+                auto it = lib->scores.find(course ? course->hash : e->chart->sha256);
                 dc.score = it != lib->scores.end() ? &it->second : nullptr;
                 DecideResult dr = run_decide(app, dc);
                 if (dr != DecideResult::Play) {
@@ -574,7 +600,7 @@ void run_select(App& app) {
                 }
                 po.decide_sound = !app.decide_skin;
             }
-            PlayExit ex = run_play(app, path, po);
+            PlayExit ex = course ? run_course(app, *course, po) : run_play(app, path, po);
             app.save_config();  // 演奏中に変えたハイスピードやカバーを残す
             app.mixer.play_system(kSysSelect, true);
             set_select_view();
@@ -583,7 +609,7 @@ void run_select(App& app) {
             for (const ScoreRecord& s : app.db.all_scores()) lib->scores[s.sha256] = s;
             sctx.player = app.db.player_stats();
             if (ex == PlayExit::Quit) quit = true;
-        } else {
+        } else if (e->kind == Entry::Kind::Missing) {
             std::lock_guard<std::mutex> lock(mu);
             status = "この譜面は持っていない：" + e->missing.title;
         }
@@ -1170,8 +1196,15 @@ void run_select(App& app) {
             const std::vector<Entry>& list = *lv.list;
             int n = static_cast<int>(list.size());
             const Entry* cur = current();
-            sctx.type = 1, sctx.chart = nullptr, sctx.score = nullptr;
-            if (cur && cur->kind == Entry::Kind::Chart) {
+            sctx.type = 1, sctx.chart = nullptr, sctx.score = nullptr, sctx.course = nullptr;
+            if (cur && cur->kind == Entry::Kind::Folder && cur->course_folder) {
+                sctx.type = 6;
+            } else if (cur && cur->kind == Entry::Kind::Course) {
+                sctx.type = 8;
+                sctx.course = cur->course.get();
+                auto it = lib->scores.find(cur->course->hash);
+                if (it != lib->scores.end()) sctx.score = &it->second;
+            } else if (cur && cur->kind == Entry::Kind::Chart) {
                 sctx.type = 0;
                 sctx.chart = cur->chart;
                 auto it = lib->scores.find(cur->chart->sha256);
@@ -1266,8 +1299,14 @@ void run_select(App& app) {
                 SelectBar b;
                 const Entry& en = list[i];
                 if (en.kind == Entry::Kind::Folder) {
-                    b.type = 1;
+                    b.type = en.course_folder ? 6 : 1;
                     b.title = en.label;
+                } else if (en.kind == Entry::Kind::Course) {
+                    // コースのバーはレベルを出さず、ランプはコースの記録
+                    b.type = 8;
+                    b.title = en.label;
+                    auto it = lib->scores.find(en.course->hash);
+                    if (it != lib->scores.end()) b.lamp = it->second.clear;
                 } else {
                     b.type = 0;
                     b.title = en.label;
@@ -1465,6 +1504,8 @@ void run_select(App& app) {
                 else if (k == 'q') run_search("celestial");
                 else if (k == 'h' && sk && !sk->helpfiles.empty()) open_readme({resolve_lr2_path(app.lr2_root, sk->helpfiles[0], false)});
                 else if (k == 'o') sort_mode = (sort_mode + 1) % kSortCount, reapply_view();
+                else if (k == 'a') autoplay = !autoplay;
+                else if (k == '_') SDL_Delay(10);  // 待つだけ
             } else {
                 if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
                 quit = true;

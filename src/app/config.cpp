@@ -25,6 +25,7 @@ bool AppConfig::load(const std::string& path) {
         if (key == "lr2_root") lr2_root = val;
         else if (key == "play_skin") play_skin = val;
         else if (key == "result_skin") result_skin = val;
+        else if (key == "courseresult_skin") courseresult_skin = val;
         else if (key == "select_skin") select_skin = val;
         else if (key == "decide_skin") decide_skin = val;
         else if (key == "sound_set") sound_set = val;
@@ -84,6 +85,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "lr2_root = " << lr2_root << "\n";
     f << "play_skin = " << play_skin << "\n";
     f << "result_skin = " << result_skin << "\n";
+    f << "courseresult_skin = " << courseresult_skin << "\n";
     f << "select_skin = " << select_skin << "\n";
     f << "decide_skin = " << decide_skin << "\n";
     f << "sound_set = " << sound_set << "\n";

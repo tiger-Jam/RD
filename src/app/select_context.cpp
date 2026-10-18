@@ -61,7 +61,8 @@ int gauge_lamp(int gauge) {
 bool SelectContext::option(int op) const {
     if (op < 0) return !option(-op);
     const bool song = chart && is_song(type);
-    const int lamp = song && score ? skin_lamp(score->clear) : 0;
+    const int lamp = (song || course) && score ? skin_lamp(score->clear) : 0;
+    if (bool v; course_option(course, op, v)) return v;
     switch (op) {
     case 0: return true;
     case 1: return is_folder(type);
@@ -90,7 +91,7 @@ bool SelectContext::option(int op) const {
         if ((cfg->assist && cfg->random != 5) || cfg->random == 4) lamp = std::min(lamp, 1);
         return lamp == op - 62;
     }
-    case 100: case 101: case 102: case 103: case 104: case 105: return song && lamp == op - 100;
+    case 100: case 101: case 102: case 103: case 104: case 105: return (song || course) && lamp == op - 100;
     case 110: case 111: case 112: case 113: case 114: case 115: case 116: case 117: {
         if (!song || !score || score->clear <= 0) return false;
         return select_rank(score->exscore, chart->notes) == 8 - (op - 110);
@@ -145,6 +146,7 @@ bool SelectContext::option(int op) const {
 }
 
 int SelectContext::number(int id) const {
+    if (int v; course_number(course, id, v)) return v;
     const bool song = chart && is_song(type);
     const ScoreRecord* s = song ? score : nullptr;
     int notes = song ? chart->notes : 0;
@@ -193,6 +195,13 @@ int SelectContext::number(int id) const {
 
 std::string SelectContext::text(int id) const {
     if (catalog && (id == 50 || id == 51 || (id >= 100 && id <= 114))) return catalog->text(id, *cfg);
+    if (std::string v; course_text(course, id, v)) return v;
+    if (course) {
+        // コースのバー：タイトルの枠にコース名。遊べないときはアーティストの枠にその旨
+        if (id == 10 || id == 12) return course->name;
+        if (id == 14) return course->playable() ? "" : "曲が設定されていないのでプレイできません";
+        if (id >= 10 && id <= 18) return {};
+    }
     const bool song = chart && is_song(type);
     auto opt = [&](const char* key, int i) { return names ? names->get(key, i) : std::string(); };
     switch (id) {

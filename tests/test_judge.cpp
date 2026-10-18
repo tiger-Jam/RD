@@ -193,3 +193,27 @@ TEST(ghost_default_target_matches_lr2) {
     none.deal();
     CHECK_EQ(none.exscore(), 0);
 }
+
+TEST(gauge_course) {
+    GaugeSet g;
+    g.init(300, 100, 2);  // 段位
+    CHECK_EQ(g.hp(kGroove), 100.0);  // コースでは GROOVE も 100% から
+    g.apply_judge(kPoor);
+    CHECK(std::abs(g.hp(kGroove) - 97.0) < 1e-4);
+    // 2% で止まらず、0 まで落ちる
+    std::array<double, kGaugeCount> low{};
+    low.fill(3.0);
+    g.set_hp(low);
+    g.apply_judge(kPoor);  // 30% 以下なので 0.6 倍
+    CHECK(std::abs(g.hp(kGroove) - 1.2) < 1e-4);
+    CHECK(gauge_failed(g, kGroove));
+    // コース中は 2% 残ればクリア
+    GaugeSet h;
+    h.init(300, 10, 0);
+    h.apply_judge(kBad);
+    CHECK_EQ(clear_type(h, kGroove, 10, 10, 5, 0, true), 3);
+    CHECK_EQ(clear_type(h, kGroove, 10, 10, 5, 0, false), 3);
+    GaugeSet s;
+    s.init(300, 10);
+    CHECK_EQ(s.hp(kGroove), 20.0);
+}

@@ -29,6 +29,7 @@ std::string* SkinCatalog::config_slot(AppConfig& cfg, int type) {
     case 5: return &cfg.select_skin;
     case 6: return &cfg.decide_skin;
     case 7: return &cfg.result_skin;
+    case 15: return &cfg.courseresult_skin;
     case 10: return &cfg.sound_set;
     default: return nullptr;
     }
@@ -45,6 +46,7 @@ std::string SkinCatalog::default_path(int type) const {
     case 5: rel = "LR2files/Theme/LR2/Select/select.lr2skin"; break;
     case 6: rel = "LR2files/Theme/LR2/Decide/decide.lr2skin"; break;
     case 7: rel = "LR2files/Theme/LR2/Result/result.lr2skin"; break;
+    case 15: rel = "LR2files/Theme/LR2/CourseResult/courseresult.lr2skin"; break;
     case 10: rel = "LR2files/Sound/lr2.lr2ss"; break;
     default: return {};
     }

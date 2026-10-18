@@ -84,9 +84,10 @@ bool is_movie_file(const std::string& p) {
 
 // リザルトに入ったときに1回だけ記録する。途中でやめたときもLR2と同じくFAILEDとして記録する
 void record_score(App& app, const std::string& sha256, const JudgeEngine& j, bool quit_early, int lamp, const AppConfig& cfg,
-                  bool assist) {
+                  bool assist, bool course_stage) {
     const PlayStats& s = j.stats();
     PlayRecord rec;
+    rec.course_stage = course_stage;
     rec.clear = lamp, rec.exscore = s.exscore(), rec.max_combo = s.max_combo;
     rec.judge = {s.judge_count[kPGreat], s.judge_count[kGreat], s.judge_count[kGood], s.judge_count[kBad], s.judge_count[kPoor]};
     // クリアしたときのオプションの履歴（LR2: statplay.cpp ConvertOptionHistory）。
@@ -182,6 +183,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     SDL_HideCursor();
     PlayContext ctx;
     ctx.chart = &chart;
+    CourseRun* course = opt.course;
+    if (course) {
+        ctx.course = course->course;
+        ctx.course_stage = course->stage;
+        ctx.course_stages = static_cast<int>(course->course->stages.size());
+    }
     ctx.autoplay = opt.autoplay;
     ctx.assist = assist;
     ctx.hs_fix = cfg.hs_fix;
@@ -265,6 +272,15 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         jcfg.gas = cfg.gas;
         jcfg.autoplay = opt.autoplay;
         jcfg.assist_scratch = assist;
+        if (course) {
+            // 2 ステージ目からは、前のステージのゲージ・ゲージの種類・コンボを引き継ぐ
+            jcfg.course = course->course->type;
+            jcfg.carry = course->stage > 0;
+            jcfg.carry_hp = course->hp;
+            jcfg.carry_combo = course->combo;
+            jcfg.carry_max_combo = course->max_combo;
+            jcfg.gauge_type = course->gauge_type;
+        }
         JudgeEngine judge(chart, jcfg);
         ctx.judge = &judge;
         ctx.timers = SkinTimers();
@@ -317,8 +333,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             const PlayStats& ps = judge.stats();
             // LR2（Main.cpp:1697）：オートプレイ・1 ノーツも判定していない・GOOD 以上が 1 つも無いときは、
             // リザルトを出さず、記録もせずに選曲画面へ戻る
+            ctx.quit_early = quit_early;
             if (opt.autoplay || ps.note_current == 0 ||
                 ps.judge_count[kGood] + ps.judge_count[kGreat] + ps.judge_count[kPGreat] == 0) {
+                // コースでは、オートプレイなら次のステージへ進み、それ以外はコースをやめて選曲へ戻る
+                if (course && !(opt.autoplay && !quit_early)) course->abandoned = true;
                 done = true;
                 return;
             }
@@ -350,9 +369,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.old_minbp = has_best ? best_score.bp : -1;
             ctx.old_total_notes = has_best ? ps.total_notes : 0;
             if (!recorded && opt.save_score && !opt.autoplay && started) {
-                record_score(app, sha256, judge, quit_early, ctx.result_clear, cfg, assist);
+                record_score(app, sha256, judge, quit_early, ctx.result_clear, cfg, assist, course != nullptr);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
-                ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
+                // （コースのステージではフルコンボのときだけ上がる）
+                if (!course || ctx.result_clear >= 5) ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
             }
             recorded = true;
             // クリア・失敗の音（LR2: ProcS_Result）
@@ -466,7 +486,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         else if (phase != Phase::Fadeout) enter_result(judge.stats().note_current < judge.stats().total_notes);
                     } else if (e.key.key == SDLK_RETURN && phase == Phase::Result) {
                         result_input();
-                    } else if (e.key.key == SDLK_F5 && phase == Phase::Result) {
+                    } else if (e.key.key == SDLK_F5 && phase == Phase::Result && !course) {
                         retry = true, done = true;
                     } else if (e.key.key == SDLK_F4) {
                         bool fs = SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN;
@@ -507,7 +527,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         bool white = input.button_held(kKey1) || input.button_held(kKey1 + 2) || input.button_held(kKey1 + 4) ||
                                      input.button_held(kKey1 + 6);
                         bool black = input.button_held(kKey1 + 1) || input.button_held(kKey1 + 3) || input.button_held(kKey1 + 5);
-                        if (white && black) retry = true;
+                        if (white && black && !course) retry = true;
                         done = true;
                     }
                 }
@@ -689,7 +709,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 }
                 old_hp = hp;
 
-                bool survival = !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
+                // コースでは GROOVE/EASY も 2% を割ると閉店する
+                bool survival = course || !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
                 if (survival && judge.failed()) {
                     phase = Phase::Failed;
                     ctx.timers.set(3, now_ms);
@@ -805,7 +826,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.judge_draw = ctx.judge_draw;
                 st.combo_draw = judge.stats().combo;
                 st.gauge_hp = ctx.hp_print >= 0 ? ctx.hp_print : judge.gauge().hp(judge.gauge_type());
-                st.gauge_survival = !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
+                st.gauge_survival = course || !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
                 st.scratch_angle = scratch_angle;
                 st.bga = &bga_textures;
                 st.bga_base = bga_base;
@@ -852,6 +873,22 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         mixer.stop();
         for (int id : {kSysDecide, kSysClear, kSysFail, kSysStop}) mixer.stop_system(id);
         if (skin) app.set_view(skin->width, skin->height, false);
+        if (course) {
+            // 次のステージへ持ち越す。途中でやめたときは全ゲージが 0（LR2: Play.cpp:1659）
+            const PlayStats& ps = judge.stats();
+            course->hp = judge.gauge().hp_all();
+            if (ctx.quit_early || fade_quit) course->hp.fill(0.0);
+            course->gauge_type = judge.gauge_type();
+            course->combo = ps.course_combo;
+            course->max_combo = ps.course_max_combo;
+            for (int k = 0; k < 6; ++k) course->total.judge_count[k] += ps.judge_count[k];
+            course->total.empty_poor += ps.empty_poor;
+            course->total.fast += ps.fast, course->total.slow += ps.slow;
+            course->total.note_current += ps.note_current;
+            course->total.total_notes += ps.total_notes;
+            course->finished = ps.note_current >= ps.total_notes && !fade_quit;
+            course->alive = !quit && !course->abandoned && course->finished && course->hp[course->gauge_type] >= 2.0;
+        }
     }
     if (!loader_joined) loader.join();
     for (SDL_Texture* t : bga_textures)
@@ -861,6 +898,174 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     if (stage_tex) SDL_DestroyTexture(stage_tex);
     if (back_tex) SDL_DestroyTexture(back_tex);
     return exit;
+}
+
+namespace {
+
+// コースリザルト（LR2: Scene13_Courseresult）。コース通しの値を、リザルトと同じ番号で見せる
+PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt) {
+    const Course& course = *cr.course;
+    AppConfig& cfg = app.cfg;
+    Mixer& mixer = app.mixer;
+    const int n = static_cast<int>(course.stages.size());
+    // コース通しの値。途中で終わったときは、遊ばなかったステージの総ノーツ数も足す（LR2: statplay.cpp:241）
+    PlayStats total = cr.total;
+    for (int i = cr.stage + 1; i < n; ++i)
+        if (course.stages[i].chart) total.total_notes += course.stages[i].chart->notes;
+    total.combo = cr.combo;
+    total.max_combo = cr.max_combo;
+    const int gtype = cr.gauge_type;
+    const double hp = cr.hp[gtype];
+    // コースのランプ：最後のステージを生きて終えたときだけクリア。フルコンボはコース全体を 1 本のコンボでつないだとき
+    int clear = 1;
+    const bool reached = cr.stage == n - 1 && cr.finished;
+    if (reached && hp >= 2.0) {
+        if (total.max_combo == total.total_notes) clear = total.judge_count[kGood] == 0 ? 6 : 5;
+        else if (hp > 2.0 && total.note_current == total.total_notes)
+            clear = (gtype == kHard || gtype == kGAttack || gtype == kPAttack) ? 4 : gtype == kEasy ? 2 : 3;
+    }
+    // SCATTER と皿の自動演奏は EASY 止まり（フルコンボは自動演奏でなく SCATTER でないときだけ残す）
+    const bool assist = cfg.assist && cfg.random != kConverge;
+    if (forces_easy(cfg.random, assist) && clear > 2 && !(clear >= 5 && !assist && cfg.random != kScatter)) clear = 2;
+
+    ScoreRecord best;
+    const bool has_best = app.db.get_score(course.hash, best);
+    PlayContext ctx;
+    ctx.course = &course;
+    ctx.course_stage = cr.stage;
+    ctx.course_stages = n;
+    ctx.stats_override = &total;
+    ctx.hp_override = hp;
+    ctx.gauge_type = gtype;
+    ctx.autoplay = opt.autoplay;
+    ctx.assist = assist;
+    ctx.in_result = true;
+    ctx.result_clear = clear;
+    ctx.quit_early = !reached;
+    ctx.old_exscore = has_best ? best.exscore : 0;
+    ctx.old_maxcombo = has_best ? best.max_combo : 0;
+    ctx.old_minbp = has_best ? best.bp : -1;
+    ctx.old_total_notes = has_best ? total.total_notes : 0;
+    ctx.best_clear = has_best ? best.clear : 0;
+    ctx.best_exscore = ctx.old_exscore;
+    if (opt.save_score && !opt.autoplay) {
+        PlayRecord rec;
+        rec.clear = clear, rec.exscore = total.exscore(), rec.max_combo = total.max_combo;
+        rec.judge = {total.judge_count[kPGreat], total.judge_count[kGreat], total.judge_count[kGood], total.judge_count[kBad],
+                     total.judge_count[kPoor]};
+        // 途中で終わったときは、残りのノーツも BP に入れる
+        rec.bp = total.bp() + total.total_notes - total.note_current;
+        if (clear > 2) rec.op_history = (1u << gtype) | (0x100u << std::clamp(cfg.random, 0, 7)) | (0x10000u << std::clamp(cfg.effect, 0, 3));
+        else if (clear == 2 && gtype == kEasy) rec.op_history = 8;
+        app.db.save_score(course.hash, rec);
+        ctx.best_clear = std::max(ctx.best_clear, clear);
+    }
+    std::printf("コースの結果: %s ランプ %d / EX %d / MAX COMBO %d / %d ノーツ\n", course.name.c_str(), clear, total.exscore(),
+                total.max_combo, total.total_notes);
+    mixer.play_system(clear < 2 ? kSysCourseFail : kSysCourseClear);
+    app.load_courseresult_skin(ctx.load_options());
+    Lr2Skin* rskin = app.courseresult_skin.get();
+    if (!rskin) return PlayExit::Back;
+    ctx.skin = rskin;
+    app.set_view(rskin->width, rskin->height, false);
+
+    InputMapper input(app.keycfg);
+    input.set_min_hold_ms(cfg.input_interval);
+    SkinTimers rtimers;
+    rtimers.set(0, 0);
+    const uint64_t start_ns = SDL_GetTicksNS();
+    int chart_op3 = rskin->gaugechart[0].src.op[2], chart_op4 = rskin->gaugechart[0].src.op[3];
+    // 決定で グラフ → ランク → 更新 → フェードアウト と進む（リザルトと同じ）
+    auto result_input = [&] {
+        double t = (SDL_GetTicksNS() - start_ns) / 1e6;
+        if (t <= rskin->startinput) return;
+        if (!rtimers.on(151)) {
+            rtimers.set(151, t);
+            chart_op4 = static_cast<int>(t);
+        } else if (rtimers.lapse(151, t) <= rskin->startinput_rank || rtimers.on(152)) {
+            if (rtimers.lapse(152, t) > rskin->startinput_update && !rtimers.on(2)) rtimers.set(2, t);
+        } else if (!opt.save_score || opt.autoplay) {
+            if (!rtimers.on(2)) rtimers.set(2, t);
+        } else {
+            rtimers.set(152, t);
+        }
+    };
+    PlayExit exit = PlayExit::Back;
+    for (bool done = false; !done;) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT) done = true, exit = PlayExit::Quit;
+            else if (e.type == SDL_EVENT_JOYSTICK_ADDED) SDL_OpenJoystick(e.jdevice.which);
+            else if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat &&
+                     (e.key.key == SDLK_ESCAPE || e.key.key == SDLK_RETURN))
+                result_input();
+            input.handle(e);
+        }
+        joystick_init().open_new();
+        std::vector<LaneInput> li;
+        std::vector<ButtonInput> bi;
+        input.collect(SDL_GetTicksNS(), li, bi);
+        for (const ButtonInput& b : bi)
+            if (b.down && b.button <= kKey7) result_input();
+        double t = (SDL_GetTicksNS() - start_ns) / 1e6;
+        if (t > chart_op3 && !rtimers.on(150)) rtimers.set(150, t);
+        if (t > chart_op4 && !rtimers.on(151)) rtimers.set(151, t);
+        if (rtimers.on(2) && rtimers.lapse(2, t) >= rskin->fadeout) done = true;
+        ctx.now_ms = t;
+        PlaySkinState st;
+        st.now_ms = t;
+        st.timers = &rtimers;
+        st.option = [&](int o) { return ctx.option(o); };
+        st.number = [&](int id) { return ctx.number(id); };
+        st.bargraph = [&](int ty, double& v, double& m) { return ctx.bargraph(ty, v, m); };
+        st.slider = [&](int ty, int& v, int& lo, int& hi) { return ctx.slider(ty, v, lo, hi); };
+        st.text = [&](int id) { return ctx.text(id); };
+        st.button = [&](int ty) { return ctx.button(ty); };
+        st.graph_gauge = gtype;
+        st.total_notes = total.total_notes;
+        st.chart_op3 = chart_op3;
+        st.chart_op4 = chart_op4;
+        SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+        SDL_RenderClear(app.renderer);
+        app.result_renderer->draw_result(*rskin, st);
+        if (const char* shot = std::getenv("BMJ_COURSE_SHOT"); shot && t > 3000 && !rtimers.on(2)) {
+            // 開発用：3 秒たったら 1 枚保存して抜ける
+            if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
+            rtimers.set(2, t);
+        }
+        SDL_RenderPresent(app.renderer);
+    }
+    for (int id : {kSysCourseClear, kSysCourseFail}) mixer.stop_system(id);
+    return exit;
+}
+
+}  // namespace
+
+PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
+    AppConfig& cfg = app.cfg;
+    // 段位認定はオプションを書き換える（LR2: Main.cpp:1546。LR2 と同じく、終わっても元に戻さない）。
+    // 配置は正規だけ（難易度表の grade_mirror / grade_random なら MIRROR も使える）。EASY と G-ATTACK は GROOVE に
+    if (course.type == 2) {
+        if (!(course.allow_mirror && cfg.random == kMirror)) cfg.random = kRandomOff;
+        if (cfg.gauge == kEasy || cfg.gauge == kGAttack) cfg.gauge = kGroove;
+        cfg.effect = 0;
+        cfg.assist = false;
+    }
+    CourseRun cr;
+    cr.course = &course;
+    cr.gauge_type = cfg.gauge;
+    const int n = static_cast<int>(course.stages.size());
+    for (int i = 0; i < n; ++i) {
+        cr.stage = i;
+        PlayOptions o = opt;
+        o.course = &cr;
+        o.decide_sound = i == 0 && opt.decide_sound;  // 2 ステージ目からは決定画面も決定の音も無い
+        if (run_play(app, course.stages[i].chart->path, o) == PlayExit::Quit) return PlayExit::Quit;
+        app.save_config();
+        if (cr.abandoned) return PlayExit::Back;
+        if (!cr.alive) break;
+    }
+    return run_course_result(app, cr, opt);
 }
 
 }  // namespace bmj

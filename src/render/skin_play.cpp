@@ -8,9 +8,12 @@ namespace bmj {
 bool PlayContext::option(int option) const {
     bool ret = option >= 0;
     if (!ret) option = -option;
-    const PlayStats* st = judge ? &judge->stats() : nullptr;
-    double hp = judge ? judge->gauge().hp(judge->gauge_type()) : 0;
+    const PlayStats* st = stats();
+    double hp = gauge_hp();
     int gtype = judge ? judge->gauge_type() : gauge_type;
+    if (bool v; course_option(course, option, v)) return v ? ret : !ret;
+    // コースでは GROOVE/EASY も赤いゲージ（42/44 は偽、43/45 は真）
+    const bool normal_gauge = (gtype == kGroove || gtype == kEasy) && !course;
     auto rank_of = [](int ex, int notes) { return notes > 0 ? ex * 9 / (notes * 2) : 0; };
     switch (option) {
     case 0: return true;
@@ -24,8 +27,12 @@ bool PlayContext::option(int option) const {
     case 39: return ret;
     case 40: return !ret;             // BGAあり
     case 41: return ret;
-    case 42: return (gtype == kGroove || gtype == kEasy) ? ret : !ret;
-    case 43: return (gtype == kGroove || gtype == kEasy) ? !ret : ret;
+    case 42: case 44: return normal_gauge ? ret : !ret;
+    case 43: case 45: return normal_gauge ? !ret : ret;
+    // いまのステージ（280〜288 は 1〜9 ステージ目、289 は最後のステージ。最後のステージは 280 番台より優先。単曲でも 289 は真）
+    case 280: case 281: case 282: case 283: case 284: case 285: case 286: case 287: case 288:
+        return course_stage == option - 280 && course_stage != course_stages - 1 ? ret : !ret;
+    case 289: return course_stage == course_stages - 1 ? ret : !ret;
     case 46: return ret;
     case 47: return !ret;
     case 50: return ret;              // オフライン
@@ -89,8 +96,7 @@ bool PlayContext::option(int option) const {
     case 195: return has_backbmp ? ret : !ret;
     // 対戦・ゴーストバトル・コース・レーンカバーの調整中は、単曲プレイでは偽
     case 270: return cover_adjusting && lane_cover_on ? ret : !ret;
-    case 10: case 11: case 12: case 13: case 271: case 280: case 281: case 282: case 283: case 284:
-    case 289: case 290: case 291: case 623:
+    case 10: case 11: case 12: case 13: case 271: case 623:
         return !ret;
     case 83: case 84: return !ret;
     case 160: return ret;             // 7KEYS
@@ -138,8 +144,9 @@ int PlayContext::number(int id) const {
     case 20: return fps;
     default: break;
     }
-    if (!judge || !chart) return id >= 100 && id < 300 ? 0 : -1;
-    const PlayStats& st = judge->stats();
+    if (int v; course_number(course, id, v)) return v;
+    if (!stats() || (!chart && !stats_override)) return id >= 100 && id < 300 ? 0 : -1;
+    const PlayStats& st = *stats();
     int n = st.total_notes;
     // 2P側（通常のプレイではターゲットのゴースト）
     const Ghost* p2g = target_type == 1 ? &best : target_type == 2 ? &target : nullptr;
@@ -161,6 +168,7 @@ int PlayContext::number(int id) const {
         // 同じフォルダの難易度ごとのレベル（無ければ -1）
         return diff_level[id - 45];
     case 90: case 290: case 91: case 291: {
+        if (!chart) return -1;
         double lo = 1e9, hi = 0;
         for (const ScrollSeg& s : chart->scroll) lo = std::min(lo, s.bpm), hi = std::max(hi, s.bpm);
         int v = static_cast<int>(id == 90 || id == 290 ? hi : lo);
@@ -172,10 +180,11 @@ int PlayContext::number(int id) const {
     case 101: return st.exscore();
     case 102: return static_cast<int>(rate);
     case 103: return static_cast<int>(rate * 100.0) % 100;
-    case 104: return st.combo;
-    case 105: return st.max_combo;
+    // コースのプレイ中は、コンボはコース通しの値（リザルトではそのステージの値）
+    case 104: return course && !in_result ? st.course_combo : st.combo;
+    case 105: return course && !in_result ? st.course_max_combo : st.max_combo;
     case 106: return n;
-    case 107: return static_cast<int>(hp_print >= 0 ? hp_print : judge->gauge().hp(judge->gauge_type())) / 2 * 2;
+    case 107: return static_cast<int>(hp_print >= 0 ? hp_print : gauge_hp()) / 2 * 2;
     case 108: return st.exscore() - p2_ex;
     case 109: case 154: return rank_diff(st.exscore());
     case 110: return st.judge_count[kPGreat];
@@ -207,6 +216,12 @@ int PlayContext::number(int id) const {
     case 156: return n > 0 ? best.exscore() * 10000 / (n * 2) % 100 : 0;
     case 157: return n > 0 ? target.exscore() * 100 / (n * 2) : 0;
     case 158: return n > 0 ? target.exscore() * 10000 / (n * 2) % 100 : 0;
+    case 160: case 161: case 162: case 163: case 164:
+        if (!chart) return 0;
+        break;
+    default: break;
+    }
+    switch (id) {
     case 160: return static_cast<int>(chart->bpm_at(static_cast<int64_t>(std::max(0.0, song_ms) * 1000)));
     case 161: return song_ms / 1000 > 0 ? static_cast<int>(song_ms) / 1000 / 60 : 0;
     case 162: return song_ms / 1000 > 0 ? static_cast<int>(song_ms) / 1000 % 60 : 0;
@@ -239,7 +254,7 @@ int PlayContext::number(int id) const {
 }
 
 bool PlayContext::bargraph(int type, double& val, double& max) const {
-    const PlayStats* st = judge ? &judge->stats() : nullptr;
+    const PlayStats* st = stats();
     switch (type) {
     case 1:
         val = song_ms;
@@ -288,6 +303,7 @@ bool PlayContext::slider(int type, int& val, int& lo, int& hi) const {
 }
 
 std::string PlayContext::text(int id) const {
+    if (std::string v; course_text(course, id, v)) return v;
     if (!chart) return {};
     const ChartMeta& m = chart->meta;
     switch (id) {
@@ -304,8 +320,8 @@ std::string PlayContext::text(int id) const {
 
 // LR2: SetObjectValue_Button。プレイ画面で意味があるのは、まだ機能の無い設定ばかりなので 0（オフ）
 int PlayContext::bp_now() const {
-    if (!judge) return 0;
-    const PlayStats& st = judge->stats();
+    if (!stats()) return 0;
+    const PlayStats& st = *stats();
     // LR2: totalnotes - note_current + BAD + POOR（途中でやめたときは残りもBPに入る）
     return st.total_notes - st.note_current + st.judge_count[kBad] + st.judge_count[kPoor];
 }

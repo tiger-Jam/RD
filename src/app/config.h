@@ -11,6 +11,7 @@ struct AppConfig {
     std::string lr2_root;          // LR2のフォルダ（LR2files があるところ）
     std::string play_skin;         // プレイスキンの .lr2skin（空なら LR2 の既定）
     std::string result_skin;       // リザルトスキンの .lr2skin（空なら LR2 の既定）
+    std::string courseresult_skin; // コースリザルトスキンの .lr2skin（空なら LR2 の既定）
     std::string select_skin;       // 選曲スキンの .lr2skin（空なら LR2 の既定。"none" なら BMjoy の仮の画面）
     std::string decide_skin;       // 決定画面のスキン（空なら LR2 の既定。"none" なら決定画面を出さない）
     std::string sound_set;         // サウンドセットの .lr2ss（空なら LR2 の既定）

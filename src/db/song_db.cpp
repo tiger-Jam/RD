@@ -519,12 +519,14 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
     // 判定の内訳は、EX スコアを更新したとき（初めてのときも）だけ入れ替える
     if (!had || exscore > r.exscore) r.judge = play.judge;
     r.op_history |= play.op_history;
-    r.clear = std::max(r.clear, clear);
+    if (!play.course_stage || clear >= 5) r.clear = std::max(r.clear, clear);
     r.exscore = std::max(r.exscore, exscore);
     r.bp = (r.bp < 0 || !had) ? bp : std::min(r.bp, bp);
     r.max_combo = std::max(r.max_combo, max_combo);
-    r.playcount++;
-    if (clear >= 2) r.clearcount++;
+    if (!play.course_stage) {
+        r.playcount++;
+        if (clear >= 2) r.clearcount++;
+    }
     r.last_played = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     Stmt st(db_, "INSERT OR REPLACE INTO score(sha256, ln_mode, judge_profile, clear, exscore, bp, max_combo, "
                  "playcount, clearcount, last_played, pg, gr, gd, bd, pr, op_history) VALUES(?,0,0,?,?,?,?,?,?,?,?,?,?,?,?,?)");
@@ -532,6 +534,7 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
         .i64(7, r.clearcount).i64(8, r.last_played).i64(9, r.judge[0]).i64(10, r.judge[1]).i64(11, r.judge[2])
         .i64(12, r.judge[3]).i64(13, r.judge[4]).i64(14, r.op_history);
     st.run();
+    if (play.course_stage) return;
     // プレイヤーの累計
     PlayerStats p = player_stats();
     p.playcount++;

@@ -592,7 +592,8 @@ int main(int, char**) {
             while (fi < 9 && fps_vals[fi] != cfg.fps) ++fi;
             g.combo(&cfg.fps, X + 392, Y + 68, 174, 20, fps_names, fi == 9 ? 0 : fi, [&](int i) { cfg.fps = fps_vals[i]; });
             struct SkinRow { const char* name; std::string* path; };
-            SkinRow skins[] = {{"選曲スキン", &cfg.select_skin}, {"プレイスキン", &cfg.play_skin}, {"リザルトスキン", &cfg.result_skin}};
+            SkinRow skins[] = {{"選曲スキン", &cfg.select_skin}, {"プレイスキン", &cfg.play_skin}, {"リザルトスキン", &cfg.result_skin},
+                               {"コースリザルト", &cfg.courseresult_skin}};
             float y = Y + 102;
             for (SkinRow& sr : skins) {
                 g.label(X + 20, y + 6, sr.name);
@@ -605,8 +606,8 @@ int main(int, char**) {
                 y += 28;
             }
             g.label(X + 20, y + 10, "難易度表（URL）");
-            g.listview(X + 20, y + 28, 546, 104, "url", cfg.tables, table_sel, table_scroll);
-            float by = y + 140;
+            g.listview(X + 20, y + 28, 546, 76, "url", cfg.tables, table_sel, table_scroll);
+            float by = y + 112;
             g.edit_str(table_input, X + 20, by, 380, 20);
             if (g.button(X + 410, by - 1, 74, 22, "追加", !table_input.empty())) {
                 if (std::find(cfg.tables.begin(), cfg.tables.end(), table_input) == cfg.tables.end()) cfg.tables.push_back(table_input);

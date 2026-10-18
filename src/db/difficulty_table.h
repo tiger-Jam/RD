@@ -12,11 +12,19 @@ struct TableChart {
     std::string md5, sha256, level, title, artist, url, url_diff;
 };
 
+// 表のヘッダに書かれたコース（段位など）。charts は各ステージの譜面（md5 か sha256 のどちらか）
+struct TableCourse {
+    std::string name;
+    std::vector<TableChart> charts;
+    std::vector<std::string> constraints;  // grade / grade_mirror / gauge_lr2 / ln など
+};
+
 struct DifficultyTable {
     std::string url;  // 登録したURL
     std::string name, symbol;
     std::vector<std::string> levels;  // 表示の順
     std::vector<TableChart> charts;
+    std::vector<TableCourse> courses;
     int64_t fetched = 0;  // 取得した時刻（UNIX秒）
     bool from_cache = false;
     std::string warning;  // 取得に失敗した・譜面が大きく減ったので更新しなかった、など

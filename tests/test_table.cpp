@@ -38,3 +38,27 @@ TEST(table_parse) {
     DifficultyTable bad;
     CHECK(!parse_table(header, "<html>", bad, err));
 }
+
+TEST(table_courses) {
+    std::string data = R"([{"md5":"a1","level":"1"}])";
+    // 並びの並び。charts の形と、古い md5 の並びの形
+    std::string header = R"({"name":"T","symbol":"t","course":[[
+        {"name":"初段","constraint":["grade_mirror","gauge_lr2"],"md5":["AA","bb"]},
+        {"name":"EX","charts":[{"md5":"cc"},{"sha256":"DD"}]}]]})";
+    DifficultyTable t;
+    std::string err;
+    CHECK(parse_table(header, data, t, err));
+    CHECK_EQ(t.courses.size(), size_t(2));
+    if (t.courses.size() == 2) {
+        CHECK(t.courses[0].name == "初段");
+        CHECK(t.courses[0].charts.size() == 2 && t.courses[0].charts[0].md5 == "aa");
+        CHECK(t.courses[0].constraints.size() == 2);
+        CHECK(t.courses[1].charts.size() == 2 && t.courses[1].charts[1].sha256 == "dd");
+        CHECK(t.courses[1].constraints.empty());
+    }
+    // 古い grade は、段位・MIRROR 可として読む
+    std::string old = R"({"name":"T","grade":[{"name":"G","md5":["x"]}]})";
+    DifficultyTable t2;
+    CHECK(parse_table(old, data, t2, err));
+    CHECK(t2.courses.size() == 1 && t2.courses[0].constraints.size() == 2 && t2.courses[0].constraints[0] == "grade_mirror");
+}

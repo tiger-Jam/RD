@@ -5,6 +5,7 @@
 #include <array>
 #include <string>
 
+#include "app/course.h"
 #include "chart/chart.h"
 #include "game/ghost.h"
 #include "game/judge.h"
@@ -17,6 +18,14 @@ struct PlayContext {
     const Chart* chart = nullptr;
     const JudgeEngine* judge = nullptr;
     const Lr2Skin* skin = nullptr;
+    // コース（単曲なら nullptr）。ステージは 0 始まり。単曲はステージ数 1 の最後のステージとして扱う（LR2 と同じ）
+    const Course* course = nullptr;
+    int course_stage = 0, course_stages = 1;
+    // コースリザルト：判定エンジンの代わりに、コース通しの値を見せる
+    const PlayStats* stats_override = nullptr;
+    double hp_override = -1;
+    const PlayStats* stats() const { return stats_override ? stats_override : judge ? &judge->stats() : nullptr; }
+    double gauge_hp() const { return hp_override >= 0 ? hp_override : judge ? judge->gauge().hp(judge->gauge_type()) : 0; }
     SkinTimers timers;
     double now_ms = 0;       // シーンの時刻
     double song_ms = -1;     // タイマー41の経過（曲の時刻）

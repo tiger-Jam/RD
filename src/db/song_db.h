@@ -40,6 +40,8 @@ struct PlayRecord {
     int clear = 0, exscore = 0, bp = 0, max_combo = 0;
     std::array<int, 5> judge{};
     uint32_t op_history = 0;
+    // コースの途中のステージ（LR2 と同じく、プレイ回数・クリア回数・プレイヤーの累計は増やさず、ランプはフルコンボのときだけ上げる）
+    bool course_stage = false;
 };
 
 // プレイヤーの累計（LR2: player 表。スキンの数値 30〜37）

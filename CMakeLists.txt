@@ -72,6 +72,7 @@ add_executable(BMjoybody WIN32
     src/app/play_session.cpp
     src/app/select_scene.cpp
     src/app/select_context.cpp
+    src/app/course.cpp
     src/app/decide_scene.cpp
     src/app/skin_catalog.cpp
     src/app/skin_select_scene.cpp
