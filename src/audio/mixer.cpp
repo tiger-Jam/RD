@@ -55,9 +55,8 @@ void Mixer::set_song(const std::vector<Sample>* samples, std::vector<ScheduledSo
 }
 
 void Mixer::start(int64_t lead_in_frames) {
-    // 音声スレッドは running_ が立つまで何も読まないので、ここで初期化してよい
+    // 音声スレッドは running_ が立つまで曲のボイスを読まないので、ここで初期化してよい
     for (Voice& v : voices_) v = Voice{};
-    queue_head_.store(queue_tail_.load());
     song_frame_ = -lead_in_frames;
     schedule_next_ = 0;
     clock_valid_ = false;
@@ -122,6 +121,28 @@ void Mixer::start_voice(uint16_t sound, int64_t delay_frames) {
     slot->pos = -delay_frames;
 }
 
+void Mixer::run_system_command(int32_t cmd) {
+    int c = cmd - kSysBase;
+    int id = c & 0xff;
+    if (c & kSysStop) {
+        for (SysVoice& v : sys_voices_)
+            if (v.sample && v.id == id) v.sample = nullptr;
+        return;
+    }
+    if (id >= static_cast<int>(sys_samples_.size()) || sys_samples_[id].pcm.empty()) return;
+    // 同じ音を鳴らし直したら前のものは止める（キー音と同じ）
+    SysVoice* slot = nullptr;
+    for (SysVoice& v : sys_voices_) {
+        if (v.sample && v.id == id) v.sample = nullptr;
+        if (!v.sample && !slot) slot = &v;
+    }
+    if (!slot) slot = &sys_voices_[0];
+    slot->sample = &sys_samples_[id];
+    slot->pos = 0;
+    slot->id = id;
+    slot->loop = c & kSysLoop;
+}
+
 void Mixer::update_clock(uint64_t wall_ns) {
     int64_t raw_us = song_frame_ * 1000000 / rate_;
     if (!clock_valid_) {
@@ -145,16 +166,18 @@ void Mixer::update_clock(uint64_t wall_ns) {
 
 void Mixer::render(float* out, uint32_t frames) {
     std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
-    if (!running_.load(std::memory_order_acquire)) return;
+    bool running = running_.load(std::memory_order_acquire);
 
-    update_clock(SDL_GetTicksNS());
-
-    // キー押下の音
+    // メインスレッドからの命令（キー押下の音・システム音）
     size_t head = queue_head_.load(std::memory_order_relaxed);
     size_t tail = queue_tail_.load(std::memory_order_acquire);
     while (head != tail) {
         int32_t cmd = queue_[head];
-        if (cmd >= 0) {
+        if (cmd >= kSysBase) {
+            run_system_command(cmd);
+        } else if (!running) {
+            // 曲を止めている間のキー音は捨てる
+        } else if (cmd >= 0) {
             start_voice(static_cast<uint16_t>(cmd), 0);
         } else {
             uint16_t id = static_cast<uint16_t>(-cmd - 1);
@@ -164,6 +187,28 @@ void Mixer::render(float* out, uint32_t frames) {
         head = (head + 1) % kQueueSize;
     }
     queue_head_.store(head, std::memory_order_release);
+
+    // システム音
+    for (SysVoice& v : sys_voices_) {
+        if (!v.sample) continue;
+        const float* pcm = v.sample->pcm.data();
+        int64_t len = v.sample->frames();
+        for (uint32_t i = 0; i < frames; ++i) {
+            if (v.pos >= len) {
+                if (!v.loop) break;
+                v.pos = 0;
+            }
+            out[i * 2] += pcm[v.pos * 2];
+            out[i * 2 + 1] += pcm[v.pos * 2 + 1];
+            ++v.pos;
+        }
+        if (!v.loop && v.pos >= len) v.sample = nullptr;
+    }
+    if (!running) {
+        for (uint32_t i = 0; i < frames * 2; ++i) out[i] = std::clamp(out[i], -1.0f, 1.0f);
+        return;
+    }
+    update_clock(SDL_GetTicksNS());
 
     // この区間に入る予定の音（BGM・自動演奏）を、フレーム単位の位置で鳴らす
     int64_t end = song_frame_ + frames;

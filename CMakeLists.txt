@@ -55,6 +55,7 @@ add_executable(bmjoy
     src/app/select_scene.cpp
     src/audio/sound_bank.cpp
     src/audio/mixer.cpp
+    src/audio/system_sound.cpp
     src/input/input.cpp
     src/input/keyconfig.cpp
     src/render/keyconfig_scene.cpp

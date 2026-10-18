@@ -11,6 +11,7 @@ struct AppConfig {
     std::string lr2_root;          // LR2のフォルダ（LR2files があるところ）
     std::string play_skin;         // プレイスキンの .lr2skin（空なら LR2 の既定）
     std::string result_skin;       // リザルトスキンの .lr2skin（空なら LR2 の既定）
+    std::string sound_set;         // サウンドセットの .lr2ss（空なら LR2 の既定）
     std::string skin_res;          // "", "sd", "hd", "fhd"
     std::map<std::string, std::vector<int>> skin_custom;  // スキンのパス → カスタマイズの選択
     std::vector<std::string> song_dirs;  // 曲フォルダ

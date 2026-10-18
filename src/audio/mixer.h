@@ -41,6 +41,11 @@ public:
     void play_now(uint16_t sound) { push_command(static_cast<int32_t>(sound)); }
     void stop_now(uint16_t sound) { push_command(-static_cast<int32_t>(sound) - 1); }
 
+    // システム音（決定音・選曲BGMなど）。曲を止めていても鳴る。set_system_sounds は鳴らし始める前に1回だけ呼ぶ
+    void set_system_sounds(std::vector<Sample> sounds) { sys_samples_ = std::move(sounds); }
+    void play_system(int id, bool loop = false) { push_command(kSysBase + id + (loop ? kSysLoop : 0)); }
+    void stop_system(int id) { push_command(kSysBase + id + kSysStop); }
+
     // 譜面上の時刻（マイクロ秒）。wall_ns は SDL_GetTicksNS() と同じ基準の時刻。
     // スピーカーから実際に出ている位置を返す（出力遅延を差し引く）
     int64_t song_time_us_at(uint64_t wall_ns) const;
@@ -60,6 +65,16 @@ private:
         int64_t pos = 0;  // 再生位置（負なら、その分だけ遅れて始まる）
         uint16_t sound = 0;
     };
+    struct SysVoice {
+        const Sample* sample = nullptr;
+        int64_t pos = 0;
+        int id = 0;
+        bool loop = false;
+    };
+    static constexpr int32_t kSysBase = 0x10000, kSysLoop = 0x100, kSysStop = 0x200;
+    std::vector<Sample> sys_samples_;
+    std::array<SysVoice, 16> sys_voices_{};
+    void run_system_command(int32_t cmd);
 
     std::unique_ptr<ma_device> device_;
     uint32_t rate_ = 48000;
@@ -73,7 +88,7 @@ private:
 
     // メインスレッド → 音声スレッドのキュー（単一生産者・単一消費者）
     static constexpr size_t kQueueSize = 1024;
-    std::array<int32_t, kQueueSize> queue_{};  // 0以上なら再生、負なら -(id+1) の停止
+    std::array<int32_t, kQueueSize> queue_{};  // 0以上なら再生、負なら -(id+1) の停止、kSysBase 以上はシステム音
     std::atomic<size_t> queue_head_{0}, queue_tail_{0};
 
     std::atomic<bool> running_{false};

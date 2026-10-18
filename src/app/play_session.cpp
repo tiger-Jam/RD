@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "audio/sound_bank.h"
+#include "audio/system_sound.h"
 #include "chart/bms_parser.h"
 #include "game/ghost.h"
 #include "game/graph.h"
@@ -117,6 +118,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     bool has_best = app.db.get_score(sha256, best_score);
     Mixer& mixer = app.mixer;
 
+    // 決定の音（LR2では決定画面で鳴る。BMjoyには決定画面が無いので、読み込みの間に鳴らす）
+    mixer.play_system(kSysDecide);
     PlayContext ctx;
     ctx.chart = &chart;
     ctx.autoplay = opt.autoplay;
@@ -242,6 +245,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
             }
             recorded = true;
+            // クリア・失敗の音（LR2: ProcS_Result）
+            mixer.play_system(ctx.result_clear < 2 ? kSysFail : kSysClear);
             // リザルトスキンは、結果が決まってから読む（#IF でクリア・失敗などを見るスキンがあるため）
             app.load_result_skin(ctx.load_options());
             rskin = app.result_skin.get();
@@ -363,6 +368,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         if ((n.kind == NoteKind::Normal || n.kind == NoteKind::Long) && n.sound)
                             schedule.push_back({frame_of(n.time_us), n.sound});
                 mixer.set_song(&bank.samples(), std::move(schedule));
+                mixer.stop_system(kSysDecide);
                 mixer.start(0);
                 started = true;
             }
@@ -391,7 +397,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 // 入力が遅れて届く分の余裕を見て、少し手前の時刻まで進める
                 judge.advance(song_us - 5000);
                 for (uint16_t s : judge.sounds_to_stop()) mixer.stop_now(s);
-                for (uint16_t s : judge.sounds_to_play()) mixer.play_now(s);
+                for (uint16_t s : judge.sounds_to_play()) {
+                    if (s == kMineSystemSound) mixer.play_system(kSysMine);
+                    else mixer.play_now(s);
+                }
                 judge.sounds_to_stop().clear();
                 judge.sounds_to_play().clear();
                 for (const JudgeEvent& je : judge.events()) {
@@ -466,6 +475,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     phase = Phase::Failed;
                     ctx.timers.set(3, now_ms);
                     mixer.stop();
+                    mixer.play_system(kSysStop);  // 閉店（LR2: Play.cpp:1367）
                     view.failed = true;
                 } else if (song_us > chart.end_us) {
                     phase = Phase::Fadeout;
@@ -596,6 +606,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             if (opt.quit_after > 0 && now_ms / 1000 > opt.quit_after) quit = true, done = true, exit = PlayExit::Quit;
         }
         mixer.stop();
+        for (int id : {kSysDecide, kSysClear, kSysFail, kSysStop}) mixer.stop_system(id);
         if (skin) app.set_view(skin->width, skin->height, false);
     }
     if (!loader_joined) loader.join();

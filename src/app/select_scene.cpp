@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "app/play_session.h"
+#include "audio/system_sound.h"
 #include "db/difficulty_table.h"
 #include "game/gauge.h"
 #include "input/input.h"
@@ -179,6 +180,7 @@ void run_select(App& app) {
         std::string name;
     };
     std::vector<Level> stack{{&root, 0, "BMjoy"}};
+    app.mixer.play_system(kSysSelect, true);  // 選曲BGM（ループ）
     bool autoplay = false;
     InputMapper input(app.keycfg);
     int repeat_dir = 0;
@@ -194,6 +196,7 @@ void run_select(App& app) {
         Level& lv = stack.back();
         int n = static_cast<int>(lv.list->size());
         if (n) lv.cursor = (lv.cursor + d + n) % n;
+        app.mixer.play_system(kSysScratch);
     };
     // 一覧を差し替えたあと、いま見ているフォルダの位置を名前でたどり直す
     auto rebuild = [&] {
@@ -215,11 +218,14 @@ void run_select(App& app) {
         if (!e) return;
         if (e->kind == Entry::Kind::Folder) {
             stack.push_back({&e->children, 0, e->label});
+            app.mixer.play_system(kSysFolderOpen);
         } else if (e->kind == Entry::Kind::Chart) {
             PlayOptions po;
             po.autoplay = autoplay;
             std::string path = e->chart->path;
+            app.mixer.stop_system(kSysSelect);
             PlayExit ex = run_play(app, path, po);
+            app.mixer.play_system(kSysSelect, true);
             app.set_view(1280, 720);
             input = InputMapper(app.keycfg);
             // スコアを読み直す
@@ -231,7 +237,10 @@ void run_select(App& app) {
         }
     };
     auto back = [&] {
-        if (stack.size() > 1) stack.pop_back();
+        if (stack.size() > 1) {
+            stack.pop_back();
+            app.mixer.play_system(kSysFolderClose);
+        }
     };
 
     while (!quit) {
@@ -255,13 +264,17 @@ void run_select(App& app) {
                     else quit = true;
                     break;
                 case SDLK_F5: refresh(); break;
-                case SDLK_F2: autoplay = !autoplay; break;
+                case SDLK_F2:
+                    autoplay = !autoplay;
+                    app.mixer.play_system(kSysOptionChange);
+                    break;
                 case SDLK_TAB: {
                     // ゲージ：GROOVE → EASY → HARD → DEATH → G-ATTACK → P-ATTACK
                     static const int order[] = {kGroove, kEasy, kHard, kDeath, kGAttack, kPAttack};
                     int i = 0;
                     while (i < 6 && order[i] != app.cfg.gauge) ++i;
                     app.cfg.gauge = order[(i + 1) % 6];
+                    app.mixer.play_system(kSysOptionChange);
                     break;
                 }
                 case SDLK_F4: {
@@ -437,6 +450,7 @@ void run_select(App& app) {
         SDL_RenderPresent(r);
         SDL_DelayPrecise(4'000'000);
     }
+    app.mixer.stop_system(kSysSelect);
     if (worker.joinable()) worker.join();
 }
 

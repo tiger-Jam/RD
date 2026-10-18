@@ -11,6 +11,9 @@
 
 namespace bmj {
 
+// 地雷が爆発したが #WAV00 が無いとき、sounds_to_play() に入れる番号（呼び出し側がシステム音を鳴らす）
+constexpr uint16_t kMineSystemSound = 0xFFFF;
+
 // 判定幅（ms）。LR2: bmsload:3810
 struct JudgeWindows {
     int pgreat = 18, great = 40, good = 100, bad = 200, empty_poor = 1000;

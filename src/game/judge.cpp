@@ -157,12 +157,12 @@ void JudgeEngine::proc_single(int lane, int keypress, int timing, int64_t t_us) 
         // 押した瞬間がGREATの早い側より後なら爆発。通り過ぎた時点で押していても爆発
         if (keypress == 1 && real - timing < win_.great) {
             apply_mine(note.damage);
-            if (note.sound == 0 && !chart_.wav.empty() && !chart_.wav[0].empty()) play_.push_back(0);
+            play_.push_back(!chart_.wav.empty() && !chart_.wav[0].empty() ? 0 : kMineSystemSound);
         } else if (timing <= real) {
             return;
         } else if (keypress == 1 || keypress == 2) {
             apply_mine(note.damage);
-            if (!chart_.wav.empty() && !chart_.wav[0].empty()) play_.push_back(0);
+            play_.push_back(!chart_.wav.empty() && !chart_.wav[0].empty() ? 0 : kMineSystemSound);
         }
         done_[idx] = true;
         l.cur++;
