@@ -512,6 +512,10 @@ struct Loader {
 
 }  // namespace
 
+bool load_skin_image(const std::string& path, SkinImage& img, const uint8_t trans[3], bool use_trans) {
+    return load_image_file(path, img, trans, use_trans);
+}
+
 std::string resolve_lr2_path(const std::string& lr2_root, const std::string& path, bool allow_wildcard) {
     std::vector<std::string> parts = split_path(path);
     if (parts.empty()) return {};

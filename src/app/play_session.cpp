@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
+#include <cstring>
 #include <cstdlib>
 #include <cstdio>
 #include <thread>
@@ -38,6 +40,33 @@ std::vector<std::string> resolve_sounds(const Chart& chart, std::vector<std::str
         paths[i] = p;
     }
     return paths;
+}
+
+// BGAの画像のファイル名を解決する（LR2: FindAltImage。書かれた名前→png/jpg/bmp→1つ上のフォルダ）
+std::vector<std::string> resolve_images(const Chart& chart) {
+    DirIndex dir(chart.base_dir);
+    std::vector<std::string> paths(chart.bmp.size());
+    for (size_t i = 0; i < chart.bmp.size(); ++i) {
+        if (chart.bmp[i].empty()) continue;
+        std::string p = dir.resolve(chart.bmp[i], {".png", ".jpg", ".bmp"});
+        if (p.empty()) {
+            std::string up = join_path(chart.base_dir, "../" + chart.bmp[i]);
+            if (std::FILE* f = std::fopen(up.c_str(), "rb")) {
+                std::fclose(f);
+                p = up;
+            }
+        }
+        paths[i] = p;
+    }
+    return paths;
+}
+
+bool is_movie_file(const std::string& p) {
+    std::string l = p;
+    for (char& c : l) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (const char* e : {".mpg", ".mpeg", ".avi", ".wmv", ".mp4", ".m4v", ".webm", ".mkv", ".ogv", ".flv"})
+        if (l.size() >= std::strlen(e) && l.compare(l.size() - std::strlen(e), std::strlen(e), e) == 0) return true;
+    return false;
 }
 
 void print_result(const Chart& chart, const JudgeEngine& j) {
@@ -81,6 +110,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     std::vector<std::string> paths = resolve_sounds(chart, missing);
     for (const auto& m : missing) std::printf("キー音が見つからない: %s\n", m.c_str());
     int total_sounds = static_cast<int>(std::count_if(paths.begin(), paths.end(), [](auto& p) { return !p.empty(); }));
+    // BGAの画像（動画はまだ対応していないので読まない）
+    std::vector<std::string> bga_paths = resolve_images(chart);
+    int total_images = 0;
+    for (std::string& p : bga_paths) {
+        if (!p.empty() && is_movie_file(p)) p.clear();
+        if (!p.empty()) total_images++;
+    }
+    std::vector<SkinImage> bga_images(bga_paths.size());
     SoundBank bank;
     std::vector<std::string> load_errors;
     std::atomic<bool> loaded{false};
@@ -88,10 +125,18 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     std::thread loader([&] {
         int threads = std::max(2u, std::thread::hardware_concurrency() / 2) + 1;
         bank.load(paths, mixer.sample_rate(), threads, &load_errors, &load_done);
+        // BGAは黒を透過色にする（LR2: bmsload:731 SetTransColor(0,0,0)）
+        const uint8_t black[3] = {0, 0, 0};
+        for (size_t i = 0; i < bga_paths.size(); ++i) {
+            if (bga_paths[i].empty()) continue;
+            load_skin_image(bga_paths[i], bga_images[i], black, true);
+            load_done.fetch_add(1);
+        }
         loaded = true;
     });
     bool loader_joined = false;
-    ctx.load_total = std::max(1, total_sounds);
+    ctx.load_total = std::max(1, total_sounds + total_images);
+    std::vector<SDL_Texture*> bga_textures;
 
     // 描画の間隔。垂直同期を使わないときは、描画を待つ間も入力と判定を回す（OpenLR2のフレームリミッタと同じ考え方）
     double fps = cfg.fps == 0 ? app.refresh_hz : cfg.fps;
@@ -125,6 +170,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         float scratch_angle = 0;
         int old_hp = -1;
         bool last_note_set = false, fc_set = false, done = false;
+        // BGAの層（LR2: bmsload:597, 810）。#BMP00 があれば、それが最初のPOORの画像になる
+        int bga_base = -1, bga_layer = -1, bga_poor = -1;
+        bool bga_poor_init = false;
+        size_t bga_next = 0;
+        double last_miss_ms = -1e9;
         int fps_frames = 0;
         uint64_t fps_t0 = scene_start;
         ctx.timers.set(0, 0);
@@ -174,6 +224,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 loader.join();
                 loader_joined = true;
                 for (const auto& er : load_errors) std::printf("%s\n", er.c_str());
+                // GPUへのアップロードはメインスレッドで行う（仕様書4章）
+                bga_textures.assign(bga_images.size(), nullptr);
+                for (size_t i = 0; i < bga_images.size(); ++i)
+                    if (!bga_images[i].rgba.empty()) bga_textures[i] = app.skin_renderer->create_texture(bga_images[i]);
+                bga_images.clear();
             }
 
             // 場面の進行（LR2: Scene04_Play.cpp:1748-1768）
@@ -231,7 +286,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         if (j >= kGood) ctx.timers.set(70 + je.lane, at);
                     } else {
                         if (j >= kGreat) ctx.timers.set(50 + je.lane, at);  // ボム
-                        if (j < kGood) ctx.last_miss_ms = at;
+                        if (j < kGood) ctx.last_miss_ms = at, last_miss_ms = at;
                         ctx.judge_draw = j;
                         ctx.timers.set(46, at);
                     }
@@ -246,6 +301,17 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     }
                 }
                 judge.events().clear();
+                // BGAの切り替え（LR2: Play.cpp:1404-1470）
+                if (!bga_poor_init && !bga_textures.empty()) {
+                    bga_poor = bga_textures[0] ? 0 : -1;
+                    bga_poor_init = true;
+                }
+                while (bga_next < chart.bga.size() && chart.bga[bga_next].time_us < song_us) {
+                    const BgaEvent& be = chart.bga[bga_next++];
+                    if (be.layer == BgaEvent::Layer::Base) bga_base = be.image;
+                    else if (be.layer == BgaEvent::Layer::Layer) bga_layer = be.image;
+                    else bga_poor = be.image;
+                }
                 for (int lane = 0; lane < kLaneCount; ++lane) {
                     if (!judge.lane_ln_holding(lane)) ctx.timers.reset(70 + lane);
                     // 自動演奏の鍵盤の光は80msで消す（LR2: Play.cpp:684）
@@ -349,6 +415,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.gauge_hp = judge.gauge().hp(judge.gauge_type());
                 st.gauge_survival = !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
                 st.scratch_angle = scratch_angle;
+                st.bga = &bga_textures;
+                st.bga_base = bga_base;
+                st.bga_layer = bga_layer;
+                st.bga_poor = bga_poor;
+                st.bga_show_poor = now_ms - last_miss_ms < 500;  // LR2: poorbga の既定値500ms
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
                 app.skin_renderer->draw_play(*skin, st);
@@ -383,6 +454,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         if (skin) app.set_view(skin->width, skin->height, false);
     }
     if (!loader_joined) loader.join();
+    for (SDL_Texture* t : bga_textures)
+        if (t) SDL_DestroyTexture(t);
     return exit;
 }
 

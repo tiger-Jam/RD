@@ -60,6 +60,10 @@ struct PlaySkinState {
     double gauge_hp = 0;         // 表示用のゲージ（%）
     bool gauge_survival = false;
     float scratch_angle = 0;     // 皿の回転（度）
+    // BGA（LR2: bgaLayer1 / bgaLayer2 / missLayer）。番号は #BMP のID、-1 は無し
+    const std::vector<SDL_Texture*>* bga = nullptr;
+    int bga_base = -1, bga_layer = -1, bga_poor = -1;
+    bool bga_show_poor = false;  // ミスしてから一定時間はPOORの画像を出す
 };
 
 class SkinRenderer {
@@ -70,6 +74,8 @@ public:
     void upload(const Lr2Skin& skin);
     void draw_play(const Lr2Skin& skin, const PlaySkinState& st);
     void set_font_path(const std::string& dir) { font_dir_ = dir; }
+    // 画像からテクスチャを作る（破棄は呼び出し側）
+    SDL_Texture* create_texture(const SkinImage& img);
 
 private:
     struct Item {
@@ -82,6 +88,7 @@ private:
         std::string str;
         int font = 0;
         int align = 0;
+        bool backbox = false;  // 画像の下に黒い箱を敷く（BGAの一番下の層）
     };
 
     SDL_Texture* image_tex(int gr) const;
@@ -95,6 +102,7 @@ private:
     void add_notes(const Lr2Skin& skin, const PlaySkinState& st);
     void add_gauge(const SkinObject& o, const PlaySkinState& st);
     void add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st);
+    void add_bga(const SkinObject& o, const PlaySkinState& st, int id, bool base);
     void flush(const Lr2Skin& skin);
     void draw_image(Item& it);
     void draw_text(const Lr2Skin& skin, Item& it);

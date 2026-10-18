@@ -42,6 +42,8 @@ int count_digit(int n) {
 
 }  // namespace
 
+SDL_Texture* SkinRenderer::create_texture(const SkinImage& img) { return make_texture(r_, img); }
+
 SkinRenderer::~SkinRenderer() {
     for (SDL_Texture* t : textures_) if (t) SDL_DestroyTexture(t);
     for (auto& v : font_textures_)
@@ -314,6 +316,30 @@ void SkinRenderer::add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st)
     }
 }
 
+// LR2: AddDrawingBuffer_BGA（skindraw:434）。256より小さい画像は等倍のまま横は中央に寄せる
+void SkinRenderer::add_bga(const SkinObject& o, const PlaySkinState& st, int id, bool base) {
+    if (o.dst.empty() || !st.bga || id < 0 || id >= static_cast<int>(st.bga->size())) return;
+    SDL_Texture* tex = (*st.bga)[id];
+    if (!tex) return;
+    SkinDraw d = eval_dst(o.dst, st.timers->lapse(o.dst.timer, st.now_ms));
+    if (!d.visible) return;
+    float iw = 0, ih = 0;
+    SDL_GetTextureSize(tex, &iw, &ih);
+    if (iw < 256) {
+        d.x += d.w / 256.0f * (256.0f - iw) * 0.5f;
+        d.w *= iw / 256.0f;
+    }
+    if (ih < 256) d.h *= ih / 256.0f;
+    if (!base) d.sort += 1;
+    Item it;
+    it.sort = d.sort;
+    it.tex = tex;
+    it.src = SDL_FRect{0, 0, iw, ih};
+    it.d = d;
+    it.backbox = base;
+    items_.push_back(it);
+}
+
 void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
     items_.clear();
     // 集める順はLR2と同じ（ProcI_Play → メインループの各オブジェクト）。最後に描画順で並べ替える
@@ -333,6 +359,18 @@ void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
             add(o.src, d, src_time(o.src, o.dst, st));
         } else {
             add_object(o, st, 0, 0);
+        }
+    }
+    // BGA（LR2: Main.cpp:2045）。ミスした直後はPOORの層だけ、それ以外は一番下の層と重ねる層
+    if (st.notes_visible) {
+        for (const SkinObject& o : skin.bgas) {
+            if (!dst_on(o.dst, st)) continue;
+            if (st.bga_show_poor && st.bga_poor >= 0) {
+                add_bga(o, st, st.bga_poor, false);
+            } else {
+                add_bga(o, st, st.bga_base, true);
+                add_bga(o, st, st.bga_layer, false);
+            }
         }
     }
     for (const SkinObject& o : skin.sliders) {
@@ -429,6 +467,11 @@ void SkinRenderer::draw_image(Item& it) {
     float x1 = std::floor(d.x + 0.5f), y1 = std::floor(d.y + 0.5f);
     float x2 = std::floor(d.x + d.w + 0.5f), y2 = std::floor(d.y + d.h + 0.5f);
     SDL_FRect dst{x1, y1, x2 - x1, y2 - y1};
+    if (it.backbox) {
+        SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawColor(r_, 0, 0, 0, 255);
+        SDL_RenderFillRect(r_, &dst);
+    }
     if (d.angle != 0.0f) {
         SDL_FPoint c;
         float w = dst.w, h = dst.h;
