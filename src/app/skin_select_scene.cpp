@@ -35,6 +35,13 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
     bool select_changed = false, done = false;
     const SkinObject* dragging = nullptr;
     float mouse_x = -1, mouse_y = -1;
+    double mouse_moved_ms = 0;
+    SDL_GetMouseState(&mouse_x, &mouse_y);
+    SDL_RenderCoordinatesFromWindow(app.renderer, mouse_x, mouse_y, &mouse_x, &mouse_y);
+    // スキンがマウスカーソルを描くなら OS のカーソルは隠す。描かないなら OS のカーソルを出す
+    bool skin_cursor = skin.mousecursor.src.valid && !skin.mousecursor.dst.empty();
+    if (skin_cursor) SDL_HideCursor();
+    else SDL_ShowCursor();
     while (!done) {
         double t = now_ms();
         if (!timers.on(1) && t > skin.startinput) timers.set(1, t);
@@ -43,7 +50,7 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
             if (e.type == SDL_EVENT_QUIT) timers.set(2, t);
             if (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP)
                 SDL_ConvertEventToRenderCoordinates(app.renderer, &e);
-            if (e.type == SDL_EVENT_MOUSE_MOTION) mouse_x = e.motion.x, mouse_y = e.motion.y;
+            if (e.type == SDL_EVENT_MOUSE_MOTION) mouse_x = e.motion.x, mouse_y = e.motion.y, mouse_moved_ms = t;
             // ESC・右クリックで閉じる（#FADEOUT のあと選曲へ）
             if ((e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) ||
                 (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_RIGHT))
@@ -106,6 +113,11 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         st.slider = [&](int ty, int& v, int& lo, int& hi) { return ctx.slider(ty, v, lo, hi); };
         st.text = [&](int id) { return ctx.text(id); };
         st.button = [&](int ty) { return ctx.button(ty); };
+        // マウスを乗せたときの絵とマウスカーソル（曲リストは無い）
+        SelectSkinState ss;
+        ss.mouse_x = mouse_x, ss.mouse_y = mouse_y;
+        ss.mouse_idle_ms = t - mouse_moved_ms;
+        st.select = &ss;
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         renderer.draw_select(skin, st);
