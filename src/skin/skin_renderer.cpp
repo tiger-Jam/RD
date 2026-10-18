@@ -112,7 +112,8 @@ bool SkinRenderer::dst_on(const SkinDst& d, const PlaySkinState& st) const {
 }
 
 void SkinRenderer::add(const SkinSrc& src, SkinDraw d, double t) {
-    if (!d.visible || !src.valid) return;
+    // 切り出す大きさが 0 の画像は描かない（押す場所だけのボタンなど）
+    if (!d.visible || !src.valid || src.w == 0 || src.h == 0) return;
     SDL_Texture* tex = image_tex(src.gr);
     if (!tex) return;
     Item it;
@@ -624,7 +625,7 @@ void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
     }
     // ボタン（LR2: SetObjectValue_Button → AddDrawingBuffer_Image）。設定の値をそのままコマ番号にする
     for (const SkinObject& o : skin.buttons) {
-        if (!dst_on(o.dst, st) || !o.src.valid) continue;
+        if (!dst_on(o.dst, st) || !o.src.valid || o.src.w == 0 || o.src.h == 0) continue;
         SkinDraw d = eval_dst(o.dst, st.timers->lapse(o.dst.timer, st.now_ms));
         if (!d.visible) continue;
         SDL_Texture* tex = image_tex(o.src.gr);

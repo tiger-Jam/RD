@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/config.h"
+#include "app/skin_catalog.h"
 #include "db/song_db.h"
 #include "skin/lr2_skin.h"
 #include "skin/skin_renderer.h"
@@ -37,6 +38,7 @@ struct SelectContext {
     bool has_stagefile = false;  // 決定画面：STAGEFILE を読み込めた（op 191）
     bool has_text = false;       // 曲のフォルダに .txt がある（op 174/175）
     PlayerStats player;          // プレイヤーの累計（数値 30〜37）
+    const SkinCatalog* catalog = nullptr;  // スキンセレクト（文字列 50/51/100〜114、ボタン 170〜188、スライダー7）
     bool autoplay = false;
     bool windowed = true;
     int list_count = 0, list_pos = 0;  // 曲リストの数と、スクロール位置（1曲=1000。スライダー1）

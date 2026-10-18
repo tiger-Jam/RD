@@ -192,6 +192,7 @@ int SelectContext::number(int id) const {
 }
 
 std::string SelectContext::text(int id) const {
+    if (catalog && (id == 50 || id == 51 || (id >= 100 && id <= 114))) return catalog->text(id, *cfg);
     const bool song = chart && is_song(type);
     auto opt = [&](const char* key, int i) { return names ? names->get(key, i) : std::string(); };
     switch (id) {
@@ -233,6 +234,7 @@ std::string SelectContext::text(int id) const {
 }
 
 int SelectContext::button(int t) const {
+    if (catalog && t >= 170 && t <= 188) return catalog->button(t);
     switch (t) {
     case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: return panel == t ? 1 : 0;
     case 10: return difficulty_filter;
@@ -269,6 +271,7 @@ bool SelectContext::slider(int t, int& val, int& lo, int& hi) const {
     case 1: val = list_pos, lo = 0, hi = std::max(1, list_count * 1000 - 1); return true;
     case 2: case 3: val = cfg->hi_speed, lo = 10, hi = 990; return true;
     case 4: case 5: val = cfg->lane_cover_v, lo = 0, hi = 100; return true;
+    case 7: val = catalog ? catalog->scroll() : 0, lo = 0, hi = catalog ? std::max(1, catalog->scroll_max(*cfg)) : 1; return true;
     default: val = 0, lo = 0, hi = 1; return true;
     }
 }

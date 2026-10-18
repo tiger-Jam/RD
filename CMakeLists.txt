@@ -73,6 +73,8 @@ add_executable(BMjoybody WIN32
     src/app/select_scene.cpp
     src/app/select_context.cpp
     src/app/decide_scene.cpp
+    src/app/skin_catalog.cpp
+    src/app/skin_select_scene.cpp
     src/audio/sound_bank.cpp
     src/audio/mixer.cpp
     src/audio/system_sound.cpp

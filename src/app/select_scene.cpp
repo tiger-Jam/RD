@@ -17,6 +17,7 @@
 #include "app/play_session.h"
 #include "app/select_context.h"
 #include "app/decide_scene.h"
+#include "app/skin_select_scene.h"
 #include "util/text.h"
 #include "audio/system_sound.h"
 #include "db/difficulty_table.h"
@@ -377,6 +378,10 @@ void run_select(App& app) {
     }
     Lr2Skin* sk = app.select_skin.get();
     sctx.skin = sk;
+    // スキンセレクト（WMIX のパネル2・LR2 標準のスキンセレクト画面）
+    SkinCatalog catalog;
+    catalog.scan(app.lr2_root);
+    sctx.catalog = &catalog;
     sctx.player = app.db.player_stats();
     std::unordered_map<std::string, bool> folder_has_text;  // 曲のフォルダに .txt があるか（op 175）
     auto set_select_view = [&] {
@@ -392,7 +397,17 @@ void run_select(App& app) {
     double move_start = 0, move_end = 0;
     float mouse_x = -1, mouse_y = -1;
     double mouse_moved_ms = -1e9;
-    const SkinObject* dragging = nullptr;  // つかんでいる曲リストのスライダー（スライダー種別1）
+    const SkinObject* dragging = nullptr;  // つかんでいるスライダー（種別1：曲リスト、7：カスタマイズ項目）
+    // 選曲スキン（やそのカスタマイズ）を替えたら、読み直して描き直す
+    auto reload_select_skin = [&] {
+        std::array<bool, 1000> ops{};
+        for (int i = 0; i < 900; ++i) ops[i] = sctx.option(i);
+        app.load_select_skin(ops);
+        sk = app.select_skin.get();
+        sctx.skin = sk;
+        dragging = nullptr;
+        set_select_view();
+    };
     // テキストビューア（readme・ヘルプ。仕様 5.4）
     std::vector<std::string> readme_lines;
     bool readme_open = false;
@@ -687,7 +702,15 @@ void run_select(App& app) {
                 SDL_ConvertEventToRenderCoordinates(r, &e);
                 if (e.type == SDL_EVENT_MOUSE_MOTION) mouse_x = e.motion.x, mouse_y = e.motion.y, mouse_moved_ms = scene_ms();
             }
-            if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && !stack.back().list->empty()) {
+            if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && dragging->src.op[2] == 7) {
+                // カスタマイズ項目のスクロール
+                const SkinSrc& src = dragging->src;
+                SkinDraw d = eval_dst(dragging->dst, sctx.timers.lapse(dragging->dst.timer, scene_ms()));
+                float len = static_cast<float>(std::max(1, src.op[1]));
+                float r = src.op[0] == 0 ? (d.y + d.h / 2 - mouse_y) / len : src.op[0] == 1 ? (mouse_x - d.x - d.w / 2) / len
+                          : src.op[0] == 2 ? (mouse_y - d.y - d.h / 2) / len : (d.x + d.w / 2 - mouse_x) / len;
+                catalog.set_scroll(static_cast<int>(std::lround(std::clamp(r, 0.0f, 1.0f) * catalog.scroll_max(app.cfg))), app.cfg);
+            } else if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && !stack.back().list->empty()) {
                 // スライダーの位置 → 曲リストの位置（仕様 6.6）。つかんでいる間はそのまま動かす
                 const SkinSrc& src = dragging->src;
                 SkinDraw d = eval_dst(dragging->dst, sctx.timers.lapse(dragging->dst.timer, scene_ms()));
@@ -708,7 +731,9 @@ void run_select(App& app) {
                 int cur = static_cast<int>((v + 500) / 1000) % n;
                 if (cur != lv.cursor) lv.cursor = cur, sctx.timers.set(11, scene_ms()), app.mixer.play_system(kSysScratch);
             }
-            if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging) {
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging && dragging->src.op[2] == 7) {
+                dragging = nullptr;
+            } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging) {
                 // 離したら最寄りの曲にスナップする（100ms）
                 dragging = nullptr;
                 old_bar = list_top;
@@ -819,6 +844,31 @@ void run_select(App& app) {
                             if (!p.empty()) open_readme({p});
                         }
                     }
+                    else if (ty >= 170 && ty <= 188) {
+                        catalog.select_type(ty - 170, app.cfg);
+                        app.mixer.play_system(kSysOptionChange);
+                    } else if (ty == 190 || (ty >= 220 && ty <= 229)) {
+                        // スキンを替える／カスタマイズ項目を替える。選曲スキンなら、その場で読み直す
+                        bool changed = ty == 190 ? catalog.step_skin(app.cfg, dir) : catalog.step_custom(app.cfg, ty - 220, dir);
+                        if (changed) {
+                            app.mixer.play_system(kSysOptionChange);
+                            app.save_config();
+                            if (catalog.selected_type() == 5) {
+                                reload_select_skin();
+                                break;
+                            }
+                        }
+                    } else if (ty == 14) {
+                        // スキンセレクト画面
+                        int old_panel = panel;
+                        set_panel(-1, false);
+                        bool select_changed = run_skin_select(app, catalog);
+                        app.save_config();
+                        if (select_changed) reload_select_skin();
+                        else set_select_view();
+                        (void)old_panel;
+                        break;
+                    }
                     else if (ty == 10) change_difficulty((difficulty_filter + 1) % 6);
                     else if (ty == 11 || ty == 12) {
                         // 鍵盤数の絞り込み・ソート（左右どちらでも +1。ソートは LR2 と同じく 0..4）
@@ -864,7 +914,7 @@ void run_select(App& app) {
                 // 曲リストのスライダーをつかむ
                 if (!clicked)
                     for (const SkinObject& o : sk->sliders) {
-                        if (o.src.op[2] != 1 || o.src.op[3] == 1 || o.dst.empty() || !sctx.timers.on(o.dst.timer)) continue;
+                        if ((o.src.op[2] != 1 && o.src.op[2] != 7) || o.src.op[3] == 1 || o.dst.empty() || !sctx.timers.on(o.dst.timer)) continue;
                         SkinDraw d = eval_dst(o.dst, sctx.timers.lapse(o.dst.timer, t));
                         if (!d.visible) continue;
                         float len = static_cast<float>(o.src.op[1]);
@@ -1336,6 +1386,9 @@ void run_select(App& app) {
                 else if (k == 'k') run_key_wizard(r, text, app.keycfg, keyconfig_path());
                 else if (k == 'p') force_panel = true;
                 else if (k == 's') change_difficulty();
+                else if (k == 'z') run_skin_select(app, catalog), set_select_view();
+                else if (k == '2') set_panel(2);
+                else if (k == 't') catalog.select_type(0, app.cfg);
                 else if (k == 'q') run_search("celestial");
                 else if (k == 'h' && sk && !sk->helpfiles.empty()) open_readme({resolve_lr2_path(app.lr2_root, sk->helpfiles[0], false)});
                 else if (k == 'o') sort_mode = (sort_mode + 1) % kSortCount, reapply_view();
