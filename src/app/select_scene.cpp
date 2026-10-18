@@ -532,7 +532,6 @@ void run_select(App& app) {
                 }
                 po.decide_sound = !app.decide_skin;
             }
-            SDL_ShowCursor();
             PlayExit ex = run_play(app, path, po);
             app.save_config();  // 演奏中に変えたハイスピードやカバーを残す
             app.mixer.play_system(kSysSelect, true);
