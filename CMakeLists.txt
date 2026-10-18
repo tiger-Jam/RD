@@ -11,7 +11,16 @@ endif()
 
 option(BMJ_ASAN "AddressSanitizer付きでビルドする" OFF)
 
-find_package(SDL3 REQUIRED CONFIG)
+# SDL3：入っていればそれを使い、無ければソースを取ってきて一緒にビルドする（Windowsで vcpkg が無くても通るように）
+find_package(SDL3 CONFIG QUIET)
+if(NOT SDL3_FOUND)
+    include(FetchContent)
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(SDL3 URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.14/SDL3-3.4.14.tar.gz)
+    FetchContent_MakeAvailable(SDL3)
+endif()
 find_package(Threads REQUIRED)
 
 # 単一ヘッダのライブラリは実装を1つの翻訳単位にまとめる
@@ -19,7 +28,9 @@ add_library(bmj_third_party STATIC third_party/third_party_impl.c third_party/st
     third_party/sqlite/sqlite3.c third_party/yyjson/yyjson.c)
 target_include_directories(bmj_third_party SYSTEM PUBLIC third_party third_party/sqlite third_party/yyjson)
 target_compile_definitions(bmj_third_party PUBLIC SQLITE_THREADSAFE=2 SQLITE_DEFAULT_WAL_SYNCHRONOUS=1 SQLITE_OMIT_LOAD_EXTENSION)
-find_package(CURL REQUIRED)
+if(NOT WIN32)
+    find_package(CURL REQUIRED)  # Windows は WinHTTP を使う
+endif()
 if(APPLE)
     target_link_libraries(bmj_third_party PUBLIC "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation")
 elseif(UNIX)
@@ -42,7 +53,12 @@ add_library(bmj_core STATIC
     src/db/difficulty_table.cpp
 )
 target_include_directories(bmj_core PUBLIC src)
-target_link_libraries(bmj_core PUBLIC bmj_third_party CURL::libcurl)
+target_link_libraries(bmj_core PUBLIC bmj_third_party)
+if(WIN32)
+    target_link_libraries(bmj_core PUBLIC winhttp)
+else()
+    target_link_libraries(bmj_core PUBLIC CURL::libcurl)
+endif()
 if(APPLE)
     target_link_libraries(bmj_core PUBLIC iconv)
 endif()
@@ -65,10 +81,18 @@ add_executable(bmjoy
     src/render/text_cache.cpp
 )
 target_link_libraries(bmjoy PRIVATE bmj_core SDL3::SDL3)
+if(WIN32)
+    # 日本語のファイル名を扱えるように、プロセスのコードページを UTF-8 にする（OpenLR2 と同じ）
+    target_sources(bmjoy PRIVATE src/app/bmjoy.manifest)
+    target_compile_definitions(bmj_core PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS)
+endif()
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
     tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp src/input/input.cpp src/input/keyconfig.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
+if(WIN32)
+    target_sources(bmj_tests PRIVATE src/app/bmjoy.manifest)
+endif()
 
 foreach(t bmj_core bmjoy bmj_tests)
     if(MSVC)

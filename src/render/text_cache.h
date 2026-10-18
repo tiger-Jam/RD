@@ -22,14 +22,15 @@ public:
     // align: 0=左, 1=中央, 2=右。max_w を超えるときは横に縮める（LR2の文字と同じ）
     float draw(float x, float y, int size, SDL_Color c, const std::string& s, int align = 0, float max_w = 0, int thick = 4);
     void clear();
-    void set_font_dir(const std::string& d) { font_dir_ = d; }
+    // 使うフォントファイルを指定する（空ならOSの日本語フォントを探す）
+    void set_font_path(const std::string& p) { font_path_ = p; }
 
 private:
     const std::vector<uint8_t>* font_data(int thick);
     SDL_Renderer* r_;
     std::map<std::string, Tex> cache_;
     std::map<std::string, std::vector<uint8_t>> files_;
-    std::string font_dir_ = "/System/Library/Fonts";
+    std::string font_path_;
 };
 
 }  // namespace bmj

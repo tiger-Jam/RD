@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <filesystem>
 
 #include "input/input.h"
 #include "input/keyconfig.h"
@@ -86,7 +87,7 @@ TEST(keyconfig_roundtrip) {
     c.analog_axis = 2;
     c.analog_invert = true;
     c.analog_release_ms = 70;
-    std::string path = std::string(std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp") + "/bmj_keyconfig_test.txt";
+    std::string path = (std::filesystem::temp_directory_path() / "bmj_keyconfig_test.txt").string();
     CHECK(c.save(path));
     KeyConfig d;
     CHECK(d.load(path));

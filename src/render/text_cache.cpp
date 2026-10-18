@@ -61,19 +61,32 @@ float TextCache::draw(float x, float y, int size, SDL_Color c, const std::string
 }
 
 const std::vector<uint8_t>* TextCache::font_data(int thick) {
-    // DxLibの太さ（0〜9）をヒラギノの太さに当てはめる
+    bool bold = thick >= 6;
+    // OSごとの日本語フォントの候補（見つかった最初のもの）。DxLibの太さ（0〜9）はおおまかな太さに当てはめる
+    std::vector<std::string> cands;
+    if (!font_path_.empty()) cands.push_back(font_path_);
     int w = thick <= 2 ? 3 : thick <= 4 ? 4 : thick <= 6 ? 6 : 8;
-    char name[64];
-    std::snprintf(name, sizeof(name), "/ヒラギノ角ゴシック W%d.ttc", w);
-    std::string path = font_dir_ + name;
-    auto it = files_.find(path);
-    if (it != files_.end()) return it->second.empty() ? nullptr : &it->second;
-    std::ifstream f(path, std::ios::binary);
-    std::vector<uint8_t> bytes;
-    if (f) bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-    auto& slot = files_[path];
-    slot = std::move(bytes);
-    return slot.empty() ? nullptr : &slot;
+    cands.push_back("/System/Library/Fonts/ヒラギノ角ゴシック W" + std::to_string(w) + ".ttc");  // macOS
+    cands.push_back(bold ? "C:/Windows/Fonts/YuGothB.ttc" : "C:/Windows/Fonts/YuGothM.ttc");    // Windows
+    cands.push_back(bold ? "C:/Windows/Fonts/meiryob.ttc" : "C:/Windows/Fonts/meiryo.ttc");
+    cands.push_back("C:/Windows/Fonts/msgothic.ttc");
+    cands.push_back(bold ? "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"  // Linux
+                         : "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc");
+    cands.push_back("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc");
+    for (const std::string& path : cands) {
+        auto it = files_.find(path);
+        if (it != files_.end()) {
+            if (!it->second.empty()) return &it->second;
+            continue;
+        }
+        std::ifstream f(path, std::ios::binary);
+        std::vector<uint8_t> bytes;
+        if (f) bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+        auto& slot = files_[path];
+        slot = std::move(bytes);
+        if (!slot.empty()) return &slot;
+    }
+    return nullptr;
 }
 
 TextCache::Tex TextCache::get(int size, int thick, const std::string& s) {
