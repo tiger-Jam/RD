@@ -37,6 +37,8 @@ struct AppConfig {
     // LIFT（判定ラインを持ち上げる）。lift_v はレーンの高さに対する %
     bool lift = false;
     int lift_v = 0;
+    // BGA（LR2: bga）。0=OFF 1=ON 2=オートプレイのときだけ 3=NO MISS（ミスのときの絵を出さない）
+    int bga = 1;
     // HIDDEN / SUDDEN（LR2: effect）。0=OFF 1=HIDDEN 2=SUDDEN 3=HID+SUD
     int effect = 0;
     // 配置（LR2: random）。0=OFF 1=MIRROR 2=RANDOM 3=S-RANDOM 4=SCATTER 5=CONVERGE

@@ -187,9 +187,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     }
     // BGA の無い譜面は、LR2files/Movie の動画を 1 本ランダムに選んで、頭から繰り返し流す（LR2: bmsload:4089。コースでは流さない）。
     // 探す順は mpg → avi → wmv → mp4 → ogv で、最初に見つかった種類の中から選ぶ
+    // BGA の設定（LR2: bga）。OFF なら画像も動画も読まない。NO MISS はミスのときの絵を出さない
+    const bool bga_shown = cfg.bga == 1 || cfg.bga == 3 || (cfg.bga == 2 && opt.autoplay);
     std::string default_movie;
     int default_movie_id = -1;
-    if (parsed.chart.sound_only && !opt.course && VideoDecoder::available()) {
+    if (bga_shown && parsed.chart.sound_only && !opt.course && VideoDecoder::available()) {
         for (const char* pat : {"LR2files/Movie/*.mpg", "LR2files/Movie/*.avi", "LR2files/Movie/*.wmv", "LR2files/Movie/*.mp4",
                                 "LR2files/Movie/*.ogv"})
             if (!app.lr2_root.empty() && !(default_movie = resolve_lr2_path(app.lr2_root, pat, true)).empty()) break;
@@ -237,6 +239,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     }
     ctx.autoplay = opt.autoplay;
     ctx.assist = assist;
+    ctx.bga_shown = bga_shown;
     ctx.hs_fix = cfg.hs_fix;
     {
         // 同じフォルダの、難易度ごとの譜面のレベル（数値45〜49）
@@ -270,6 +273,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     int total_sounds = static_cast<int>(std::count_if(paths.begin(), paths.end(), [](auto& p) { return !p.empty(); }));
     // BGAの画像と動画（動画は FFmpeg が読み込めたときだけ出す）
     std::vector<std::string> bga_paths = resolve_images(chart);
+    if (!bga_shown) bga_paths.assign(bga_paths.size(), "");
     if (default_movie_id >= 0) bga_paths[default_movie_id] = default_movie;
     std::vector<std::unique_ptr<VideoDecoder>> videos(bga_paths.size());
     int total_images = 0;
@@ -1042,7 +1046,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.bga_base = bga_base;
                 st.bga_layer = bga_layer;
                 st.bga_poor = bga_poor;
-                st.bga_show_poor = now_ms - last_miss_ms < cfg.poor_bga_ms;  // LR2: poorbga（既定 500ms）
+                st.bga_show_poor = cfg.bga != 3 && now_ms - last_miss_ms < cfg.poor_bga_ms;  // LR2: poorbga（既定 500ms）
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
                 app.skin_renderer->draw_play(*skin, st);

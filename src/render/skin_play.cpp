@@ -53,8 +53,8 @@ bool PlayContext::option_raw(int option) const {
     case 35: case 36: case 37: return !ret;
     case 38: return !ret;             // スコアグラフあり
     case 39: return ret;
-    case 40: return !ret;             // BGAあり
-    case 41: return ret;
+    case 40: return bga_shown ? !ret : ret;  // BGA OFF / ON
+    case 41: return bga_shown ? ret : !ret;
     case 42: case 44: return normal_gauge ? ret : !ret;
     case 43: case 45: return normal_gauge ? !ret : ret;
     // いまのステージ（280〜288 は 1〜9 ステージ目、289 は最後のステージ。最後のステージは 280 番台より優先。単曲でも 289 は真）
