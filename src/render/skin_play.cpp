@@ -282,12 +282,14 @@ int PlayContext::number_raw(int id) const {
         break;
     default: break;
     }
+    // リザルトでは曲の時刻のタイマー（41）が立っていない（LR2 は画面ごとにタイマーを消す）ので、経過は 0、残りは曲の長さ
+    const double played_ms = in_result ? -1.0 : song_ms;
     switch (id) {
     case 160: return static_cast<int>(chart->bpm_at(static_cast<int64_t>(std::max(0.0, song_ms) * 1000)));
-    case 161: return song_ms / 1000 > 0 ? static_cast<int>(song_ms) / 1000 / 60 : 0;
-    case 162: return song_ms / 1000 > 0 ? static_cast<int>(song_ms) / 1000 % 60 : 0;
+    case 161: return played_ms / 1000 > 0 ? static_cast<int>(played_ms) / 1000 / 60 : 0;
+    case 162: return played_ms / 1000 > 0 ? static_cast<int>(played_ms) / 1000 % 60 : 0;
     case 163: case 164: {
-        int rest = static_cast<int>(chart->end_us / 1000 - std::max(0.0, song_ms));
+        int rest = static_cast<int>(chart->end_us / 1000 - std::max(0.0, played_ms));
         if (rest / 1000 <= 0) return 0;
         return id == 163 ? rest / 1000 / 60 : rest / 1000 % 60;
     }
