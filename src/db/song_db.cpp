@@ -38,6 +38,10 @@ CREATE INDEX IF NOT EXISTS chart_sha256 ON chart(sha256);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
 CREATE TABLE IF NOT EXISTS chart_added(path TEXT PRIMARY KEY, added INTEGER);
 CREATE TABLE IF NOT EXISTS favorite(md5 TEXT PRIMARY KEY, value INTEGER);
+CREATE TABLE IF NOT EXISTS play_log(
+    sha256 TEXT, played_at INTEGER, kind TEXT, rate REAL,
+    clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
+    pg INTEGER, gr INTEGER, gd INTEGER, bd INTEGER, pr INTEGER, op_history INTEGER, rseed INTEGER, op_best INTEGER, ghost TEXT);
 CREATE TABLE IF NOT EXISTS lr2_score(
     md5 TEXT PRIMARY KEY, clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     playcount INTEGER, clearcount INTEGER,
@@ -475,6 +479,16 @@ std::vector<ChartRecord> SongDb::all_charts() const {
         out.back().added = st.col_i64(27);
     }
     return out;
+}
+
+void SongDb::log_play(const std::string& sha256, const PlayRecord& r, const std::string& kind, double rate) {
+    if (!db_) return;
+    Stmt st(db_, "INSERT INTO play_log(sha256, played_at, kind, rate, clear, exscore, bp, max_combo, pg, gr, gd, bd, pr, "
+                 "op_history, rseed, op_best, ghost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    st.text(1, sha256).i64(2, now).text(3, kind).dbl(4, rate).i64(5, r.clear).i64(6, r.exscore).i64(7, r.bp).i64(8, r.max_combo);
+    for (int i = 0; i < 5; ++i) st.i64(9 + i, r.judge[i]);
+    st.i64(14, r.op_history).i64(15, r.rseed).i64(16, r.op_best).text(17, r.ghost).run();
 }
 
 std::unordered_map<std::string, int> SongDb::favorites() const {

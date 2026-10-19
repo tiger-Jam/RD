@@ -118,6 +118,8 @@ void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int
     // 処理しなかったノーツは、どう終わっても BP に入れる（途中でやめたときも閉店したときも。LR2: statplay.cpp:992）
     rec.bp = s.bp() + s.total_notes - s.note_current;
     app.db.save_score(sha256, rec);
+    // 遅くして遊んだときは、ふだんの記録には回数しか残さない代わりに、中身を別の表に残す（画面には出さない）
+    if (count_only) app.db.log_play(sha256, rec, "slow", cfg.sound_fx.play_rate());
 }
 
 void print_result(const Chart& chart, const JudgeEngine& j) {

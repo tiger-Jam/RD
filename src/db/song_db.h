@@ -95,6 +95,9 @@ public:
     bool find_by_md5(const std::string& md5, ChartRecord& out) const;
     // お気に入り（LR2: favorite）。md5 → 1 = FAVORITE 2 = IGNORE（0 は書かない）
     std::unordered_map<std::string, int> favorites() const;
+    // ふだんの記録には混ぜない 1 回ごとのプレイの記録（画面には出さない。MOD などがあとで読む）。
+    // kind はなぜ分けたか（"slow" = 曲を遅くして遊んだ）、rate はそのときの速さの倍率
+    void log_play(const std::string& sha256, const PlayRecord& r, const std::string& kind, double rate);
     void set_favorite(const std::string& md5, int value);
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）
     void save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo);

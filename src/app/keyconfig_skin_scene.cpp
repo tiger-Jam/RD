@@ -19,7 +19,7 @@ namespace {
 constexpr const char* kDefaultSkin = "LR2files/Theme/LR2/KeyConfig/keyconfig.lr2skin";
 
 // 開発用：BMJ_KEYCONFIG_SKIN_KEYS の文字で操作する（数字 1-7 / s / S / t / l = 1〜7 鍵・皿の 2 方向・START・SELECT を選ぶ、
-// a-h = スロット 1〜8 を選ぶ、z = Z キーを割り当てる、x = Delete、r = F1、C = F2、_ = 少し待つ）
+// a-h = スロット 1〜8 を選ぶ、z = Z キーを割り当てる、x = Delete、r = F2（既定に戻す）、C = F1（全部空ける）、_ = 少し待つ）
 void dev_step(char k, KeyconfigEditor& ed, const std::function<void(const Binding&)>& assign, const std::function<void()>& erase,
               const std::function<void()>& reset, const std::function<void()>& clear) {
     if (k >= '1' && k <= '7') ed.click(100 + (k - '0'), 1);
@@ -102,8 +102,9 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
             if (!accept) continue;
             if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
                 SDL_Scancode sc = e.key.scancode;
-                if (sc == SDL_SCANCODE_F1) reset();
-                else if (sc == SDL_SCANCODE_F2) clear();
+                // F1 で全部のスロットを空ける、F2 で既定に戻す（LR2 の help/5.html とスキンの絵の「F1:リセット　F2:初期設定に戻す」）
+                if (sc == SDL_SCANCODE_F1) clear();
+                else if (sc == SDL_SCANCODE_F2) reset();
                 else if (sc == SDL_SCANCODE_DELETE) erase();
                 else if (!keyconfig_reserved(sc)) assign({Binding::Type::Key, sc, 0});
             } else if (Binding b; capture.take(e, b, app.keycfg.analog_axis)) {
