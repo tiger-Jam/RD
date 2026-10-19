@@ -33,6 +33,7 @@
 #include "util/hash.h"
 #include "util/path.h"
 #include "video/video_decoder.h"
+#include "util/dev.h"
 
 namespace bmj {
 
@@ -184,7 +185,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     }};
     // 開発用：BMJ_INPUT_REPLAY のファイルの入力を、手で押したものとして流す（記録・ゴースト・リプレイの保存はふだんどおり）
     bool feed_input = false;
-    if (const char* f = std::getenv("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) feed_input = load_replay(f, replay);
+    if (const char* f = dev_env("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) feed_input = load_replay(f, replay);
     if (opt.replay) {
         if (!load_replay(replay_path(sha256), replay) || replay.sha256 != sha256) {
             std::fprintf(stderr, "リプレイが無い: %s\n", chart_path.c_str());
@@ -1104,7 +1105,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 enter_result(false);
             }
 
-            if (std::getenv("BMJ_DEBUG_LOOP")) {
+            if (dev_env("BMJ_DEBUG_LOOP")) {
                 // 開発用：1秒あたりの入力処理の回数、描画の回数、描画1回にかかった時間、フレームの間隔の最大
                 static uint64_t t = now_ns, last_frame = now_ns;
                 static int loops = 0;
@@ -1429,7 +1430,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         app.result_renderer->draw_result(*rskin, st);
-        if (const char* shot = std::getenv("BMJ_COURSE_SHOT"); shot && t > 3000 && !rtimers.on(2)) {
+        if (const char* shot = dev_env("BMJ_COURSE_SHOT"); shot && t > 3000 && !rtimers.on(2)) {
             // 開発用：3 秒たったら 1 枚保存して抜ける
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             rtimers.set(2, t);

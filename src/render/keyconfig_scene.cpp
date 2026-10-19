@@ -12,6 +12,7 @@
 #include "input/joystick_init.h"
 #include "input/midi.h"
 #include "input/win_rawhid.h"
+#include "util/dev.h"
 #include "render/frame_hooks.h"
 
 namespace bmj {
@@ -272,7 +273,7 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
         text(r, 16, y + 4, dim, "LAST: " + last_raw);
         text(r, 16, 440, hi, message);
         text(r, 16, 456, dim, "UP/DOWN: SELECT   F1: RESET TO DEFAULT");
-        if (const char* shot = std::getenv("BMJ_KEYCONFIG_SHOT"); shot && SDL_GetTicksNS() - t0 > 1500000000ull) {
+        if (const char* shot = dev_env("BMJ_KEYCONFIG_SHOT"); shot && SDL_GetTicksNS() - t0 > 1500000000ull) {
             // 開発用：1枚保存して終わる
             if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             quit = true;
@@ -482,7 +483,7 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
         if (!last.empty()) text.draw(640, 490, 18, dim, "直前に割り当てた入力：" + last, 1);
         if (!warn.empty()) text.draw(640, 230, 20, SDL_Color{255, 110, 110, 255}, warn, 1, 1180);
         text.draw(640, 640, 16, dim, "Backspace：1つ戻る　　Esc：やめる（保存しない）", 1);
-        if (const char* shot = std::getenv("BMJ_WIZARD_SHOT")) {
+        if (const char* shot = dev_env("BMJ_WIZARD_SHOT")) {
             // 開発用：1枚保存してやめる
             if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             canceled = true;

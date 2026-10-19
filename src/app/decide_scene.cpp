@@ -4,6 +4,7 @@
 #include "input/input.h"
 #include "render/frame_hooks.h"
 #include "util/path.h"
+#include "util/dev.h"
 
 namespace bmj {
 
@@ -122,7 +123,7 @@ DecideResult run_decide(App& app, const SelectContext& base) {
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         app.decide_renderer->draw_select(*sk, st);
-        if (const char* shot = std::getenv("BMJ_DECIDE_SHOT"); shot && t > 1500) {
+        if (const char* shot = dev_env("BMJ_DECIDE_SHOT"); shot && t > 1500) {
             // 開発用：1 枚保存して戻る
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             result = DecideResult::Back, done = true;

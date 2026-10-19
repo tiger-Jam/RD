@@ -36,6 +36,7 @@
 #include "render/frame_hooks.h"
 #include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
+#include "util/dev.h"
 
 namespace fs = std::filesystem;
 
@@ -1002,7 +1003,7 @@ void run_select(App& app) {
             po.replay = start_replay && e->kind == Entry::Kind::Chart;
             if (po.replay) po.autoplay = false;
             start_replay = false;
-            if (const char* cap = std::getenv("BMJ_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
+            if (const char* cap = dev_env("BMJ_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
             std::string path = e->chart ? e->chart->path : "";
             std::shared_ptr<Course> course = e->course;
             stop_preview(false);
@@ -1267,7 +1268,7 @@ void run_select(App& app) {
                 }
             }
             if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED) std::printf("ウィンドウにフォーカスが来た\n");
-            if (std::getenv("BMJ_DEBUG_INPUT") && e.type >= SDL_EVENT_JOYSTICK_AXIS_MOTION && e.type <= SDL_EVENT_JOYSTICK_UPDATE_COMPLETE) {
+            if (dev_env("BMJ_DEBUG_INPUT") && e.type >= SDL_EVENT_JOYSTICK_AXIS_MOTION && e.type <= SDL_EVENT_JOYSTICK_UPDATE_COMPLETE) {
                 static int logged = 0;
                 if (logged++ < 30) std::printf("選曲画面: ジョイスティックのイベント %u を受け取った\n", e.type);
             }
@@ -2153,7 +2154,7 @@ void run_select(App& app) {
         text.draw(px, 600, 14, joystick_init().ready() ? dim : accent, joy_text, 0, 420);
         text.draw(24, 690, 14, dim,
                   "↑↓ 選ぶ　Enter/→ 決定　← 戻る　Esc 終了　START/Space オプション　F1 キーの説明　（コントローラ：白鍵 決定／黒鍵 戻る／皿 選ぶ）");
-        if (std::getenv("BMJ_DEBUG_LOOP")) {
+        if (dev_env("BMJ_DEBUG_LOOP")) {
             // 開発用：選曲画面の1秒あたりの描画回数と、1回にかかった時間
             static uint64_t t = SDL_GetTicksNS();
             static int frames = 0;
@@ -2191,13 +2192,13 @@ void run_select(App& app) {
             std::lock_guard<std::mutex> lock(mu);
             settled = !busy && !pending;
         }
-        if (const char* shot = std::getenv("BMJ_SELECT_SHOT"); shot && settled) {
+        if (const char* shot = dev_env("BMJ_SELECT_SHOT"); shot && settled) {
             // 開発用：更新が終わってから1枚保存して終わる。BMJ_SELECT_KEYS の文字で操作してから撮る（d=下 e=決定）
             static size_t step = 0;
-            const char* keys = std::getenv("BMJ_SELECT_KEYS");
+            const char* keys = dev_env("BMJ_SELECT_KEYS");
             if (keys && keys[step]) {
                 // 開発用：BMJ_SELECT_FRAMES を指定すると、操作している間の毎フレームを保存する
-                if (const char* dir = std::getenv("BMJ_SELECT_FRAMES")) {
+                if (const char* dir = dev_env("BMJ_SELECT_FRAMES")) {
                     static int frame_no = 0;
                     char name[512];
                     std::snprintf(name, sizeof(name), "%s/f%04d.bmp", dir, frame_no++);

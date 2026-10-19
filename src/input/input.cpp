@@ -1,4 +1,5 @@
 #include "input/input.h"
+#include "util/dev.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -203,7 +204,7 @@ void InputMapper::analog_motion(uint32_t which, int16_t value, uint64_t ts) {
     it->second = value;
     if (d == 0) return;
     int dir = (d > 0) == !cfg_.analog_invert ? 1 : -1;
-    static const bool debug = std::getenv("BMJ_DEBUG_INPUT") != nullptr;
+    static const bool debug = dev_env("BMJ_DEBUG_INPUT") != nullptr;
     if (debug && dir != analog_dir_) std::printf("皿: 値 %d（差 %d）で向き %d → %d\n", value, d, analog_dir_, dir);
     analog_move_ns_ = ts;
     if (dir == analog_dir_) return;

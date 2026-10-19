@@ -7,6 +7,7 @@
 #include "audio/system_sound.h"
 #include "render/skin_play.h"
 #include "render/frame_hooks.h"
+#include "util/dev.h"
 
 namespace bmj {
 
@@ -239,7 +240,7 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         renderer.draw_select(skin, st);
-        if (const char* shot = std::getenv("BMJ_SKINSELECT_SHOT"); shot && t > 800) {
+        if (const char* shot = dev_env("BMJ_SKINSELECT_SHOT"); shot && t > 800) {
             // 開発用：1 枚保存して閉じる
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             done = true;

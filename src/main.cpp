@@ -46,6 +46,7 @@
 #include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
 #include "skin/lr2_skin.h"
+#include "util/dev.h"
 
 using namespace bmj;
 
@@ -249,7 +250,7 @@ bool startup_screen(App& app, bool update) {
         float y = 0;
         for (const std::string& l : lines) text.draw(0, y, font, white, l, 0, 0, 0), y += font;
         for (const std::string& l : temp) text.draw(0, y, font, white, l, 0, 0, 0), y += font;
-        if (const char* shot = std::getenv("BMJ_LOADING_SHOT"); shot && !temp.empty()) {
+        if (const char* shot = dev_env("BMJ_LOADING_SHOT"); shot && !temp.empty()) {
             // 開発用：読み込み中の画面を1枚保存する
             static bool saved = false;
             if (!saved)
@@ -264,7 +265,7 @@ bool startup_screen(App& app, bool update) {
     if (update) {
         SongDb db;
         if (db.open(song_db_path())) {
-            if (std::getenv("BMJ_FORCE_RESCAN")) db.clear_charts();  // 開発用：全部読み直す
+            if (dev_env("BMJ_FORCE_RESCAN")) db.clear_charts();  // 開発用：全部読み直す
             int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
             ScanStats s = db.scan(app.cfg.song_dirs, threads, [&](int, int, const std::string& path) {
                 if (!path.empty()) draw({"Now Loading...", path});
@@ -319,11 +320,11 @@ bool startup_screen(App& app, bool update) {
     lines.push_back("");
     lines.push_back("BMjoy version 0.1.0");
     lines.push_back("PUSH ANY KEY");
-    startup_shot = std::getenv("BMJ_STARTUP_SHOT");  // 開発用：入力待ちの画面を1枚保存して終わる
+    startup_shot = dev_env("BMJ_STARTUP_SHOT");  // 開発用：入力待ちの画面を1枚保存して終わる
     draw({});
     if (startup_shot) return false;
     // 何か押されるまで待つ（キーボード・コントローラーのボタン・マウス）。開発用の撮影中は待たない
-    bool pushed = std::getenv("BMJ_SELECT_SHOT") != nullptr;
+    bool pushed = dev_env("BMJ_SELECT_SHOT") != nullptr;
     while (!pushed && !closed) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {

@@ -5,6 +5,7 @@
 #include "app/skin_catalog.h"
 #include "audio/system_sound.h"
 #include "render/frame_hooks.h"
+#include "util/dev.h"
 #include <filesystem>
 #include <vector>
 
@@ -18,7 +19,7 @@ namespace {
 std::string find_lr2_root(const std::string& configured, const char* argv0) {
     std::vector<std::string> cands;
     if (!configured.empty()) cands.push_back(configured);
-    if (const char* env = std::getenv("BMJ_LR2_ROOT")) cands.push_back(env);
+    if (const char* env = dev_env("BMJ_LR2_ROOT")) cands.push_back(env);
     cands.push_back(".");
     std::error_code ec;
     fs::path exe = fs::weakly_canonical(fs::path(argv0), ec).parent_path();

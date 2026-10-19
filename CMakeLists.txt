@@ -62,6 +62,11 @@ add_library(bmj_core STATIC
     src/audio/dsp.cpp
 )
 target_include_directories(bmj_core PUBLIC src)
+# 開発用の口（BMJ_ で始まる環境変数で画面を撮る・操作や入力を流す）。配る版は -DBMJ_DEV=OFF でビルドする
+option(BMJ_DEV "開発用の環境変数を読む" ON)
+if(BMJ_DEV)
+    target_compile_definitions(bmj_core PUBLIC BMJ_DEV)
+endif()
 target_link_libraries(bmj_core PUBLIC bmj_third_party)
 if(WIN32)
     target_link_libraries(bmj_core PUBLIC winhttp hid)

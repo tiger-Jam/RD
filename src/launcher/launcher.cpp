@@ -22,6 +22,7 @@
 #include "app/lr2_import.h"
 #include "db/song_db.h"
 #include "render/text_cache.h"
+#include "util/dev.h"
 
 namespace fs = std::filesystem;
 using namespace bmj;
@@ -389,7 +390,7 @@ int main(int, char**) {
         }
     } job;
     bool quit = false, start = false;
-    bool autostart = std::getenv("BMJ_LAUNCHER_AUTOSTART") != nullptr;  // 開発用：すぐ起動する
+    bool autostart = dev_env("BMJ_LAUNCHER_AUTOSTART") != nullptr;  // 開発用：すぐ起動する
 
     while (!quit) {
         g.pressed = false, g.wheel = 0, g.typed.clear();
@@ -727,10 +728,10 @@ int main(int, char**) {
                 quit = true;
             }
         }
-        if (const char* shot = std::getenv("BMJ_LAUNCHER_SHOT")) {
+        if (const char* shot = dev_env("BMJ_LAUNCHER_SHOT")) {
             // 開発用：BMJ_LAUNCHER_TAB のタブを1枚保存して終わる
             static int frames = 0;
-            if (const char* t = std::getenv("BMJ_LAUNCHER_TAB")) tab = std::atoi(t);
+            if (const char* t = dev_env("BMJ_LAUNCHER_TAB")) tab = std::atoi(t);
             if (++frames == 10) {
                 if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
                 quit = true;

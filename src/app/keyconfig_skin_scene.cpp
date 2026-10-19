@@ -11,6 +11,7 @@
 #include "render/frame_hooks.h"
 #include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
+#include "util/dev.h"
 
 namespace bmj {
 
@@ -74,7 +75,7 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
         if (!ed.option(a, v)) v = base.option(a);
         return neg ? !v : v;
     };
-    const char* dev_keys = std::getenv("BMJ_KEYCONFIG_SKIN_KEYS");
+    const char* dev_keys = dev_env("BMJ_KEYCONFIG_SKIN_KEYS");
     size_t dev_pos = 0;
     double dev_next = 600;
     KeyconfigExit result = KeyconfigExit::Back;
@@ -162,7 +163,7 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         renderer.draw_select(skin, st);
-        if (const char* shot = std::getenv("BMJ_KEYCONFIG_SKIN_SHOT");
+        if (const char* shot = dev_env("BMJ_KEYCONFIG_SKIN_SHOT");
             shot && t > 800 && (!dev_keys || (!dev_keys[dev_pos] && t > dev_next + 100))) {
             // 開発用：1 枚保存して閉じる
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);

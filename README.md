@@ -41,6 +41,10 @@ tools/win.sh log                # 最後に起動したときのログ
 
 SSH から直接起動すると画面の無いセッションで動いてしまうので、`run` はタスク スケジューラ経由でログイン中のユーザーの画面に起動する。
 
+### 開発用の口と配る版
+
+`BMJ_` で始まる環境変数（画面を撮る `BMJ_SELECT_SHOT`、操作を流す `BMJ_SELECT_KEYS`、入力を流す `BMJ_INPUT_REPLAY` など）は、開発用の版（既定）でだけ読む。配る版は `cmake -S . -B build-rel -DBMJ_DEV=OFF` でビルドし、どれも読まない。入力を作る口が残っていると、記録の不正に使えるため。
+
 ## 遊ぶ
 
 LR2 と同じく、設定アプリ `BMjoy`（LR2.exe に相当）と本体 `BMjoybody`（LR2body.exe に相当）に分かれている。
