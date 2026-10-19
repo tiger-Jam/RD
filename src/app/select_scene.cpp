@@ -940,7 +940,8 @@ void run_select(App& app) {
         }
     };
     bool start_replay = false;  // 次の決定をリプレイの再生にする（ボタン 19、6 番の鍵盤の長押し）
-    bool to_keyconfig = false;  // キーコンフィグへ移るためにフェードアウトしている
+    bool to_keyconfig = false;    // キーコンフィグへ移るためにフェードアウトしている
+    bool to_skin_select = false;  // スキンセレクトへ移るためにフェードアウトしている
     std::string replay_checked;  // リプレイの有無を見た譜面（遊んだあとは空にして見直す）
     bool replay_found = false;
     auto decide = [&] {
@@ -1444,14 +1445,13 @@ void run_select(App& app) {
                             }
                         }
                     } else if (ty == 14) {
-                        // スキンセレクト画面
-                        int old_panel = panel;
-                        set_panel(-1, false);
-                        bool select_changed = run_skin_select(app, catalog);
-                        app.save_config();
-                        if (select_changed) reload_select_skin();
-                        else set_select_view();
-                        (void)old_panel;
+                        // スキンセレクト画面：キーコンフィグと同じく、選曲画面をフェードアウトさせてから移る（LR2: Songselect.cpp:2071）
+                        if (!to_keyconfig && !to_skin_select) {
+                            for (int id = 0; id < kSysSoundCount; ++id) app.mixer.stop_system(id);
+                            app.mixer.play_system(kSysOptionChange);
+                            sctx.timers.set(2, scene_ms());
+                            to_skin_select = true;
+                        }
                         break;
                     }
                     else if (ty == 10) change_difficulty((difficulty_filter + 1) % 6);
@@ -1655,7 +1655,7 @@ void run_select(App& app) {
             if (mode_filter != old_mode) reapply_view(false);
             buttons.clear();
         }
-        bool accept = sctx.timers.on(1) && !readme_open && !editing && !to_keyconfig;
+        bool accept = sctx.timers.on(1) && !readme_open && !editing && !to_keyconfig && !to_skin_select;
         if (editing) buttons.clear();
         if (readme_open) {
             // 鍵盤のどれかで閉じる。↑で下へ 0.6px/ms、↓で上へ 1.2px/ms（LR2 と同じく下へ送る方が速い）
@@ -1705,6 +1705,15 @@ void run_select(App& app) {
             if (!open_keyconfig_from_select(app, text, sctx, scene_ms, true)) quit = true;
             input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
             set_select_view();
+        }
+        if (to_skin_select && (!sk || sk->fadeout == 0 || sctx.timers.lapse(2, t_ms) > sk->fadeout)) {
+            to_skin_select = false;
+            set_panel(-1, false);
+            bool select_changed = run_skin_select(app, catalog);
+            app.save_config();
+            if (select_changed) reload_select_skin();
+            else set_select_view();
+            app.mixer.play_system(kSysSelect, true);
         }
         if (sctx.timers.on(172)) {
             const Entry* e = current();
