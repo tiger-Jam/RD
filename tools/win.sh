@@ -23,7 +23,8 @@ case "${1:-}" in
 sync)
     tmp=$(mktemp -d)
     # git の管理下のファイル（コミットしていない変更も含む）だけを送る
-    git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf "$tmp/src.tar"
+    # macOS の tar は拡張属性を ._ のファイルとして入れてしまうので止める（Windows では C のソースに見えて、ビルドが壊れる）
+    git ls-files -z --cached --others --exclude-standard | COPYFILE_DISABLE=1 tar --no-xattrs --null -T - -cf "$tmp/src.tar"
     ps "New-Item -ItemType Directory -Force '$WINDIR' | Out-Null"
     scp -q -o BatchMode=yes "$tmp/src.tar" "$HOST:$DIR/src.tar"
     rm -rf "$tmp"

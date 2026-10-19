@@ -27,7 +27,7 @@ find_package(Threads REQUIRED)
 add_library(bmj_third_party STATIC third_party/third_party_impl.c third_party/stb_vorbis_impl.c
     third_party/sqlite/sqlite3.c third_party/yyjson/yyjson.c)
 # Lua（MOD のスクリプト。仕様書14章）
-file(GLOB BMJ_LUA_SOURCES ${CMAKE_SOURCE_DIR}/third_party/lua/*.c)
+file(GLOB BMJ_LUA_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/third_party/lua/*.c)
 # C++ として組む（スクリプトの失敗を longjmp ではなく例外で戻し、本体の C++ のデストラクタを飛ばさない）
 set_source_files_properties(${BMJ_LUA_SOURCES} PROPERTIES LANGUAGE CXX)
 target_sources(bmj_third_party PRIVATE ${BMJ_LUA_SOURCES})

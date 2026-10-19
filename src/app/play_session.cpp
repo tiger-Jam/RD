@@ -212,7 +212,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     }};
     // 開発用：BMJ_INPUT_REPLAY のファイルの入力を、手で押したものとして流す（記録・ゴースト・リプレイの保存はふだんどおり）
     bool feed_input = false;
-    if (const char* f = dev_env("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) feed_input = load_replay(f, replay);
+    if (const char* f = dev_env("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) {
+        feed_input = load_replay(f, replay);
+        std::printf("開発用：入力を流す %s（%zu 件）\n", feed_input ? "" : "読めない", replay.events.size());
+    }
     if (opt.replay) {
         // 配置の作り方の版が違う記録は、同じ譜面を作れないので再生しない（古い版の作り方を残したら、ここで選ぶ）
         // プレーに影響する MOD の組み合わせが今と違う記録も、同じ判定にならないので再生しない
