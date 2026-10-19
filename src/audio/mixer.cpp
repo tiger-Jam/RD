@@ -3,6 +3,7 @@
 #include <SDL3/SDL_timer.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 #include "miniaudio.h"
