@@ -97,6 +97,32 @@ void load_custom(Library& lib, const AppConfig& cfg, const std::unordered_map<st
     if (q->build(lib.charts, lib.scores, favs)) lib.custom_query = q;
 }
 
+// 分類のフォルダの名前。folderinfo.txt があればその #TITLE（LR2: songmanage:1391）、無ければディレクトリ名。
+// 一覧を作り直すたびに読まないよう、フォルダごとに覚えておく
+std::string folder_title(const std::string& dir) {
+    static std::mutex mu;
+    static std::unordered_map<std::string, std::string> memo;
+    std::lock_guard<std::mutex> lock(mu);
+    auto [it, fresh] = memo.try_emplace(dir);
+    if (fresh) {
+        it->second = fs::path(dir).filename().string();
+        std::ifstream f(fs::path(dir) / "folderinfo.txt", std::ios::binary);
+        if (f) {
+            std::string text = to_utf8_auto(std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>()));
+            std::istringstream in(text);
+            std::string line;
+            while (std::getline(in, line)) {
+                std::string l(trim(line));
+                if (to_upper_ascii(l).rfind("#TITLE", 0) == 0 && l.size() > 6) {
+                    std::string t(trim(std::string_view(l).substr(6)));
+                    if (!t.empty()) it->second = t;
+                }
+            }
+        }
+    }
+    return it->second;
+}
+
 // 音の設定のスライダー（EQ 10〜16、音量 17〜19、エフェクタ 20〜25、ピッチ 26）
 bool is_sound_slider(int ty) { return ty >= 10 && ty <= 26; }
 
@@ -276,7 +302,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
             Entry f;
             f.fs_folder = true;
             f.dir = k;
-            f.label = fs::path(k).filename().string();
+            f.label = folder_title(k);
             fill(f, k);
             if (f.children.empty()) continue;
             e.owned += f.owned, e.total += f.total;
