@@ -91,7 +91,9 @@ add_executable(BMjoybody WIN32
     src/render/text_cache.cpp
 )
 # 動画の BGA：FFmpeg のヘッダーだけを使い、ライブラリは実行時に読み込む（同梱しない）
-set_source_files_properties(src/video/video_decoder.cpp PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/ffmpeg/include)
+# 手元の FFmpeg に合わせるときは BMJ_FFMPEG_INCLUDE にそのヘッダーの場所を渡す（読み込むライブラリの版はヘッダーで決まる）
+set(BMJ_FFMPEG_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/ffmpeg/include" CACHE PATH "FFmpeg のヘッダーの場所")
+set_source_files_properties(src/video/video_decoder.cpp PROPERTIES INCLUDE_DIRECTORIES "${BMJ_FFMPEG_INCLUDE}")
 target_link_libraries(BMjoybody PRIVATE bmj_core SDL3::SDL3)
 if(WIN32)
     # 日本語のファイル名を扱えるように、プロセスのコードページを UTF-8 にする（OpenLR2 と同じ）
