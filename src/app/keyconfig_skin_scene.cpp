@@ -207,7 +207,8 @@ bool run_keyconfig_skin(App& app, KeyconfigExit& exit) {
     return true;
 }
 
-bool open_keyconfig_from_select(App& app, TextCache& text, SelectContext& sctx, const std::function<double()>& scene_ms) {
+bool open_keyconfig_from_select(App& app, TextCache& text, SelectContext& sctx, const std::function<double()>& scene_ms,
+                                bool faded) {
     SkinRenderer renderer(app.renderer);
     std::unique_ptr<Lr2Skin> skin = load_keyconfig_skin(app, renderer);
     if (!skin) {
@@ -216,9 +217,11 @@ bool open_keyconfig_from_select(App& app, TextCache& text, SelectContext& sctx, 
         return true;
     }
     // 選曲画面のフェードアウト（タイマー 2）。システム音を止め、オプションの音を鳴らす（LR2 と同じ）
-    for (int id = 0; id < kSysSoundCount; ++id) app.mixer.stop_system(id);
-    app.mixer.play_system(kSysOptionChange);
-    if (const Lr2Skin* sel = app.select_skin.get()) {
+    if (!faded) {
+        for (int id = 0; id < kSysSoundCount; ++id) app.mixer.stop_system(id);
+        app.mixer.play_system(kSysOptionChange);
+    }
+    if (const Lr2Skin* sel = faded ? nullptr : app.select_skin.get()) {
         sctx.timers.set(2, scene_ms());
         bool quit = false;
         while (!quit) {

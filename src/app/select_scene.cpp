@@ -940,6 +940,7 @@ void run_select(App& app) {
         }
     };
     bool start_replay = false;  // 次の決定をリプレイの再生にする（ボタン 19、6 番の鍵盤の長押し）
+    bool to_keyconfig = false;  // キーコンフィグへ移るためにフェードアウトしている
     std::string replay_checked;  // リプレイの有無を見た譜面（遊んだあとは空にして見直す）
     bool replay_found = false;
     auto decide = [&] {
@@ -1381,10 +1382,14 @@ void run_select(App& app) {
                     };
                     if (ty >= 1 && ty <= 8) set_panel(panel == ty ? -1 : ty);
                     else if (ty == 13) {
-                        // キーコンフィグ（スキンがあれば選曲をフェードアウトしてからスキンの画面、無ければウィザード）
-                        if (!open_keyconfig_from_select(app, text, sctx, scene_ms)) quit = true;
-                        input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
-                        set_select_view();
+                        // キーコンフィグ：選曲画面をフェードアウト（タイマー 2）させてから移る（LR2: Songselect.cpp:2071）。
+                        // システム音を止めてオプションの音を鳴らす。移るのはフェードが終わってから（下）
+                        if (!to_keyconfig) {
+                            for (int id = 0; id < kSysSoundCount; ++id) app.mixer.stop_system(id);
+                            app.mixer.play_system(kSysOptionChange);
+                            sctx.timers.set(2, scene_ms());
+                            to_keyconfig = true;
+                        }
                     } else if (ty == 15 || ty == 16) {
                         // 通常 / オートで始める。曲とコースのときだけ（フォルダは開かない。LR2 と同じ）
                         const Entry* cur = current();
@@ -1650,7 +1655,7 @@ void run_select(App& app) {
             if (mode_filter != old_mode) reapply_view(false);
             buttons.clear();
         }
-        bool accept = sctx.timers.on(1) && !readme_open && !editing;
+        bool accept = sctx.timers.on(1) && !readme_open && !editing && !to_keyconfig;
         if (editing) buttons.clear();
         if (readme_open) {
             // 鍵盤のどれかで閉じる。↑で下へ 0.6px/ms、↓で上へ 1.2px/ms（LR2 と同じく下へ送る方が速い）
@@ -1694,6 +1699,12 @@ void run_select(App& app) {
             } else if (b.button == kSelect) {
                 change_difficulty();
             }
+        }
+        if (to_keyconfig && (!sk || sk->fadeout == 0 || sctx.timers.lapse(2, t_ms) > sk->fadeout)) {
+            to_keyconfig = false;
+            if (!open_keyconfig_from_select(app, text, sctx, scene_ms, true)) quit = true;
+            input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
+            set_select_view();
         }
         if (sctx.timers.on(172)) {
             const Entry* e = current();

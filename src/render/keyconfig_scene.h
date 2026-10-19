@@ -25,6 +25,8 @@ struct SelectContext;
 // スキンの画面を出して、戻ったら割り当てを読み直す。スキンが無ければ run_key_wizard を出す。
 // sctx・scene_ms は選曲画面のもの（フェードアウトを描くのに使う）。アプリを閉じるなら false。
 // 中身は app/keyconfig_skin_scene.cpp
-bool open_keyconfig_from_select(App& app, TextCache& text, SelectContext& sctx, const std::function<double()>& scene_ms);
+// faded：選曲画面がフェードアウト（タイマー 2）を済ませてから呼ぶなら true（ここではフェードしない）
+bool open_keyconfig_from_select(App& app, TextCache& text, SelectContext& sctx, const std::function<double()>& scene_ms,
+                                bool faded = false);
 
 }  // namespace bmj
