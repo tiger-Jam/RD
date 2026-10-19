@@ -186,11 +186,11 @@
 
 | 項目 | LR2 | BMjoy | 判定 | 出典 |
 |---|---|---|---|---|
-| 自動でプレイへ | #SCENETIME を過ぎたら。未指定なら 0 なので、すぐプレイへ | #SCENETIME が 0 より大きいときだけ。0 なら待ち続ける | 違う（#SCENETIME の無いスキンで） | O Scene03_Decide.cpp:7-10, LR2_skinload.cpp:188 / B decide_scene.cpp:96 |
-| 飛ばす | #STARTINPUT のあと、鍵盤・Enter・左クリック→タイマー3→#SKIP | 同じ（1P のみ）。#IGNOREINPUT も見る | 同じ | O Scene03_Decide.cpp:12-16, 31-36 / B decide_scene.cpp:66-95 |
-| 戻る | ESC・右クリック・START+SELECT。タイマー3 の後は受け付けない。システム音を止める | タイマー3 の後でも戻れる。音は止めない | 違う（小） | O Scene03_Decide.cpp:18-23 / B decide_scene.cpp:70-72, 91 |
-| 画像 | STAGEFILE・BACKBMP・BANNER（100/101/102） | STAGEFILE（100）だけ | 一部が BMjoyに無い | O Main.cpp:1167-1197 / B decide_scene.cpp:43-52 |
-| 決定音 | 隠しモードなら exdecide | 常に decide | BMjoyに無い（隠しモードが無い） | O Main.cpp:1201-1204 / B decide_scene.cpp:54 |
+| 自動でプレイへ | #SCENETIME を過ぎたら。未指定なら 0 なので、すぐプレイへ | 同じ（0 ならすぐプレイへ） | 直した | O Scene03_Decide.cpp:7-10, LR2_skinload.cpp:188 / B decide_scene.cpp:95-97 |
+| 飛ばす | #STARTINPUT のあと、鍵盤・Enter・左クリック→タイマー3→#SKIP | 同じ（1P のみ）。#IGNOREINPUT も見る | 同じ | O Scene03_Decide.cpp:12-16, 31-36 / B decide_scene.cpp:97-98, 105-106 |
+| 戻る | ESC・右クリック・START+SELECT。タイマー3 の後は受け付けない。システム音を止める | 同じ | 直した | O Scene03_Decide.cpp:18-23 / B decide_scene.cpp:99-104 |
+| 画像 | STAGEFILE・BACKBMP・BANNER（100/101/102） | 同じ | 直した | O Main.cpp:1167-1197 / B decide_scene.cpp:40-55 |
+| 決定音 | 隠しモードなら exdecide | 常に decide | BMjoyに無い（隠しモードが無い） | O Main.cpp:1201-1204 / B decide_scene.cpp:57 |
 
 ### 2.6 一覧だけ（どれも BMjoy に無い）
 
@@ -379,7 +379,7 @@
 | SELECT | 選曲画面に入ったとき、ループ | 同じ | 同じ | O Main.cpp:1159-1162 / B select_scene.cpp:576,838 |
 | EXSELECT / EXDECIDE | EX モード（2 鍵の長押しで切り替え）で SELECT/DECIDE と差し替え | 読み込むだけ。EX モード自体が無い | BMjoyに無い | O Scene02_Songselect.cpp:1330-1346, Main.cpp:1202-1205 |
 | プレビュー中に BGM を絞る | 1000ms かけて 0.025 倍まで下げる | 同じ | 同じ | O En_audio.cpp:383-395, Scene02_Songselect.cpp:1710,2733 / B select_scene.cpp:1430,698 |
-| DECIDE | 決定画面 | 決定画面。決定スキンが無いときはプレイ開始時 | 同じ | O Main.cpp:1205 / B decide_scene.cpp:54, play_session.cpp:234 |
+| DECIDE | 決定画面 | 決定画面。決定スキンが無いときはプレイ開始時 | 同じ | O Main.cpp:1205 / B decide_scene.cpp:57, play_session.cpp:234 |
 | SCRATCH | 選曲バーが動いたとき | 同じ | 同じ | O Scene02_Songselect.cpp:2539 / B select_scene.cpp:737 |
 | FOLDER_OPEN / CLOSE、DIFFICULTY | フォルダの出入り。難度を変えたら DIFFICULTY（無ければ FOLDER_OPEN） | 同じ | 同じ | O Scene02_Songselect.cpp:2985-2989,3040 / B select_scene.cpp:801,907,930 |
 | PANEL_OPEN / CLOSE、OPTION_CHANGE | パネルの開閉と各種ボタン | 同じ | 同じ | O Scene02_Songselect.cpp:1897,1938 / B select_scene.cpp:744,662 |
@@ -432,7 +432,7 @@
 | 解像度 | スキンの解像度（history.txt:12「フルスクリーンは 640x480 のみ」）。resolution は [EXT] | スキン解像度で描き、縦横比を保って拡大（`skin_res`） | 意図した違い | O Main.cpp:470-471 / B app.cpp:116-144, 仕様書:282-288 |
 | ウインドウの大きさ | screenexrate=100%、640x480 | window_scale（0 なら SD スキンは 2 倍） | 違う | O LR2_configsave.cpp:969,980-981 / B app.cpp:116-131 |
 | VSYNC | ON/OFF。判定タイミングに影響する。OpenLR2 は本物の VSYNC を使わず待つ間も入力を回す [EXT] | `vsync`（既定 OFF）。判定は入力の時刻で行うので影響しない | 意図した違い | H help/8.html, O Main.cpp:2402-2409 / B config.h:53-56, app.cpp:70, 仕様書:290-295 |
-| fps の上限 | VSYNC 任せ（mainsleep=3）[?] | プレイは `fps`（0=モニタ、-1=無制限、指定値）を守る。選曲は 4ms、決定は 2ms 待つだけ | LR2に無い | B play_session.cpp:331-332,990-994, select_scene.cpp:1784, decide_scene.cpp:116 |
+| fps の上限 | VSYNC 任せ（mainsleep=3）[?] | プレイは `fps`（0=モニタ、-1=無制限、指定値）を守る。選曲は 4ms、決定は 2ms 待つだけ | LR2に無い | B play_session.cpp:331-332,990-994, select_scene.cpp:1784, decide_scene.cpp:132 |
 | 表示方式（VSYNC / IMMEDIATE / MAILBOX） | 無い | ON/OFF だけ（仕様書では 3 択の予定） | 仕様との差 | 仕様書:300 |
 | F4（ウインドウ切り替え） | 選曲画面だけ | 選曲に加えプレイでも効く。ボタン 80 でも切り替え | 違う（BMjoy が広げている） | O Main.cpp:2523 / H history.txt:601 / B select_scene.cpp:1300-1303,1204-1206, play_session.cpp:673-675 |
 | F7（FPS 表示） | ある | 無い | BMjoyに無い | O LR2_gameloop.cpp:499-501 / H help/3.html |
@@ -474,7 +474,7 @@
 
 この章の略記：`load` = O LR2_skinload.cpp、`draw` = O LR2_skindraw.cpp、`val` = O En_value.cpp、`fu` = O En_fileutil.cpp、`cfgsv` = O LR2_configsave.cpp、`mng` = O LR2_skinmanage.cpp、`sh` = LR2 の skin_history.txt、ほかの `*.txt` = LR2files/スキン関連ドキュメント（行番号は CP932 から変換後）。BMjoy 側は `ls` = src/skin/lr2_skin.cpp、`rd` = src/skin/skin_renderer.cpp。
 
-**lr2_skin_ids.md の監査以降に実装済みになったもの**：決定画面（decide_scene.cpp）、スキンセレクト（skin_select_scene.cpp）、gr100/101 をプレイで読む（play_session.cpp:785-786）、blend 10（rd:716-718）、`#SCENETIME` / `#IGNOREINPUT`（decide_scene.cpp:66,96）。
+**lr2_skin_ids.md の監査以降に実装済みになったもの**：決定画面（decide_scene.cpp）、スキンセレクト（skin_select_scene.cpp）、gr100/101 をプレイで読む（play_session.cpp:785-786）、blend 10（rd:716-718）、`#SCENETIME` / `#IGNOREINPUT`（decide_scene.cpp:95-98）。
 
 ### 5.0 行・CSV・#IF の扱い
 
@@ -504,7 +504,7 @@
 | `#NOBGA` | BGA を読まない | 無い | BMjoyに無い（実スキンでの使用は 0） | H history.txt:840 / load:1716 |
 | `#TEXTMERGIN` | readme の余白（既定 10,10） | 無い | BMjoyに無い | load:1736 |
 | `#LR2FONT` の第 2 引数 =1 | 「画像フォントを使わない」設定でも強制的に読む | その設定が無く、常に読む | 同じ（BMjoy は値が固定） | H history.txt:660,673 / load:1686 |
-| `#IGNOREINPUT`、`#SAMPLEBMS` | OpenLR2 は解釈しない [?] | IGNOREINPUT はあり、SAMPLEBMS は無い | [?] | decide_scene.cpp:66 |
+| `#IGNOREINPUT`、`#SAMPLEBMS` | OpenLR2 は解釈しない [?] | IGNOREINPUT はあり、SAMPLEBMS は無い | [?] | decide_scene.cpp:97 |
 | `#CUSTOMFOLDER`、`#HORIZONTAL`、`#SRC/DST_MASK`、`_THUMBNAIL`、`#EVENT_*` | [EXT]（THUMBNAIL は LR2 標準 SkinSelect に `#` 抜きの行がある [?]） | 無い | LR2に無い [EXT] | load:1149-1160,1603-1680,1778,1828 |
 | `#BAR_STAR`、`#DST_BAR_STAGEFILE` | 資料に記載なし [EXT?] | 読むが描かない | [?] | load:1589,1296 |
 
@@ -574,8 +574,8 @@
 
 | gr | LR2 | BMjoy | 判定 | 出典 |
 |---|---|---|---|---|
-| 100 STAGEFILE | 決定画面で読み、リザルトの終わりまで持つ | 決定・プレイ・リザルトで差し替える | 同じ | H history.txt:844 / decide_scene.cpp:51, play_session.cpp:785 |
-| 101 BACKBMP | 決定画面からリザルトまで | プレイとリザルトだけ | 違う（決定画面で無い） | H history.txt:845 / play_session.cpp:786 |
+| 100 STAGEFILE | 決定画面で読み、リザルトの終わりまで持つ | 決定・プレイ・リザルトで差し替える | 同じ | H history.txt:844 / decide_scene.cpp:50, play_session.cpp:785 |
+| 101 BACKBMP | 決定画面からリザルトまで | 決定・プレイ・リザルトで差し替える | 同じ（決定画面は直した） | H history.txt:845 / decide_scene.cpp:51, play_session.cpp:786 |
 | 102 BANNER | 選曲画面。`#RELOADBANNER` があるときだけ曲ごとに変わる | 同じ | 同じ | sh:305 / select_scene.cpp:1495-1519 |
 | 104 | 256x256 の空の画像。用途不明 [?] | 無い | [?] | load:389-390 |
 | 105 | スキンセレクトのプレビュー | あり | 同じ | sh:307 / skin_select_scene.cpp:141 |
@@ -628,7 +628,7 @@
 ### 低
 
 - スコア: complete フラグ、失敗回数、プレイ時間、プレイヤー累計をプレイ中に数える方式、scorehash、DB に無い譜面を保存しない扱い、遅延率の検査、コースのリトライ（STAGE1 から）、リザルトとコースリザルトのマウス操作。
-- 画面: 決定画面の BACKBMP・BANNER（gr101/102）、ボタン 191（スキンの確定）、F1 の F キー説明、曲フォルダ未登録の起動時チェック。
+- 画面: ~~決定画面の BACKBMP・BANNER（gr101/102）~~（直した）、ボタン 191（スキンの確定）、F1 の F キー説明、曲フォルダ未登録の起動時チェック。
 - 設定: customfolder（特殊フォルダ）、randomclose、maindisplay、disablesystemkey、disableimagefont / fontname、course.*（ランダムコース）、tools.*、newsongfolder、newrandomrestart [EXT]、autokey [?]。影響の無いもの（highcolor、outputlog、mainsleep、language、eventmode、directdraw）。
 - 音声: エフェクタ（スライダー 20〜25）、出力デバイスの選択と ASIO、コースのステージごとのピッチ、muon.wav による遅れの検出。
 - スキン: LR2 の SkinCustomize xml の取り込み、`#NOBGA`、`#TEXTMERGIN`、blend 11 のα、CSV の引用符、st 30 以外の文字列編集。
@@ -661,7 +661,7 @@ LR2 の挙動を守る方針（memory: LR2挙動の維持）なので、どれ�
 
 13. **選曲の F6 がレーンカバー**（B select_scene.cpp:1295-1299）。LR2 ではスクリーンショット。F キー全体も F1 説明 / F5 IR / F7 FPS / F8 再読み込みと違う（判断）。
 14. **選曲の ESC**。LR2 はフォルダの中でもすぐ終了、BMjoy は一つ戻る（B select_scene.cpp:1278-1282）。LR2 に合わせるか、意図した違いとして仕様書に書くか（判断）。
-15. **決定画面**。`#SCENETIME` が無い（0 の）スキンで LR2 はすぐプレイへ進むが、BMjoy は待ち続ける（B decide_scene.cpp:96）。LR2 はタイマー3 の後は ESC を受け付けず、戻るときにシステム音を止める。
+15. ~~**決定画面**。`#SCENETIME` が無い（0 の）スキンで LR2 はすぐプレイへ進むが、BMjoy は待ち続ける（B decide_scene.cpp:96）。LR2 はタイマー3 の後は ESC を受け付けず、戻るときにシステム音を止める。~~ 直した。
 16. **キーコンフィグ**。Esc で抜けると保存しない（LR2 は割り当てるたびに保存）。矢印と F1〜F12 を割り当てられる（LR2 は禁止。選曲の操作とぶつかる恐れ）。
 17. **キーコンフィグとスキンセレクトに入るときにフェードしない**。LR2 は選曲がフェードアウトしてから移る。スキンセレクトは LR2 では毎回 7KEYS から始まる [?]。
 18. **F5 ですぐリトライ**（B play_session.cpp:670）と **プレイ中の F4**（B play_session.cpp:673）は LR2 に無い操作（判断）。
@@ -680,7 +680,7 @@ LR2 の挙動を守る方針（memory: LR2挙動の維持）なので、どれ�
 25. **`#CUSTOMFILE` の既定値が候補に無いと先頭の候補を選ぶ**（B lr2_skin.cpp:708-709）。LR2 は既定値（空ならランダム）。候補名を最後の `.` で切るのでフォルダ名の `.` まで切れ、フォルダ型の RANDOM も失敗する（:631,702）。
 26. **カスタマイズを番号で保存している**（B skin_catalog.cpp:126）。壁紙などのファイルを足したり消したりすると選択がずれる。LR2 はファイル名で残す。
 27. **文字の blend 0 で a を使っている** [?]（B skin_renderer.cpp:785）。LR2 は不透明で描くので、フェードインする文字の見え方が違う（実スキンに 66 行）。
-28. 軽微: `#CUSTOMOPTION` を 900 未満でも反映（B lr2_skin.cpp:729）、`#SETOPTION` の 900 未満が描画時の op に漏れる（B src/render/skin_play.cpp:160）、ONMOUSE でも SRC の時刻を DST の最初のキーから数える（B skin_renderer.cpp:593）、blend 11 をαなしで描く（:733）、決定画面で gr101 が無い。
+28. 軽微: `#CUSTOMOPTION` を 900 未満でも反映（B lr2_skin.cpp:729）、`#SETOPTION` の 900 未満が描画時の op に漏れる（B src/render/skin_play.cpp:160）、ONMOUSE でも SRC の時刻を DST の最初のキーから数える（B skin_renderer.cpp:593）、blend 11 をαなしで描く（:733）、~~決定画面で gr101 が無い~~（直した）。
 
 ### 実物の LR2 で確かめれば決まる [?]
 
