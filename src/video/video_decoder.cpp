@@ -33,12 +33,14 @@ struct Api {
     int (*send_packet)(AVCodecContext*, const AVPacket*);
     int (*receive_frame)(AVCodecContext*, AVFrame*);
     void (*codec_free)(AVCodecContext**);
+    void (*flush_buffers)(AVCodecContext*);
     // libavformat
     int (*open_input)(AVFormatContext**, const char*, const AVInputFormat*, AVDictionary**);
     int (*find_stream_info)(AVFormatContext*, AVDictionary**);
     int (*find_best_stream)(AVFormatContext*, enum AVMediaType, int, int, const AVCodec**, int);
     int (*read_frame)(AVFormatContext*, AVPacket*);
     void (*close_input)(AVFormatContext**);
+    int (*seek_frame)(AVFormatContext*, int, int64_t, int);
     // libswscale
     SwsContext* (*sws_get)(int, int, enum AVPixelFormat, int, int, enum AVPixelFormat, int, SwsFilter*, SwsFilter*, const double*);
     int (*sws_scale_fn)(SwsContext*, const uint8_t* const[], const int[], int, int, uint8_t* const[], const int[]);
@@ -100,11 +102,13 @@ const Api& api() {
         get(codec, "avcodec_send_packet", r.send_packet);
         get(codec, "avcodec_receive_frame", r.receive_frame);
         get(codec, "avcodec_free_context", r.codec_free);
+        get(codec, "avcodec_flush_buffers", r.flush_buffers);
         get(format, "avformat_open_input", r.open_input);
         get(format, "avformat_find_stream_info", r.find_stream_info);
         get(format, "av_find_best_stream", r.find_best_stream);
         get(format, "av_read_frame", r.read_frame);
         get(format, "avformat_close_input", r.close_input);
+        get(format, "av_seek_frame", r.seek_frame);
         get(sws, "sws_getContext", r.sws_get);
         get(sws, "sws_scale", r.sws_scale_fn);
         get(sws, "sws_freeContext", r.sws_free);
@@ -157,9 +161,10 @@ void VideoDecoder::close() {
     ctx_ = nullptr;
 }
 
-bool VideoDecoder::open(const std::string& path) {
+bool VideoDecoder::open(const std::string& path, int key) {
     const Api& a = api();
     if (!a.ok) return false;
+    key_ = key;
     ctx_ = new Ctx;
     if (a.open_input(&ctx_->fmt, path.c_str(), nullptr, nullptr) < 0 || a.find_stream_info(ctx_->fmt, nullptr) < 0) {
         close();
@@ -209,17 +214,33 @@ void VideoDecoder::run() {
             uint8_t* dst[4] = {f.rgba.data(), nullptr, nullptr, nullptr};
             int lines[4] = {w_ * 4, 0, 0, 0};
             a.sws_scale_fn(ctx_->sws, ctx_->frame->data, ctx_->frame->linesize, 0, h_, dst, lines);
+            if (key_ >= 0) {
+                // 透過色の画素を透明にする（LR2 の SetTransColor と同じく、色がぴったり同じものだけ）
+                const uint8_t kr = key_ >> 16 & 255, kg = key_ >> 8 & 255, kb = key_ & 255;
+                for (size_t i = 0; i < f.rgba.size(); i += 4)
+                    if (f.rgba[i] == kr && f.rgba[i + 1] == kg && f.rgba[i + 2] == kb) f.rgba[i + 3] = 0;
+            }
             std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait(lock, [&] { return stop_ || queue_.size() < kQueueMax; });
+            cv_.wait(lock, [&] { return stop_ || restart_ || queue_.size() < kQueueMax; });
             if (stop_) return false;
+            if (restart_) return true;  // 頭に戻すので、このフレームは捨てる
             queue_.push_back(std::move(f));
         }
         return true;
     };
     while (true) {
+        bool rewind = false;
         {
-            std::lock_guard<std::mutex> lock(mu_);
+            std::unique_lock<std::mutex> lock(mu_);
+            // 終わりまでデコードしたら、頭に戻すよう言われるまで待つ
+            cv_.wait(lock, [&] { return stop_ || restart_ || !eof_; });
             if (stop_) return;
+            if (restart_) restart_ = false, eof_ = false, rewind = true, queue_.clear();
+        }
+        if (rewind) {
+            a.seek_frame(ctx_->fmt, ctx_->stream, 0, AVSEEK_FLAG_BACKWARD);
+            a.flush_buffers(ctx_->codec);
+            flushing = false;
         }
         if (!flushing) {
             int r = a.read_frame(ctx_->fmt, ctx_->pkt);
@@ -235,10 +256,18 @@ void VideoDecoder::run() {
         if (!push_frames()) return;
         if (flushing) {
             std::lock_guard<std::mutex> lock(mu_);
-            eof_ = true;
-            return;
+            if (!restart_) eof_ = true;
         }
     }
+}
+
+void VideoDecoder::restart() {
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        restart_ = true;
+        queue_.clear();
+    }
+    cv_.notify_all();
 }
 
 bool VideoDecoder::take(double t_ms, Frame& out) {

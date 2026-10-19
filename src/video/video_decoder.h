@@ -28,8 +28,11 @@ public:
     VideoDecoder(const VideoDecoder&) = delete;
     VideoDecoder& operator=(const VideoDecoder&) = delete;
 
-    // 開いて、裏でデコードを始める（頭の数フレームを先に用意しておく）
-    bool open(const std::string& path);
+    // 開いて、裏でデコードを始める（頭の数フレームを先に用意しておく）。
+    // key は透過色（RGB。この色の画素を透明にする）。負なら透過しない
+    bool open(const std::string& path, int key = -1);
+    // 頭から再生し直す（LR2 は BGA に出るたびに頭から再生する）
+    void restart();
     // 動画の時刻 t_ms までに出すべき一番新しいフレームを取り出す（新しいフレームが無ければ false）
     bool take(double t_ms, Frame& out);
     int width() const { return w_; }
@@ -46,7 +49,8 @@ private:
     std::mutex mu_;
     std::condition_variable cv_;
     std::deque<Frame> queue_;
-    bool stop_ = false, eof_ = false;
+    bool stop_ = false, eof_ = false, restart_ = false;
+    int key_ = -1;
 };
 
 }  // namespace bmj

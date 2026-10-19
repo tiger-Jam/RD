@@ -77,6 +77,14 @@ std::vector<std::string> resolve_images(const Chart& chart) {
     return paths;
 }
 
+// 動画の透過色（LR2: bmsload:734）。.mpg と .avi は緑、それ以外は静止画と同じく黒
+int video_key(const std::string& p) {
+    std::string l = p;
+    for (char& c : l) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    auto ends = [&](const char* e) { return l.size() >= 3 && l.compare(l.size() - 3, 3, e) == 0; };
+    return ends("mpg") || ends("avi") ? 0x00FF00 : 0x000000;
+}
+
 bool is_movie_file(const std::string& p) {
     std::string l = p;
     for (char& c : l) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -263,7 +271,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             if (bga_paths[i].empty()) continue;
             if (is_movie_file(bga_paths[i])) {
                 auto v = std::make_unique<VideoDecoder>();
-                if (v->open(bga_paths[i])) videos[i] = std::move(v);
+                if (v->open(bga_paths[i], video_key(bga_paths[i]))) videos[i] = std::move(v);
                 else std::printf("動画を開けない: %s\n", bga_paths[i].c_str());
             } else {
                 load_skin_image(bga_paths[i], bga_images[i], black, true);
@@ -342,11 +350,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         // 動画の再生を始めた曲の時刻（ms。まだなら負）。もう一度遊ぶときは頭から開き直す
         std::vector<double> video_start(videos.size(), -1.0);
         if (loader_joined)
-            for (size_t i = 0; i < videos.size(); ++i)
-                if (videos[i]) {
-                    auto v = std::make_unique<VideoDecoder>();
-                    if (v->open(bga_paths[i])) videos[i] = std::move(v);
-                }
+            for (auto& v : videos)
+                if (v) v->restart();
         double last_miss_ms = -1e9;
         int fps_frames = 0;
         uint64_t fps_t0 = scene_start;
@@ -843,9 +848,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     if (be.layer == BgaEvent::Layer::Base) bga_base = be.image;
                     else if (be.layer == BgaEvent::Layer::Layer) bga_layer = be.image;
                     else bga_poor = be.image;
-                    // 動画は、初めて出たときから再生する
-                    if (be.image < videos.size() && videos[be.image] && video_start[be.image] < 0)
+                    // 動画は、BGA に出るたびに頭から再生する（LR2: Play.cpp:1409。繰り返しはしない）
+                    if (be.layer != BgaEvent::Layer::Poor && be.image < videos.size() && videos[be.image]) {
+                        if (video_start[be.image] >= 0) videos[be.image]->restart();
                         video_start[be.image] = be.time_us / 1000.0;
+                    }
                 }
                 for (size_t i = 0; i < videos.size(); ++i) {
                     if (!videos[i] || video_start[i] < 0 || i >= bga_textures.size() || !bga_textures[i]) continue;
