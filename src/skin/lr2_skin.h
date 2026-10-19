@@ -15,6 +15,7 @@ struct SkinImage {
     int w = 0, h = 0;
     std::vector<uint8_t> rgba;  // 空なら読み込めていない
     std::string path;
+    std::string movie;  // 動画（mpg・avi・wma・ogv）なら、そのファイル。描くときに無音で繰り返し流す（LR2: skinload:974）
 };
 
 struct SkinSrc {

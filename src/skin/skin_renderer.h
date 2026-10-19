@@ -18,6 +18,7 @@
 #include "render/text_cache.h"
 #include "skin/lr2_skin.h"
 #include "skin/skin_adjust.h"
+#include "video/video_decoder.h"
 
 namespace bmj {
 
@@ -179,6 +180,9 @@ private:
     std::map<SDL_Texture*, SDL_Texture*> inverted_;
     SDL_Texture* inverted(SDL_Texture* t);
     std::vector<SDL_Texture*> textures_;
+    // スキンの #IMAGE の動画（画像の番号 → デコーダ）。シーンの始まりから無音で繰り返す
+    std::map<int, std::unique_ptr<VideoDecoder>> movies_;
+    void update_movies(const PlaySkinState& st);
     std::vector<std::vector<SDL_Texture*>> font_textures_;  // 画像フォントごとの画像
     std::vector<Item> items_;
     TextCache text_;

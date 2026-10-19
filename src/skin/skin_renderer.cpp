@@ -59,7 +59,20 @@ void SkinRenderer::upload(const Lr2Skin& skin) {
     for (auto& [k, v] : inverted_) SDL_DestroyTexture(v);
     inverted_.clear();
     images_.clear();
-    for (const SkinImage& img : skin.images) textures_.push_back(make_texture(r_, img)), images_.push_back(&img);
+    movies_.clear();
+    for (const SkinImage& img : skin.images) {
+        SDL_Texture* t = make_texture(r_, img);
+        if (!img.movie.empty() && VideoDecoder::available()) {
+            auto v = std::make_unique<VideoDecoder>();
+            if (v->open(img.movie) && v->width() > 0) {
+                v->set_loop(true);
+                t = SDL_CreateTexture(r_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, v->width(), v->height());
+                if (t) SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+                movies_[static_cast<int>(textures_.size())] = std::move(v);
+            }
+        }
+        textures_.push_back(t), images_.push_back(&img);
+    }
     font_textures_.clear();
     for (const ImageFont& f : skin.image_fonts) {
         std::vector<SDL_Texture*> v;
@@ -95,8 +108,25 @@ SDL_Texture* SkinRenderer::image_tex(int gr) const {
 }
 
 // LR2: ReadSRC の DerivationGraph と同じ切り出し
+void SkinRenderer::update_movies(const PlaySkinState& st) {
+    if (movies_.empty() || !st.timers) return;
+    double t = st.timers->lapse(0, st.now_ms);
+    for (auto& [gr, v] : movies_) {
+        VideoDecoder::Frame f;
+        if (gr < static_cast<int>(textures_.size()) && textures_[gr] && v->take(t, f) && !f.rgba.empty())
+            SDL_UpdateTexture(textures_[gr], nullptr, f.rgba.data(), f.w * 4);
+    }
+}
+
 SDL_FRect SkinRenderer::frame_rect(const SkinSrc& src, int frame) const {
-    int bw = src.w / src.div_x, bh = src.h / src.div_y;
+    // 動画の SRC で幅・高さが -1 なら、動画全体
+    int sw = src.w, sh = src.h;
+    if (sw < 0 || sh < 0)
+        if (auto it = movies_.find(src.gr); it != movies_.end()) {
+            if (sw < 0) sw = it->second->width();
+            if (sh < 0) sh = it->second->height();
+        }
+    int bw = sw / src.div_x, bh = sh / src.div_y;
     int i = frame % src.div_x, j = frame / src.div_x;
     return SDL_FRect{static_cast<float>(src.x + bw * i), static_cast<float>(src.y + bh * j), static_cast<float>(bw),
                      static_cast<float>(bh)};
@@ -410,6 +440,7 @@ void SkinRenderer::add_bga(const SkinObject& o, const PlaySkinState& st, int id,
 
 void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
     items_.clear();
+    update_movies(st);
     adjust_ = st.adjust;
     // 集める順はLR2と同じ（ProcI_Play → メインループの各オブジェクト）。最後に描画順で並べ替える
     add_gauge(skin.gauge[0], st);
@@ -487,6 +518,7 @@ void SkinRenderer::add_score_chart(const Lr2Skin& skin, const PlaySkinState& st)
 }
 
 void SkinRenderer::draw_result(const Lr2Skin& skin, const PlaySkinState& st) {
+    update_movies(st);
     items_.clear();
     add_gauge_chart(skin, st);
     add_score_chart(skin, st);
@@ -496,6 +528,7 @@ void SkinRenderer::draw_result(const Lr2Skin& skin, const PlaySkinState& st) {
 
 // 選曲画面（docs/lr2_select_spec.md）
 void SkinRenderer::draw_select(const Lr2Skin& skin, const PlaySkinState& st) {
+    update_movies(st);
     items_.clear();
     if (st.select) add_bars(skin, st);
     add_common(skin, st);
@@ -867,13 +900,23 @@ void SkinRenderer::draw_text(const Lr2Skin& skin, Item& it) {
     float x = d.x;
     if (it.align == 1) x -= static_cast<int>(width * wl * 0.5f);
     else if (it.align == 2) x -= static_cast<int>(width * wl);
-    SDL_SetTextureColorMod(tt.tex, r, g, b);
     SDL_SetTextureAlphaMod(tt.tex, a);
     SDL_SetTextureBlendMode(tt.tex, mode);
     SDL_SetTextureScaleMode(tt.tex, SDL_SCALEMODE_LINEAR);
     float tex_w = 0, tex_h = 0;
     SDL_GetTextureSize(tt.tex, &tex_w, &tex_h);
     SDL_FRect dst{x, d.y, tex_w * wl, tex_h * hl};
+    // #FONT の種類 1・3 は縁取り（DxLib の EDGE。縁は黒）。周りに 1 画素ずらして黒で描いてから本体を描く
+    if (f.type == 1 || f.type == 3) {
+        SDL_SetTextureColorMod(tt.tex, 0, 0, 0);
+        for (int oy = -1; oy <= 1; ++oy)
+            for (int ox = -1; ox <= 1; ++ox) {
+                if (ox == 0 && oy == 0) continue;
+                SDL_FRect e{dst.x + ox, dst.y + oy, dst.w, dst.h};
+                SDL_RenderTexture(r_, tt.tex, nullptr, &e);
+            }
+    }
+    SDL_SetTextureColorMod(tt.tex, r, g, b);
     SDL_RenderTexture(r_, tt.tex, nullptr, &dst);
 }
 

@@ -206,8 +206,8 @@ SkinSrc read_src(const Csv& c, const Lr2Skin& sk) {
     s.h = c.val(6);
     if (s.gr >= 0 && s.gr < static_cast<int>(sk.images.size())) {
         const SkinImage& img = sk.images[s.gr];
-        if (s.w < 0) s.w = img.w;
-        if (s.h < 0) s.h = img.h;
+        if (s.w < 0 && img.movie.empty()) s.w = img.w;
+        if (s.h < 0 && img.movie.empty()) s.h = img.h;
     }
     s.div_x = std::max(1, c.val(7));
     s.div_y = std::max(1, c.val(8));
@@ -347,8 +347,13 @@ struct Loader {
             }
             SkinImage& img = sk.images[image_count++];
             img = SkinImage{};
-            if (is_movie(p)) return;  // 動画は未対応
             std::string resolved = resolve_lr2_path(root, apply_custom_file(p));
+            if (is_movie(p)) {
+                // 動画の大きさは開くまで分からないので、SRC の -1 はそのまま残す（描くときに動画の大きさにする）
+                if (resolved.empty()) sk.warnings.push_back("動画が見つからない: " + p);
+                else img.movie = resolved;
+                return;
+            }
             if (resolved.empty() || !load_image_file(resolved, img, trans, true))
                 sk.warnings.push_back("画像が読めない: " + p);
         } else if (cmd == "#TRANSCOLOR" || cmd == "#TRANSCLOLR" || cmd == "#TRANSCLOLOR") {
