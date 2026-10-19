@@ -1,5 +1,7 @@
 #include "game/judge.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 namespace bmj {
