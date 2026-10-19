@@ -510,11 +510,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             mixer.play_system(ctx.result_clear < 2 ? kSysFail : kSysClear);
             // リザルトスキンは、結果が決まってから読む（#IF でクリア・失敗などを見るスキンがあるため）
             ctx.in_result = true;
-            // リザルトのフリップ：プレイスキンの #FLIPRESULT で入れ替え、リザルトスキンの #DISABLEFLIP で打ち消す
+            // リザルトのフリップ：プレイスキンの旗から始め、リザルトスキンの #FLIPRESULT / #DISABLEFLIP を読み込み順に当てる
             ctx.result_flip = skin && skin->flip_result;
             app.load_result_skin(ctx.load_options());
             rskin = app.result_skin.get();
-            if (rskin && rskin->disable_flip) ctx.result_flip = false;
+            if (rskin) ctx.result_flip = rskin->flip_result;
             // リザルトのスキンのカスタマイズ（op 900〜）は、リザルトのスキンの値を見る
             if (rskin) ctx.skin = rskin;
             rtimers = SkinTimers();
@@ -1266,7 +1266,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     app.load_courseresult_skin(ctx.load_options());
     Lr2Skin* rskin = app.courseresult_skin.get();
     if (!rskin) return PlayExit::Back;
-    if (rskin->disable_flip) ctx.result_flip = false;
+    ctx.result_flip = rskin->flip_result;
     ctx.skin = rskin;
     app.set_view(rskin->width, rskin->height, false);
 

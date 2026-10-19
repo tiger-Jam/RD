@@ -11,6 +11,13 @@
 
 namespace bmj {
 
+// 設定に書かれたカスタマイズの選択を、スキンのヘッダ（各項目の selected）に当てはめる。
+// #CUSTOMFILE は名前で探し、候補に無ければ既定のまま。古い形式（番号）なら番号で選ぶ
+void apply_skin_custom(const std::vector<SkinCustomChoice>& sel, SkinHeader& h);
+void apply_skin_custom(const AppConfig& cfg, const std::string& skin_path, SkinHeader& h);
+// ヘッダの selected を、設定に書く形にする
+std::vector<SkinCustomChoice> skin_custom_choices(const SkinHeader& h);
+
 struct SkinEntry {
     std::string path;
     SkinHeader header;

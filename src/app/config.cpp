@@ -5,11 +5,54 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
-#include <sstream>
 
 #include "util/text.h"
 
 namespace bmj {
+
+// skin_custom の値：項目ごとにカンマで区切る。#CUSTOMOPTION は番号、#CUSTOMFILE は "名前"（中の " は "" と書く）。
+// 古い形式（#CUSTOMFILE も番号）もそのまま読める
+std::vector<SkinCustomChoice> parse_skin_custom(const std::string& val) {
+    std::vector<SkinCustomChoice> out;
+    size_t i = 0;
+    while (!val.empty()) {
+        while (i < val.size() && val[i] == ' ') ++i;
+        SkinCustomChoice c;
+        if (i < val.size() && val[i] == '"') {
+            for (++i; i < val.size(); ++i) {
+                if (val[i] != '"') c.file.push_back(val[i]);
+                else if (i + 1 < val.size() && val[i + 1] == '"') c.file.push_back('"'), ++i;
+                else break;
+            }
+            if (c.file.empty()) c.index = -1;  // 名前が空の選択は、既定を使う
+            while (i < val.size() && val[i] != ',') ++i;
+        } else {
+            size_t end = val.find(',', i);
+            if (end == std::string::npos) end = val.size();
+            c.index = std::atoi(val.substr(i, end - i).c_str());
+            i = end;
+        }
+        out.push_back(c);
+        if (i >= val.size()) break;
+        ++i;  // ','
+    }
+    return out;
+}
+
+std::string format_skin_custom(const std::vector<SkinCustomChoice>& sel) {
+    std::string out;
+    for (size_t i = 0; i < sel.size(); ++i) {
+        if (i) out += ",";
+        if (sel[i].file.empty()) {
+            out += std::to_string(sel[i].index);
+            continue;
+        }
+        out += '"';
+        for (char ch : sel[i].file) out += ch == '"' ? std::string("\"\"") : std::string(1, ch);
+        out += '"';
+    }
+    return out;
+}
 
 bool AppConfig::load(const std::string& path) {
     std::ifstream f(path);
@@ -81,14 +124,8 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "joystick_directinput") joystick_directinput = iv != 0;
         else if (key == "audio_exclusive") audio_exclusive = iv != 0;
         else if (key == "audio_buffer") audio_buffer = iv;
-        else if (key.rfind("skin_custom ", 0) == 0) {
-            // skin_custom <スキンのパス> = 選択,選択,...
-            std::vector<int> sel;
-            std::istringstream in(val);
-            std::string part;
-            while (std::getline(in, part, ',')) sel.push_back(std::atoi(part.c_str()));
-            skin_custom[std::string(trim(std::string_view(key).substr(12)))] = sel;
-        }
+        else if (key.rfind("skin_custom ", 0) == 0)
+            skin_custom[std::string(trim(std::string_view(key).substr(12)))] = parse_skin_custom(val);
     }
     return true;
 }
@@ -155,11 +192,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "joystick_directinput = " << (joystick_directinput ? 1 : 0) << "  # Windows：1 にすると SDL の DirectInput も使う（起動が遅くなる環境がある）\n";
     f << "audio_exclusive = " << (audio_exclusive ? 1 : 0) << "  # 1 = Windows の WASAPI 排他モード（音の遅れが小さい）\n";
     f << "audio_buffer = " << audio_buffer << "  # 1 回分のフレーム数。0 = 自動\n";
-    for (const auto& [skin, sel] : skin_custom) {
-        f << "skin_custom " << skin << " =";
-        for (size_t i = 0; i < sel.size(); ++i) f << (i ? "," : " ") << sel[i];
-        f << "\n";
-    }
+    for (const auto& [skin, sel] : skin_custom) f << "skin_custom " << skin << " = " << format_skin_custom(sel) << "\n";
     return static_cast<bool>(f);
 }
 

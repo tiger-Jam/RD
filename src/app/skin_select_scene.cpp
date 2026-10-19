@@ -31,7 +31,7 @@ public:
         std::string want = e ? e->path : "";
         if (e)
             if (auto it = app_.cfg.skin_custom.find(e->path); it != app_.cfg.skin_custom.end())
-                for (int v : it->second) want += "," + std::to_string(v);
+                want += "," + format_skin_custom(it->second);
         if (want == path_ && type == type_) return;
         path_ = want, type_ = type;
         skin_.reset();
@@ -51,9 +51,7 @@ public:
             return;
         }
         SkinHeader h = e->header;
-        if (auto it = app_.cfg.skin_custom.find(e->path); it != app_.cfg.skin_custom.end())
-            for (size_t i = 0; i < it->second.size() && i < h.customs.size(); ++i)
-                if (it->second[i] >= 0 && it->second[i] < static_cast<int>(h.customs[i].labels.size())) h.customs[i].selected = it->second[i];
+        apply_skin_custom(app_.cfg, e->path, h);
         auto sk = std::make_unique<Lr2Skin>();
         std::string err;
         if (!load_lr2_skin(app_.lr2_root, e->path, h, ctx_.load_options(), *sk, err)) return;

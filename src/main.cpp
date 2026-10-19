@@ -32,6 +32,7 @@
 #include "audio/mixer.h"
 #include "app/play_session.h"
 #include "app/select_scene.h"
+#include "app/skin_catalog.h"
 #include "chart/bms_parser.h"
 #include "chart/chart_loader.h"
 #include "db/difficulty_table.h"
@@ -436,15 +437,16 @@ int main(int argc, char** argv) {
             std::string skin_path = c.play_skin.empty()
                                         ? resolve_lr2_path(app.lr2_root, "LR2files/Theme/LR2/Play/play_7.lr2skin", false)
                                         : c.play_skin;
-            auto& sel = c.skin_custom[skin_path];
+            // 指定は選択肢の番号。#CUSTOMFILE は名前にして残す
             SkinHeader h;
-            if (read_skin_header(app.lr2_root, skin_path, h) && sel.size() < h.customs.size()) {
-                size_t old = sel.size();
-                sel.resize(h.customs.size());
-                for (size_t i = old; i < sel.size(); ++i) sel[i] = h.customs[i].selected;
+            if (read_skin_header(app.lr2_root, skin_path, h)) {
+                apply_skin_custom(c, skin_path, h);
+                for (auto [idx, choice] : opt.skin_opts)
+                    if (idx >= 0 && idx < static_cast<int>(h.customs.size()) && choice >= 0 &&
+                        choice < static_cast<int>(h.customs[idx].labels.size()))
+                        h.customs[idx].selected = choice;
+                c.skin_custom[skin_path] = skin_custom_choices(h);
             }
-            for (auto [idx, choice] : opt.skin_opts)
-                if (idx >= 0 && idx < static_cast<int>(sel.size())) sel[idx] = choice;
         }
 
         if (!opt.import_lr2.empty()) {

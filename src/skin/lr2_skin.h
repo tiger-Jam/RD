@@ -92,7 +92,7 @@ struct SkinCustomItem {
     std::vector<std::string> labels;   // 選択肢（#CUSTOMFILE ならファイル名）
     std::string pattern;               // #CUSTOMFILE の検索パターン
     std::string default_value;         // #CUSTOMFILE の既定
-    int selected = 0;                  // labels の添字
+    int selected = 0;                  // labels の添字。#CUSTOMFILE で -1 なら、既定が候補に無いので既定の文字列をそのまま使う
 };
 
 struct SkinHeader {
@@ -146,7 +146,9 @@ struct Lr2Skin {
     int startinput = 0, loadstart = 0, loadend = 0, playstart = 2000, fadeout = 0, close = 0;
     int startinput_rank = 0, startinput_update = 0;  // リザルト画面：ランク表示・更新表示のあと、次の入力を受けるまで
     int scratch_side[2] = {0, 0};
-    bool flip_result = false, disable_flip = false;  // #FLIPRESULT / #DISABLEFLIP
+    // リザルトのフリップ（#FLIPRESULT で立て、#DISABLEFLIP で下ろす。読み込み順で最後の値）。
+    // 読み込みを始めた時点の値は、渡した options の 351
+    bool flip_result = false;
     int scenetime = 0;      // 決定画面：この時間が経ったらプレイへ（#SCENETIME）
     int ignore_input = 0;   // 決定画面：この時間まで ESC 以外の入力を受けない（#IGNOREINPUT）
 
