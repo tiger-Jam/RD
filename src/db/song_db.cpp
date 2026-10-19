@@ -679,9 +679,9 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
             r.ghost = st.col_text(14);
         }
     }
-    r.op_history |= play.op_history;
-    if (!play.course_stage || clear >= 5) r.clear = std::max(r.clear, clear);
-    if (!play.lamp_only) {
+    if (!play.count_only) r.op_history |= play.op_history;
+    if (!play.count_only && (!play.course_stage || clear >= 5)) r.clear = std::max(r.clear, clear);
+    if (!play.lamp_only && !play.count_only) {
         // 判定の内訳・乱数の種・オプション・ゴーストは、EX スコアを更新したとき（初めてのときも）だけ入れ替える（LR2: statplay.cpp:959）
         if (!had || exscore > r.exscore) {
             r.judge = play.judge;

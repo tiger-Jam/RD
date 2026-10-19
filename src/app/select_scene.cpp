@@ -77,6 +77,9 @@ struct Library {
     std::unordered_map<std::string, ScoreRecord> scores;  // sha256 → スコア
 };
 
+// 音の設定のスライダー（EQ 10〜16、音量 17〜19、エフェクタ 20〜25、ピッチ 26）
+bool is_sound_slider(int ty) { return ty >= 10 && ty <= 26; }
+
 // 新曲とみなす境の時刻（LR2: titleflash 時間より後に見つけた譜面）
 int64_t new_song_since(int hours) {
     int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -1176,11 +1179,20 @@ void run_select(App& app) {
                           : src.op[0] == 2 ? (mouse_y - d.y - d.h / 2) / len : (d.x + d.w / 2 - mouse_x) / len;
                 return std::clamp(r, 0.0f, 1.0f);
             };
-            if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && dragging->src.op[2] >= 17 && dragging->src.op[2] <= 19) {
-                // 音量（17 = MASTER 18 = KEY 19 = BGM。0〜100）
-                int& v = dragging->src.op[2] == 17 ? app.cfg.vol_master : dragging->src.op[2] == 18 ? app.cfg.vol_key : app.cfg.vol_bgm;
-                v = static_cast<int>(std::lround(slider_ratio(*dragging) * 100));
+            if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && is_sound_slider(dragging->src.op[2])) {
+                // 音のスライダー：10〜16 = EQ（-12〜12 dB）、17〜19 = 音量 MASTER / KEY / BGM（0〜100）、
+                // 20〜25 = エフェクタ 3 つ × パラメータ 2 つ（0〜100）、26 = ピッチ（-12〜12 半音）
+                const int ty = dragging->src.op[2];
+                const float r = slider_ratio(*dragging);
+                SoundFx& fx = app.cfg.sound_fx;
+                if (ty >= 10 && ty <= 16) fx.eq[ty - 10] = static_cast<int>(std::lround(r * 24)) - 12;
+                else if (ty == 17) app.cfg.vol_master = static_cast<int>(std::lround(r * 100));
+                else if (ty == 18) app.cfg.vol_key = static_cast<int>(std::lround(r * 100));
+                else if (ty == 19) app.cfg.vol_bgm = static_cast<int>(std::lround(r * 100));
+                else if (ty >= 20 && ty <= 25) ((ty - 20) % 2 == 0 ? fx.fx[(ty - 20) / 2].p1 : fx.fx[(ty - 20) / 2].p2) = static_cast<int>(std::lround(r * 100));
+                else fx.pitch = static_cast<int>(std::lround(r * 24)) - 12;
                 app.apply_volume();
+                app.apply_sound_fx();
             } else if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && dragging->src.op[2] == 7) {
                 // カスタマイズ項目のスクロール
                 const SkinSrc& src = dragging->src;
@@ -1211,7 +1223,7 @@ void run_select(App& app) {
                 if (cur != lv.cursor) lv.cursor = cur, sctx.timers.set(11, scene_ms()), app.mixer.play_system(kSysScratch);
             }
             if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging &&
-                (dragging->src.op[2] == 7 || (dragging->src.op[2] >= 17 && dragging->src.op[2] <= 19))) {
+                (dragging->src.op[2] == 7 || is_sound_slider(dragging->src.op[2]))) {
                 dragging = nullptr;
             } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging) {
                 // 離したら最寄りの曲にスナップする（100ms）
@@ -1378,6 +1390,21 @@ void run_select(App& app) {
                         app.cfg.score_graph = v != 0;
                     } else if (ty == 71) loop(app.cfg.ghost, 0, 3);
                     else if (ty == 73) loop(app.cfg.bga_size, 0, 1);
+                    else if (ty >= 20 && ty <= 33 && ty != 30) {
+                        // 音の設定（LR2: skinobject の 20〜33）。20〜22 エフェクタの種類、23〜25 オン／オフ、26〜28 掛け先、
+                        // 29 EQ のオン／オフ、31 音量のオン／オフ、32 ピッチのオン／オフ、33 ピッチの方式
+                        SoundFx& fx = app.cfg.sound_fx;
+                        if (ty <= 22) fx.set_fx_type(ty - 20, (fx.fx[ty - 20].type + (dir > 0 ? 1 : 7)) % 8);
+                        else if (ty <= 25) fx.fx[ty - 23].on = !fx.fx[ty - 23].on;
+                        else if (ty <= 28) loop(fx.fx[ty - 26].target, 0, 2);
+                        else if (ty == 29) fx.eq_on = !fx.eq_on;
+                        else if (ty == 31) app.cfg.volume_on = !app.cfg.volume_on;
+                        else if (ty == 32) fx.pitch_on = !fx.pitch_on;
+                        else loop(fx.pitch_type, 0, 2);
+                        if ((ty >= 20 && ty <= 25) || ty == 29 || ty == 31 || ty == 32) app.mixer.play_system(kSysOptionChange);
+                        app.apply_volume();
+                        app.apply_sound_fx();
+                    }
                     else if (ty == 76) loop(app.cfg.target_percent, 50, 100);
                     else if (ty == 77) loop(app.cfg.target, 0, 5);  // ターゲット（IR の 6〜8 は無いので飛ばす）
                     else if (ty == 83) loop(app.cfg.replay_save, 0, 4);
@@ -1436,7 +1463,7 @@ void run_select(App& app) {
                 if (!clicked)
                     for (const SkinObject& o : sk->sliders) {
                         int sty = o.src.op[2];
-                        if ((sty != 1 && sty != 7 && (sty < 17 || sty > 19)) || o.src.op[3] == 1 || o.dst.empty() || !sctx.timers.on(o.dst.timer))
+                        if ((sty != 1 && sty != 7 && !is_sound_slider(sty)) || o.src.op[3] == 1 || o.dst.empty() || !sctx.timers.on(o.dst.timer))
                             continue;
                         SkinDraw d = eval_dst(o.dst, sctx.timers.lapse(o.dst.timer, t));
                         if (!d.visible) continue;

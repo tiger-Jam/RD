@@ -102,9 +102,10 @@ uint32_t option_history(int lamp, int gauge_type, const AppConfig& cfg, bool ass
 // lamp_only：ランプ・回数・オプション履歴だけを残す（皿の自動演奏・CONSTANT・SCATTER・CONVERGE。LR2: statplay.cpp:895）
 // ghost は判定の列、rseed は譜面の乱数の種（自己ベストを更新したときだけ残る）
 void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int lamp, const AppConfig& cfg, bool assist,
-                  bool lamp_only, bool course_stage, int ln_mode, const std::vector<int8_t>& ghost, uint32_t rseed) {
+                  bool lamp_only, bool count_only, bool course_stage, int ln_mode, const std::vector<int8_t>& ghost, uint32_t rseed) {
     const PlayStats& s = j.stats();
     PlayRecord rec;
+    rec.count_only = count_only;
     rec.ghost = encode_ghost(ghost);
     rec.rseed = static_cast<int>(rseed);
     rec.op_best = j.gauge_type() + std::clamp(cfg.random, 0, 9) * 10;  // LR2: ゲージ + 配置×10
@@ -209,6 +210,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     // 皿の自動演奏・CONSTANT・SCATTER・CONVERGE は、ランプを EASY まで（フルコンボも EASY）にして、
     // ランプ・回数・オプション履歴だけを残す。コースのステージでは何も残さない（LR2: statplay.cpp:7, 895）
     const bool lamp_only = assist || constant || cfg.random >= kScatter;
+    // 曲を遅くして（ピッチの FREQ・SPEED で下げて）遊んだら、回数だけを残す（LR2: statplay.cpp:791。速くしたときは普通に残す）
+    const bool slowed = cfg.sound_fx.play_rate() < 1.0;
     // BGA の無い譜面は、LR2files/Movie の動画を 1 本ランダムに選んで、頭から繰り返し流す（LR2: bmsload:4089。コースでは流さない）。
     // 探す順は mpg → avi → wmv → mp4 → ogv で、最初に見つかった種類の中から選ぶ
     // BGA の設定（LR2: bga）。OFF なら画像も動画も読まない。NO MISS はミスのときの絵を出さない
@@ -406,6 +409,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.ghost_pos = cfg.ghost;
         ctx.score_graph = cfg.score_graph;
         ctx.bga_size = cfg.bga_size;
+        ctx.sound_fx = &cfg.sound_fx;
         ctx.silent = silent;
         ctx.replay = opt.replay;
         ctx.replay_rec = !opt.replay && !opt.autoplay && !course && cfg.replay_save > 0;
@@ -488,12 +492,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.old_maxcombo = has_best ? best_score.max_combo : 0;
             ctx.old_minbp = has_best ? best_score.bp : -1;
             ctx.old_total_notes = has_best ? ps.total_notes : 0;
-            if (!recorded && opt.save_score && !opt.autoplay && started && !(course && lamp_only)) {
-                record_score(app, sha256, judge, ctx.result_clear, cfg, assist, lamp_only, course != nullptr, score_ln_mode,
+            if (!recorded && opt.save_score && !opt.autoplay && started && !(course && (lamp_only || slowed))) {
+                record_score(app, sha256, judge, ctx.result_clear, cfg, assist, lamp_only, slowed, course != nullptr, score_ln_mode,
                              ghost_log, popt.random_seed);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
                 // （コースのステージではフルコンボのときだけ上がる）
-                if (!course || ctx.result_clear >= 5) ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
+                if ((!course || ctx.result_clear >= 5) && !slowed) ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
             }
             // リプレイの保存（LR2: replaysave。Main.cpp:1796）。ALWAYS は毎回、HISCORE は EX が自己ベスト以上、
             // CLEAR はクリア、FULLCOMBO はフルコンボのとき（どれも EX が 0 なら残さない）。コースのステージは残さない
@@ -546,7 +550,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 chart_op4 = static_cast<int>(t);  // グラフを最後まで描く
             } else if (rtimers.lapse(151, t) <= rskin->startinput_rank || rtimers.on(152)) {
                 if (rtimers.lapse(152, t) > rskin->startinput_update && !rtimers.on(2)) rtimers.set(2, t);
-            } else if (!opt.save_score || opt.autoplay || lamp_only) {
+            } else if (!opt.save_score || opt.autoplay || lamp_only || slowed) {
                 // 記録しないプレイ（オートなど）とランプだけを残すプレイは、更新の表示を飛ばしてフェードアウトへ（LR2 と同じ）
                 if (!rtimers.on(2)) rtimers.set(2, t);
             } else {

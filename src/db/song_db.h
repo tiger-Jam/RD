@@ -52,6 +52,8 @@ struct PlayRecord {
     bool course_stage = false;
     // ランプ・回数・オプション履歴だけを残す（EX・判定数・最大コンボ・BP は変えない。皿の自動演奏や SCATTER など）
     bool lamp_only = false;
+    // 回数だけを残す（ランプも変えない。曲を遅くして遊んだとき。LR2: statplay.cpp:791）
+    bool count_only = false;
     int ln_mode = 0;
     int rseed = -1, op_best = 0;
     std::string ghost;  // 判定の列（LR2 のゴーストの文字列）  // 記録を分ける LN の種類（種類を決めていない LN が無い譜面は 0）

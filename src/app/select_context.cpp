@@ -87,8 +87,9 @@ bool SelectContext::option(int op) const {
     case 56: return true;  // 2P のアシスト OFF
     // スコアが残るか（LR2: CheckScoreSaveConditon）。皿の自動演奏・CONSTANT・SCATTER・CONVERGE はランプだけ
     case 60: case 61: {
-        bool lamp_only = cfg->assist || cfg->hs_fix == 4 || cfg->random >= 4;
-        return lamp_only == (op == 60);
+        // 曲を遅くして遊ぶときも残らない（ピッチの FREQ・SPEED）
+        bool no_score = cfg->assist || cfg->hs_fix == 4 || cfg->random >= 4 || cfg->sound_fx.play_rate() < 1.0;
+        return no_score == (op == 60);
     }
     case 62: case 63: case 64: case 65: case 66: {
         // 取れるランプの上限（LR2: CheckClearLampChallenge）。上の 4 つは EASY 止まり
