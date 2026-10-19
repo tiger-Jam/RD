@@ -235,7 +235,7 @@ std::string SelectContext::text(int id) const {
     case 76: return opt("BGADRAW", cfg->bga);
     case 78: return opt("VSYNC", cfg->vsync ? 1 : 0);
     case 79: return opt("SCREEN", windowed ? 1 : 0);
-    case 80: return opt("AUTOADJUST", 0);
+    case 80: return opt("AUTOADJUST", cfg->auto_adjust);
     case 81: return opt("REPLAYSAVE", 0);
     case 84: return opt("EFFECT", cfg->effect);
     case 85: return opt("EFFECT", 0);
@@ -270,6 +270,7 @@ int SelectContext::button(int t) const {
     case 57: case 58: return 1;
     case 70: return 1;  // スコアグラフ ON
     case 72: return cfg->bga;
+    case 75: return cfg->auto_adjust;
     case 76: return 90;
     case 80: return windowed ? 1 : 0;
     case 82: return cfg->vsync ? 1 : 0;

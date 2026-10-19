@@ -189,7 +189,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     // BGA の無い譜面は、LR2files/Movie の動画を 1 本ランダムに選んで、頭から繰り返し流す（LR2: bmsload:4089。コースでは流さない）。
     // 探す順は mpg → avi → wmv → mp4 → ogv で、最初に見つかった種類の中から選ぶ
     // BGA の設定（LR2: bga）。OFF なら画像も動画も読まない。NO MISS はミスのときの絵を出さない
-    const bool bga_shown = cfg.bga == 1 || cfg.bga == 3 || (cfg.bga == 2 && opt.autoplay);
+    // 判定タイミングの自動調整の SILENT は、キー音も BGA も読まない（LR2: bmsload:659）
+    const bool silent = cfg.auto_adjust == 2;
+    const bool bga_shown = !silent && (cfg.bga == 1 || cfg.bga == 3 || (cfg.bga == 2 && opt.autoplay));
     std::string default_movie;
     int default_movie_id = -1;
     if (bga_shown && parsed.chart.sound_only && !opt.course && VideoDecoder::available()) {
@@ -271,6 +273,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     // キー音はワーカーで読み込む。読み込み中もスキンの読み込み画面を動かす
     std::vector<std::string> missing;
     std::vector<std::string> paths = resolve_chart_sounds(chart, missing);
+    if (silent) paths.assign(paths.size(), ""), missing.clear();
     std::vector<std::pair<int64_t, int64_t>> ranges = sound_ranges(chart);
     for (const auto& m : missing) std::printf("キー音が見つからない: %s\n", m.c_str());
     int total_sounds = static_cast<int>(std::count_if(paths.begin(), paths.end(), [](auto& p) { return !p.empty(); }));
@@ -379,6 +382,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         bool cover_display = true;
         double cover_dbl_ms = 0;
         int old_hp = -1;
+        // 判定タイミングの自動調整（LR2: Play.cpp:1319）。PG〜BD で押すたびにずれを足し、10 回たまったら
+        // 遅ければ +1ms、早ければ −1ms 動かす。オートプレイでは動かさない
+        int adjust_count = 0, adjust_sum = 0;
         bool last_note_set = false, fc_set = false, done = false;
         // BGAの層（LR2: bmsload:597, 810）。#BMP00 があれば、それが最初のPOORの画像になる
         int bga_base = -1, bga_layer = -1, bga_poor = -1;
@@ -846,6 +852,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 judge.sounds_to_stop().clear();
                 judge.sounds_to_play().clear();
                 for (const JudgeEvent& je : judge.events()) {
+                    if (cfg.auto_adjust > 0 && !opt.autoplay && je.has_offset && !je.ln_end && je.judge >= kBad && je.judge <= kPGreat) {
+                        adjust_sum += je.offset_ms;
+                        if (++adjust_count > 9) {
+                            if (adjust_sum > 0) cfg.judge_timing = std::min(199, cfg.judge_timing + 1);
+                            else if (adjust_sum < 0) cfg.judge_timing = std::max(-199, cfg.judge_timing - 1);
+                            adjust_count = adjust_sum = 0;
+                        }
+                    }
                     double at = scene_ms_of(je.time_us);
                     int j = je.judge >= 100 ? je.judge - 100 : je.judge;
                     if (je.judge >= 100) {
@@ -1044,6 +1058,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.effect = cfg.effect;
                 st.autoplay = opt.autoplay;
                 st.judge_draw = ctx.judge_draw;
+                st.show_judge = !silent;
                 st.combo_draw = judge.stats().combo;
                 st.gauge_hp = ctx.hp_print >= 0 ? ctx.hp_print : judge.gauge().hp(judge.gauge_type());
                 st.gauge_survival = course || !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);

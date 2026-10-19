@@ -86,6 +86,7 @@ struct PlaySkinState {
     int effect = 0;              // HIDDEN / SUDDEN（LR2: m_HIDSUD。0=OFF 1=HIDDEN 2=SUDDEN 3=HID+SUD）
     bool autoplay = false;
     int judge_draw = 0;          // 直近の判定（0=空POOR..5=PGREAT）
+    bool show_judge = true;      // 判定とコンボの表示（自動調整の SILENT では出さない）
     int combo_draw = 0;
     double gauge_hp = 0;         // 表示用のゲージ（%）
     bool gauge_survival = false;

@@ -28,6 +28,7 @@ struct JudgeEvent {
     bool fast = false;
     bool has_offset = false;
     bool ln_start = false;  // CN・HCN の始点（押さえている間の演出を始める）
+    bool ln_end = false;    // CN・HCN の終点（離した時刻で判定したもの）
 };
 
 struct PlayStats {

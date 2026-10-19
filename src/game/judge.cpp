@@ -434,6 +434,7 @@ void JudgeEngine::proc_charge(int lane, int keypress, int timing, int64_t t_us) 
         if (judge < 0) judge = kPoor;
         if (dm > 0 && judge <= kBad && l.note_val > 0) stop_.push_back(l.note_val);
         judge_to_score(judge, lane, t_us, -dm, true);
+        events_.back().ln_end = true;
         if (hcn && judge >= kGood) hcn_[lane].tail_good = true;
         finish();
         return;

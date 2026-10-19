@@ -402,7 +402,7 @@ void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
     add_gauge(skin.gauge[0], st);
     if (st.notes_visible && st.chart && st.judge) {
         add_notes(skin, st);
-        add_judge_combo(skin, st);
+        if (st.show_judge) add_judge_combo(skin, st);
     }
     if (!skin.judgeline[0].dst.empty()) add_play_area(skin.judgeline[0].src, skin.judgeline[0].dst, st, 0, 0, -1);
     add_common(skin, st);

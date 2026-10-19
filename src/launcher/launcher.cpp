@@ -673,8 +673,11 @@ int main(int, char**) {
             g.check(X + 38, Y + 256, "LIFT を使う", cfg.lift);
             g.label(X + 182, Y + 256, "量", cfg.lift);
             g.edit_int(cfg.lift_v, X + 210, Y + 248, 58, 20, cfg.lift, 0, 100);
+            g.label(X + 300, Y + 312, "判定の自動調整");
+            g.combo(&cfg.auto_adjust, X + 400, Y + 304, 150, 22, {"OFF", "ON", "SILENT"}, std::clamp(cfg.auto_adjust, 0, 2),
+                    [&](int i) { cfg.auto_adjust = i; });
             g.label(X + 28, Y + 312, "LN の種類");
-            g.combo(&cfg.ln_mode, X + 182, Y + 304, 200, 22, {"LN", "CN", "HCN"}, std::clamp(cfg.ln_mode, 0, 2),
+            g.combo(&cfg.ln_mode, X + 182, Y + 304, 100, 22, {"LN", "CN", "HCN"}, std::clamp(cfg.ln_mode, 0, 2),
                     [&](int i) { cfg.ln_mode = i; });
         }
         g.combo_popup();

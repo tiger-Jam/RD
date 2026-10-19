@@ -1191,7 +1191,8 @@ void run_select(App& app) {
                     else if (ty >= 91 && ty <= 96) change_difficulty(ty - 91);
                     else if (ty == 44) app.cfg.assist = !app.cfg.assist, app.mixer.play_system(kSysOptionChange);
                     else if (ty == 50) loop(app.cfg.effect, 0, 3);
-                    else if (ty == 72) loop(app.cfg.bga, 0, 2);  // BGA（ボタンは OFF / ON / AUTOPLAY の 3 つを回す。LR2 と同じ）
+                    else if (ty == 72) loop(app.cfg.bga, 0, 2);
+                    else if (ty == 75) loop(app.cfg.auto_adjust, 0, 2);  // 判定タイミングの自動調整（OFF / ON / SILENT）  // BGA（ボタンは OFF / ON / AUTOPLAY の 3 つを回す。LR2 と同じ）
                     else if (ty == 55) {
                         loop(app.cfg.hs_fix, 0, 5);
                     } else if (ty == 57) {

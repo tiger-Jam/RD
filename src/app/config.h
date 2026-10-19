@@ -21,6 +21,8 @@ struct AppConfig {
     std::vector<std::string> tables;     // 難易度表のURL（アプリには同梱しない。ユーザーが登録する）
     int hi_speed = 100;            // LR2のハイスピ（100=1.00倍）
     int judge_timing = 0;          // LR2の判定タイミング（描画だけをずらす）
+    // 判定タイミングの自動調整（LR2: autojudgeadjust）。0 = OFF 1 = ON 2 = SILENT（キー音・BGA・判定の表示なし）
+    int auto_adjust = 0;
     // ハイスピードの範囲と刻み（LR2: hsmin / hsmax / hsmargin）
     int hs_min = 10, hs_max = 900, hs_margin = 10;
     // ハイスピード固定（LR2: hstype）。0=OFF 1=MAX BPM 2=MIN BPM 3=AVERAGE 4=CONSTANT 5=MAIN BPM（5 は OpenLR2 の拡張）。
