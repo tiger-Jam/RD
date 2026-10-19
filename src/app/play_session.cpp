@@ -28,6 +28,7 @@
 #include "render/skin_play.h"
 #include "util/hash.h"
 #include "util/path.h"
+#include "video/video_decoder.h"
 
 namespace bmj {
 
@@ -232,11 +233,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     std::vector<std::string> paths = resolve_chart_sounds(chart, missing);
     for (const auto& m : missing) std::printf("キー音が見つからない: %s\n", m.c_str());
     int total_sounds = static_cast<int>(std::count_if(paths.begin(), paths.end(), [](auto& p) { return !p.empty(); }));
-    // BGAの画像（動画はまだ対応していないので読まない）
+    // BGAの画像と動画（動画は FFmpeg が読み込めたときだけ出す）
     std::vector<std::string> bga_paths = resolve_images(chart);
+    std::vector<std::unique_ptr<VideoDecoder>> videos(bga_paths.size());
     int total_images = 0;
     for (std::string& p : bga_paths) {
-        if (!p.empty() && is_movie_file(p)) p.clear();
+        if (!p.empty() && is_movie_file(p) && !VideoDecoder::available()) p.clear();
         if (!p.empty()) total_images++;
     }
     std::vector<SkinImage> bga_images(bga_paths.size());
@@ -259,7 +261,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         const uint8_t black[3] = {0, 0, 0};
         for (size_t i = 0; i < bga_paths.size(); ++i) {
             if (bga_paths[i].empty()) continue;
-            load_skin_image(bga_paths[i], bga_images[i], black, true);
+            if (is_movie_file(bga_paths[i])) {
+                auto v = std::make_unique<VideoDecoder>();
+                if (v->open(bga_paths[i])) videos[i] = std::move(v);
+                else std::printf("動画を開けない: %s\n", bga_paths[i].c_str());
+            } else {
+                load_skin_image(bga_paths[i], bga_images[i], black, true);
+            }
             load_done.fetch_add(1);
         }
         if (!stage_path.empty()) load_skin_image(stage_path, stage_image, black, false);
@@ -331,6 +339,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         int bga_base = -1, bga_layer = -1, bga_poor = -1;
         bool bga_poor_init = false;
         size_t bga_next = 0;
+        // 動画の再生を始めた曲の時刻（ms。まだなら負）。もう一度遊ぶときは頭から開き直す
+        std::vector<double> video_start(videos.size(), -1.0);
+        if (loader_joined)
+            for (size_t i = 0; i < videos.size(); ++i)
+                if (videos[i]) {
+                    auto v = std::make_unique<VideoDecoder>();
+                    if (v->open(bga_paths[i])) videos[i] = std::move(v);
+                }
         double last_miss_ms = -1e9;
         int fps_frames = 0;
         uint64_t fps_t0 = scene_start;
@@ -698,8 +714,20 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 for (const auto& er : load_errors) std::printf("%s\n", er.c_str());
                 // GPUへのアップロードはメインスレッドで行う（仕様書4章）
                 bga_textures.assign(bga_images.size(), nullptr);
-                for (size_t i = 0; i < bga_images.size(); ++i)
+                for (size_t i = 0; i < bga_images.size(); ++i) {
                     if (!bga_images[i].rgba.empty()) bga_textures[i] = app.skin_renderer->create_texture(bga_images[i]);
+                    if (videos[i]) {
+                        // 動画は毎フレーム絵を書き換えるテクスチャ。最初は黒
+                        SDL_Texture* t = SDL_CreateTexture(app.renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+                                                           videos[i]->width(), videos[i]->height());
+                        if (t) {
+                            std::vector<uint8_t> blank(static_cast<size_t>(videos[i]->width()) * videos[i]->height() * 4, 0);
+                            for (size_t k = 3; k < blank.size(); k += 4) blank[k] = 255;
+                            SDL_UpdateTexture(t, nullptr, blank.data(), videos[i]->width() * 4);
+                        }
+                        bga_textures[i] = t;
+                    }
+                }
                 bga_images.clear();
                 if (!stage_image.rgba.empty()) stage_tex = app.skin_renderer->create_texture(stage_image);
                 if (!back_image.rgba.empty()) back_tex = app.skin_renderer->create_texture(back_image);
@@ -815,6 +843,15 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     if (be.layer == BgaEvent::Layer::Base) bga_base = be.image;
                     else if (be.layer == BgaEvent::Layer::Layer) bga_layer = be.image;
                     else bga_poor = be.image;
+                    // 動画は、初めて出たときから再生する
+                    if (be.image < videos.size() && videos[be.image] && video_start[be.image] < 0)
+                        video_start[be.image] = be.time_us / 1000.0;
+                }
+                for (size_t i = 0; i < videos.size(); ++i) {
+                    if (!videos[i] || video_start[i] < 0 || i >= bga_textures.size() || !bga_textures[i]) continue;
+                    VideoDecoder::Frame f;
+                    if (videos[i]->take(song_ms - video_start[i], f) && !f.rgba.empty())
+                        SDL_UpdateTexture(bga_textures[i], nullptr, f.rgba.data(), f.w * 4);
                 }
                 for (int lane = 0; lane < kLaneCount; ++lane) {
                     if (!judge.lane_ln_holding(lane)) ctx.timers.reset(70 + lane);

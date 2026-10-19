@@ -77,6 +77,7 @@ add_executable(BMjoybody WIN32
     src/app/decide_scene.cpp
     src/app/skin_catalog.cpp
     src/app/skin_select_scene.cpp
+    src/video/video_decoder.cpp
     src/audio/sound_bank.cpp
     src/audio/mixer.cpp
     src/audio/system_sound.cpp
@@ -89,6 +90,8 @@ add_executable(BMjoybody WIN32
     src/skin/skin_renderer.cpp
     src/render/text_cache.cpp
 )
+# 動画の BGA：FFmpeg のヘッダーだけを使い、ライブラリは実行時に読み込む（同梱しない）
+set_source_files_properties(src/video/video_decoder.cpp PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/ffmpeg/include)
 target_link_libraries(BMjoybody PRIVATE bmj_core SDL3::SDL3)
 if(WIN32)
     # 日本語のファイル名を扱えるように、プロセスのコードページを UTF-8 にする（OpenLR2 と同じ）
