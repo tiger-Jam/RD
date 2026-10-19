@@ -625,7 +625,24 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
 }
 
 int SongDb::import_lr2_songs(const std::string& lr2_song_db, std::string* error,
-                             const std::function<void(int, int)>& progress) {
+                             const std::function<void(int, int)>& progress, const std::vector<std::string>& roots) {
+    auto upper = [](std::string s) {
+        for (char& ch : s) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+        return s;
+    };
+    std::vector<std::string> root_keys;
+    for (const std::string& r : roots) {
+        std::string k = upper(fs::path(r).lexically_normal().string());
+        while (!k.empty() && (k.back() == '/' || k.back() == '\\')) k.pop_back();
+        root_keys.push_back(k);
+    }
+    auto under_root = [&](const std::string& p) {
+        if (root_keys.empty()) return true;
+        std::string up = upper(p);
+        for (const std::string& k : root_keys)
+            if (up.size() > k.size() && up.compare(0, k.size(), k) == 0 && (up[k.size()] == '/' || up[k.size()] == '\\')) return true;
+        return false;
+    };
     if (!db_) return -1;
     sqlite3* src = nullptr;
     if (sqlite3_open_v2(lr2_song_db.c_str(), &src, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
@@ -653,6 +670,7 @@ int SongDb::import_lr2_songs(const std::string& lr2_song_db, std::string* error,
             Row w;
             ChartRecord& r = w.r;
             r.path = text(0);
+            if (!under_root(r.path)) continue;
             r.folder = fs::path(r.path).parent_path().string();
             r.md5 = st.col_text(1);
             for (char& ch : r.md5) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
