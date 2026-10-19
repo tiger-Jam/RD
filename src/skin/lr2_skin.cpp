@@ -745,6 +745,10 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
         error = "スキンを読めない: " + skin_path;
         return false;
     }
+    // スライダーの繰り返しの戻り先が最初の表示より前（WMIX の曲リストのスライダー：1000〜1100ms で表れ、loop 0）のとき、
+    // OpenLR2 の計算では点滅し続けるが、実際の LR2 では表れたまま。最後の表示のまま止める
+    for (SkinObject& o : out.sliders)
+        if (!o.dst.keys.empty() && o.dst.loop >= 0 && o.dst.loop < o.dst.keys.front().time) o.dst.loop = o.dst.keys.back().time;
     return true;
 }
 
