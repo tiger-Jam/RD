@@ -367,7 +367,7 @@ int main(int argc, char** argv) {
     if (!opt.table_urls.empty()) {
         std::string cache = opt.db_path.empty() ? "tables_test" : opt.db_path;
         for (const std::string& u : opt.table_urls) {
-            DifficultyTable t = update_table(cache, u);
+            DifficultyTable t = update_table(cache, u, true);
             std::printf("%s [%s] %zu 譜面、%zu レベル%s\n", t.name.empty() ? u.c_str() : t.name.c_str(), t.symbol.c_str(),
                         t.charts.size(), t.levels.size(), t.from_cache ? "（手元の版）" : "");
             if (!t.warning.empty()) std::printf("  %s\n", t.warning.c_str());

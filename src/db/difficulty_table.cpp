@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -350,6 +351,21 @@ int64_t now_sec() {
 
 }  // namespace
 
+bool is_today(int64_t t) {
+    if (t <= 0) return false;
+    auto day = [](int64_t s) {
+        std::time_t tt = static_cast<std::time_t>(s);
+        std::tm tm{};
+#ifdef _WIN32
+        localtime_s(&tm, &tt);
+#else
+        localtime_r(&tt, &tm);
+#endif
+        return (tm.tm_year + 1900) * 1000 + tm.tm_yday;
+    };
+    return day(t) == day(now_sec());
+}
+
 bool fetch_table(const std::string& url, DifficultyTable& out, std::string& error) {
     std::string header, data;
     if (!fetch_raw(url, header, data, error)) return false;
@@ -374,13 +390,38 @@ bool load_cached_table(const std::string& cache_dir, const std::string& url, Dif
     return true;
 }
 
-DifficultyTable update_table(const std::string& cache_dir, const std::string& url) {
+DifficultyTable update_table(const std::string& cache_dir, const std::string& url, bool force) {
     DifficultyTable cached;
     bool have_cache = load_cached_table(cache_dir, url, cached);
+    std::error_code ec;
+    fs::create_directories(cache_dir, ec);
+    const std::string base = cache_base(cache_dir, url);
+    // 表の更新はその日の最初の 1 回だけ確かめる（起動のたびに取りに行くと待たされる）。
+    // 取れなかったときも確かめた時刻を残し、その日のうちは取りに行かない（応答の無いサイトを毎回待たない）
+    int64_t checked = 0;
+    std::string last_error;
+    {
+        std::ifstream in(base + ".checked");
+        std::string line;
+        if (std::getline(in, line)) checked = std::atoll(line.c_str());
+        std::getline(in, last_error);
+    }
+    if (!force && ((have_cache && is_today(cached.fetched)) || is_today(checked))) {
+        if (have_cache) {
+            if (!last_error.empty() && !is_today(cached.fetched)) cached.warning = "今日は更新できなかったので、手元の版を使う：" + last_error;
+            return cached;
+        }
+        DifficultyTable none;
+        none.url = url;
+        none.warning = "今日は取得できなかった：" + last_error;
+        return none;
+    }
+    auto mark_checked = [&](const std::string& error) { std::ofstream(base + ".checked") << now_sec() << "\n" << error << "\n"; };
     std::string header, data, error;
     DifficultyTable fresh;
     fresh.url = url;
     if (!fetch_raw(url, header, data, error) || !parse_table(header, data, fresh, error)) {
+        mark_checked(error);
         // 取れなかった・壊れていたときは手元の版を使い続ける
         if (have_cache) {
             cached.warning = "更新できなかったので、手元の版を使う：" + error;
@@ -389,6 +430,7 @@ DifficultyTable update_table(const std::string& cache_dir, const std::string& ur
         fresh.warning = "取得できない：" + error;
         return fresh;
     }
+    mark_checked("");
     if (have_cache && fresh.charts.size() * 2 < cached.charts.size()) {
         // 譜面が半分未満に減ったら、置き換えずに手元の版を使う（仕様書9章）
         cached.warning = "取得した表の譜面が " + std::to_string(cached.charts.size()) + " → " +
@@ -396,9 +438,6 @@ DifficultyTable update_table(const std::string& cache_dir, const std::string& ur
         return cached;
     }
     fresh.fetched = now_sec();
-    std::error_code ec;
-    fs::create_directories(cache_dir, ec);
-    std::string base = cache_base(cache_dir, url);
     std::ofstream(base + ".header.json", std::ios::binary) << header;
     std::ofstream(base + ".data.json", std::ios::binary) << data;
     std::ofstream(base + ".meta") << fresh.fetched << "\n" << url << "\n";

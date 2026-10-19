@@ -1,3 +1,4 @@
+#include <chrono>
 #include "db/difficulty_table.h"
 #include "test.h"
 
@@ -61,4 +62,12 @@ TEST(table_courses) {
     DifficultyTable t2;
     CHECK(parse_table(old, data, t2, err));
     CHECK(t2.courses.size() == 1 && t2.courses[0].constraints.size() == 2 && t2.courses[0].constraints[0] == "grade_mirror");
+}
+
+// 難易度表の更新は 1 日 1 回：その日（この機械の時刻の日付）に取ったかどうか
+TEST(table_checked_today) {
+    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    CHECK(is_today(now));
+    CHECK(!is_today(now - 2 * 86400));
+    CHECK(!is_today(0));
 }

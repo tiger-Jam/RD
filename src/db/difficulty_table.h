@@ -34,8 +34,11 @@ struct DifficultyTable {
 bool parse_table(const std::string& header_json, const std::string& data_json, DifficultyTable& out, std::string& error);
 // ネットワークから取得する（キャッシュは見ない）
 bool fetch_table(const std::string& url, DifficultyTable& out, std::string& error);
-// 取得を試み、駄目なら手元の版を使う。更新で譜面が半分未満に減ったら置き換えない
-DifficultyTable update_table(const std::string& cache_dir, const std::string& url);
+// 取得を試み、駄目なら手元の版を使う。更新で譜面が半分未満に減ったら置き換えない。
+// force でなければ、手元の版をその日（この機械の時刻の日付）のうちに取ってあれば、取りに行かずに手元の版を使う
+DifficultyTable update_table(const std::string& cache_dir, const std::string& url, bool force = false);
+// t（UNIX 秒）が今日か（この機械の時刻の日付で比べる）
+bool is_today(int64_t t);
 // 手元の版だけを読む
 bool load_cached_table(const std::string& cache_dir, const std::string& url, DifficultyTable& out);
 
