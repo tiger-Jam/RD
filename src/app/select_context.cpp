@@ -116,8 +116,8 @@ bool SelectContext::option(int op) const {
     case 181: return song && chart->rank == 1;
     case 182: return song && chart->rank == 2;
     case 183: return song && chart->rank >= 3;
-    case 185: return song && chart->playlevel <= cfg->levelbar_7;
-    case 186: return song && chart->playlevel > cfg->levelbar_7;
+    case 185: return song && chart->playlevel <= levelbar_max();
+    case 186: return song && chart->playlevel > levelbar_max();
     case 190: return !has_stagefile;
     case 191: return has_stagefile;
     case 192: return !has_banner;
@@ -140,7 +140,7 @@ bool SelectContext::option(int op) const {
         // 同じフォルダの難易度 0..4 のレベルがレベルバーの上限以下（70〜74）／超える（75〜79）
         int d = (op - 70) % 5;
         if (!song || diff_count[d] == 0) return false;
-        return op < 75 ? diff_level[d] <= cfg->levelbar_7 : diff_level[d] > cfg->levelbar_7;
+        return op < 75 ? diff_level[d] <= levelbar_max() : diff_level[d] > levelbar_max();
     }
     if (op >= 520 && op <= 565) {
         // 難易度 d のランプが v（op = 520 + d*10 + v）
@@ -295,6 +295,9 @@ bool SelectContext::slider(int t, int& val, int& lo, int& hi) const {
     switch (t) {
     case 1: val = list_pos, lo = 0, hi = std::max(1, list_count * 1000 - 1); return true;
     case 2: case 3: val = cfg->hi_speed, lo = 10, hi = 990; return true;
+    case 17: val = cfg->vol_master, lo = 0, hi = 100; return true;  // 音量 MASTER / KEY / BGM
+    case 18: val = cfg->vol_key, lo = 0, hi = 100; return true;
+    case 19: val = cfg->vol_bgm, lo = 0, hi = 100; return true;
     case 4: case 5: val = cfg->lane_cover_v, lo = 0, hi = 100; return true;
     case 7: val = catalog ? catalog->scroll() : 0, lo = 0, hi = catalog ? std::max(1, catalog->scroll_max(*cfg)) : 1; return true;
     default: val = 0, lo = 0, hi = 1; return true;
@@ -304,8 +307,8 @@ bool SelectContext::slider(int t, int& val, int& lo, int& hi) const {
 bool SelectContext::bargraph(int t, double& val, double& max) const {
     const bool song = chart && is_song(type);
     switch (t) {
-    case 3: val = song ? chart->playlevel : 0, max = cfg->levelbar_7; return true;
-    case 5: case 6: case 7: case 8: case 9: val = song ? diff_level[t - 5] : 0, max = cfg->levelbar_7; return true;
+    case 3: val = song ? chart->playlevel : 0, max = levelbar_max(); return true;
+    case 5: case 6: case 7: case 8: case 9: val = song ? diff_level[t - 5] : 0, max = levelbar_max(); return true;
     case 47: val = song && score ? score->exscore : 0, max = song ? notes_of(*chart) * 2 : 0; return true;
     default: return false;
     }

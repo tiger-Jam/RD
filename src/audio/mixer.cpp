@@ -170,7 +170,7 @@ void Mixer::callback(ma_device* dev, void* out, const void*, unsigned int frames
     static_cast<Mixer*>(dev->pUserData)->render(static_cast<float*>(out), frames);
 }
 
-void Mixer::start_voice(uint16_t sound, int64_t delay_frames) {
+void Mixer::start_voice(uint16_t sound, int64_t delay_frames, bool key) {
     if (!samples_ || sound >= samples_->size()) return;
     const Sample& s = (*samples_)[sound];
     if (s.pcm.empty()) return;
@@ -194,6 +194,7 @@ void Mixer::start_voice(uint16_t sound, int64_t delay_frames) {
     slot->sample = &s;
     slot->sound = sound;
     slot->pos = -delay_frames;
+    slot->key = key;
 }
 
 void Mixer::run_system_command(int32_t cmd) {
@@ -256,7 +257,7 @@ void Mixer::render(float* out, uint32_t frames) {
         } else if (!running) {
             // 曲を止めている間のキー音は捨てる
         } else if (cmd >= 0) {
-            start_voice(static_cast<uint16_t>(cmd), 0);
+            start_voice(static_cast<uint16_t>(cmd), 0, true);
         } else {
             uint16_t id = static_cast<uint16_t>(-cmd - 1);
             for (Voice& v : voices_)
@@ -285,16 +286,28 @@ void Mixer::render(float* out, uint32_t frames) {
         return loop_gain0 < loop_target ? std::min(loop_target, loop_gain0 + d) : std::max(loop_target, loop_gain0 - d);
     };
     sys_loop_gain_ = frames ? loop_gain_at(frames - 1) : loop_gain0;
+    // 全体のフェード（リザルトを抜けるときなど）と、KEY 側・BGM 側の音量
+    const float fade_target = fade_target_.load(std::memory_order_relaxed);
+    const float fade_step = fade_step_.load(std::memory_order_relaxed);
+    const float fade0 = fade_gain_;
+    auto fade_at = [&](uint32_t i) {
+        float d = fade_step * static_cast<float>(i + 1);
+        return fade0 < fade_target ? std::min(fade_target, fade0 + d) : std::max(fade_target, fade0 - d);
+    };
+    fade_gain_ = frames ? fade_at(frames - 1) : fade0;
+    const float gk = gain_key_.load(std::memory_order_relaxed), gb = gain_bgm_.load(std::memory_order_relaxed);
+    const uint32_t key_mask = sys_key_mask_.load(std::memory_order_relaxed);
     for (SysVoice& v : sys_voices_) {
         if (!v.sample) continue;
         const float* pcm = v.sample->pcm.data();
         int64_t len = v.sample->frames();
+        const float side = v.id < 32 && (key_mask >> v.id & 1u) ? gk : gb;
         for (uint32_t i = 0; i < frames; ++i) {
             if (v.pos >= len) {
                 if (!v.loop) break;
                 v.pos = 0;
             }
-            float g = v.loop ? loop_gain_at(i) : 1.0f;
+            float g = (v.loop ? loop_gain_at(i) : 1.0f) * side * fade_at(i);
             out[i * 2] += pcm[v.pos * 2] * g;
             out[i * 2 + 1] += pcm[v.pos * 2 + 1] * g;
             ++v.pos;
@@ -312,7 +325,7 @@ void Mixer::render(float* out, uint32_t frames) {
     while (schedule_next_ < schedule_.size() && schedule_[schedule_next_].frame < end) {
         const ScheduledSound& e = schedule_[schedule_next_++];
         int64_t delay = std::max<int64_t>(0, e.frame - song_frame_);
-        start_voice(e.sound, delay);
+        start_voice(e.sound, delay, e.key);
     }
 
     int active = 0;
@@ -322,11 +335,13 @@ void Mixer::render(float* out, uint32_t frames) {
         int64_t len = v.sample->frames();
         int64_t i0 = 0;
         if (v.pos < 0) i0 = std::min<int64_t>(frames, -v.pos);
+        const float side = v.key ? gk : gb;
         for (int64_t i = i0; i < frames; ++i) {
             int64_t p = v.pos + i;
             if (p >= len) break;
-            out[i * 2] += pcm[p * 2];
-            out[i * 2 + 1] += pcm[p * 2 + 1];
+            float g = side * fade_at(static_cast<uint32_t>(i));
+            out[i * 2] += pcm[p * 2] * g;
+            out[i * 2 + 1] += pcm[p * 2 + 1] * g;
         }
         v.pos += frames;
         if (v.pos >= len) v.sample = nullptr;

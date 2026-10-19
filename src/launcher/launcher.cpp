@@ -559,7 +559,7 @@ int main(int, char**) {
             g.label(X + 28, Y + 268, "7/14KEYS");
             g.edit_int(cfg.levelbar_7, X + 102, Y + 255, 58, 22, true, 1, 99);
             g.label(X + 28, Y + 296, "9BUTTONS");
-            g.edit_int(cfg.levelbar_9, X + 102, Y + 284, 58, 22, true, 1, 99);
+            g.edit_int(cfg.levelbar_9, X + 102, Y + 284, 58, 22, false, 1, 99);  // 9 ボタンは扱わない
         } else if (tab == 5) {
             g.group(X + 10, Y + 8, 558, 90, "DISPLAY");
             g.check(X + 38, Y + 38, "16bitモードで起動する(フルスクリーンモードのみ)", d_false, false);

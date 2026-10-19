@@ -44,6 +44,8 @@ struct SelectContext {
     bool autoplay = false;
     bool windowed = true;
     bool replay_exists = false;  // カーソルの譜面のリプレイがある（op 196 / 197）
+    // レベルバーの最大値（LR2: levelbarflash_5 / _7）。5 鍵の譜面は 5 鍵の値
+    int levelbar_max() const { return chart && chart->keys == 5 ? cfg->levelbar_5 : cfg->levelbar_7; }
     int list_count = 0, list_pos = 0;  // 曲リストの数と、スクロール位置（1曲=1000。スライダー1）
     // 同じフォルダの難易度ごとの譜面（添字 0..4 = BEGINNER..INSANE）。レベル（無ければ -1）、数、ランプ
     std::array<int, 5> diff_level{-1, -1, -1, -1, -1}, diff_count{}, diff_lamp{};

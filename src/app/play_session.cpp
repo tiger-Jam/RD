@@ -866,7 +866,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 if (opt.autoplay)
                     for (const Note& n : chart.notes)
                         if ((n.kind == NoteKind::Normal || n.kind == NoteKind::Long) && n.sound)
-                            schedule.push_back({frame_of(n.time_us), n.sound});
+                            schedule.push_back({frame_of(n.time_us), n.sound, true});
                 mixer.set_song(&bank.samples(), std::move(schedule));
                 mixer.stop_system(kSysDecide);
                 mixer.start(0);
@@ -1285,7 +1285,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     }
     std::printf("コースの結果: %s ランプ %d / EX %d / MAX COMBO %d / %d ノーツ\n", course.name.c_str(), clear, total.exscore(),
                 total.max_combo, total.total_notes);
-    mixer.play_system(clear < 2 ? kSysCourseFail : kSysCourseClear);
+    mixer.play_system(clear < 2 ? kSysCourseFail : kSysCourseClear, true);  // リザルトの間は繰り返す（LR2 と同じ）
     ctx.result_flip = app.play_skin && app.play_skin->flip_result;
     app.load_courseresult_skin(ctx.load_options());
     Lr2Skin* rskin = app.courseresult_skin.get();

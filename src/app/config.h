@@ -57,6 +57,9 @@ struct AppConfig {
     bool score_graph = false; // スコアグラフ（LR2: scoregraph）
     // リプレイの保存（LR2: replaysave）。0=OFF 1=ALWAYS 2=HISCORE（EX がベスト以上） 3=CLEAR 4=FULLCOMBO
     int replay_save = 0;
+    // 音量（LR2: volumeflag / master / key / bgm）。volume_on が false なら全部 100 として鳴らす
+    bool volume_on = true;
+    int vol_master = 100, vol_key = 100, vol_bgm = 100;
     // 選曲の絞り込みとソート（LR2: select.difficulty など）。0=ALL / OFF
     int select_difficulty = 0, select_mode = 0, select_sort = 0;
     bool no_right_click_exit = false;  // 演奏中の右クリックで曲を終えない（LR2: disableleftclickexit）

@@ -16,6 +16,7 @@ namespace bmj {
 struct ScheduledSound {
     int64_t frame = 0;  // 譜面の時刻0からのフレーム位置
     uint16_t sound = 0;
+    bool key = false;   // キー音（自動演奏）として鳴らす（音量は KEY 側。false なら BGM 側）
 };
 
 class Mixer {
@@ -53,7 +54,7 @@ public:
     void stop();
 
     // 今すぐ鳴らす／止める（キー押下・LNを離したとき）。メインスレッドからだけ呼ぶ
-    void play_now(uint16_t sound) { push_command(static_cast<int32_t>(sound)); }
+    void play_now(uint16_t sound) { push_command(static_cast<int32_t>(sound)); }  // キー音（KEY 側）
     void stop_now(uint16_t sound) { push_command(-static_cast<int32_t>(sound) - 1); }
 
     // システム音（決定音・選曲BGMなど）。曲を止めていても鳴る。
@@ -68,6 +69,19 @@ public:
     }
     void play_system(int id, bool loop = false) { push_command(kSysBase + id + (loop ? kSysLoop : 0)); }
     void stop_system(int id) { push_command(kSysBase + id + kSysStop); }
+    // 音量（LR2: volumeflag / master / key / bgm。0〜100）。on が false なら音量の設定を使わない（全部 100）。
+    // キー音と KEY 側のシステム音は MASTER×KEY、BGM と BGM 側のシステム音は MASTER×BGM
+    void set_volume(bool on, int master, int key, int bgm) {
+        gain_key_.store(on ? master / 100.0f * key / 100.0f : 1.0f);
+        gain_bgm_.store(on ? master / 100.0f * bgm / 100.0f : 1.0f);
+    }
+    // システム音のうち KEY 側のもの（ビットが id）。それ以外は BGM 側
+    void set_system_key_side(uint32_t mask) { sys_key_mask_.store(mask); }
+    // 全体の音量を ms かけて target にする（LR2: リザルトを抜けるときのフェードアウト）。1 で元に戻す
+    void fade_all(float target, int ms) {
+        fade_target_.store(target);
+        fade_step_.store(ms > 0 ? 1.0f / (ms * 0.001f * static_cast<float>(rate_)) : 1.0f);
+    }
     // くり返し鳴らしているシステム音（選曲 BGM）の音量を、ms かけて target にする（LR2: SetFadePreview）
     void fade_system_loop(float target, int ms) {
         sys_loop_target_.store(target);
@@ -89,13 +103,14 @@ private:
     static void callback(ma_device* dev, void* out, const void* in, unsigned int frames);
     void render(float* out, uint32_t frames);
     void push_command(int32_t cmd);
-    void start_voice(uint16_t sound, int64_t delay_frames);
+    void start_voice(uint16_t sound, int64_t delay_frames, bool key);
     void update_clock(uint64_t wall_ns);
 
     struct Voice {
         const Sample* sample = nullptr;
         int64_t pos = 0;  // 再生位置（負なら、その分だけ遅れて始まる）
         uint16_t sound = 0;
+        bool key = false;  // KEY 側の音量を使う
     };
     struct SysVoice {
         const Sample* sample = nullptr;
@@ -111,6 +126,10 @@ private:
     std::atomic<int64_t> click_frame_{-1};
     std::atomic<float> sys_loop_target_{1.0f}, sys_loop_step_{1.0f};
     float sys_loop_gain_ = 1.0f;  // 音声スレッドだけが触る
+    std::atomic<float> gain_key_{1.0f}, gain_bgm_{1.0f};
+    std::atomic<uint32_t> sys_key_mask_{0};
+    std::atomic<float> fade_target_{1.0f}, fade_step_{1.0f};
+    float fade_gain_ = 1.0f;  // 音声スレッドだけが触る
     bool exclusive_ = false;
     uint32_t period_frames_ = 0, periods_ = 0;
     std::vector<Sample> sys_samples_;

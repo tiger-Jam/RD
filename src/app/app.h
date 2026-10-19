@@ -46,6 +46,8 @@ struct App {
     void save_config() const { cfg.save(cfg_path); }
     // フルスクリーンとウインドウを切り替え、次の起動もその状態で始める
     void toggle_fullscreen();
+    // 設定の音量をミキサーに渡す（スライダーで変えたときも呼ぶ）
+    void apply_volume() { mixer.set_volume(cfg.volume_on, cfg.vol_master, cfg.vol_key, cfg.vol_bgm); }
 };
 
 }  // namespace bmj

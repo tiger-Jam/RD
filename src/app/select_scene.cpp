@@ -1086,7 +1086,20 @@ void run_select(App& app) {
                 SDL_ConvertEventToRenderCoordinates(r, &e);
                 if (e.type == SDL_EVENT_MOUSE_MOTION) mouse_x = e.motion.x, mouse_y = e.motion.y, mouse_moved_ms = scene_ms();
             }
-            if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && dragging->src.op[2] == 7) {
+            auto slider_ratio = [&](const SkinObject& o) {
+                const SkinSrc& src = o.src;
+                SkinDraw d = eval_dst(o.dst, sctx.timers.lapse(o.dst.timer, scene_ms()));
+                float len = static_cast<float>(std::max(1, src.op[1]));
+                float r = src.op[0] == 0 ? (d.y + d.h / 2 - mouse_y) / len : src.op[0] == 1 ? (mouse_x - d.x - d.w / 2) / len
+                          : src.op[0] == 2 ? (mouse_y - d.y - d.h / 2) / len : (d.x + d.w / 2 - mouse_x) / len;
+                return std::clamp(r, 0.0f, 1.0f);
+            };
+            if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && dragging->src.op[2] >= 17 && dragging->src.op[2] <= 19) {
+                // 音量（17 = MASTER 18 = KEY 19 = BGM。0〜100）
+                int& v = dragging->src.op[2] == 17 ? app.cfg.vol_master : dragging->src.op[2] == 18 ? app.cfg.vol_key : app.cfg.vol_bgm;
+                v = static_cast<int>(std::lround(slider_ratio(*dragging) * 100));
+                app.apply_volume();
+            } else if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && dragging->src.op[2] == 7) {
                 // カスタマイズ項目のスクロール
                 const SkinSrc& src = dragging->src;
                 SkinDraw d = eval_dst(dragging->dst, sctx.timers.lapse(dragging->dst.timer, scene_ms()));
@@ -1115,7 +1128,8 @@ void run_select(App& app) {
                 int cur = static_cast<int>((v + 500) / 1000) % n;
                 if (cur != lv.cursor) lv.cursor = cur, sctx.timers.set(11, scene_ms()), app.mixer.play_system(kSysScratch);
             }
-            if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging && dragging->src.op[2] == 7) {
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging &&
+                (dragging->src.op[2] == 7 || (dragging->src.op[2] >= 17 && dragging->src.op[2] <= 19))) {
                 dragging = nullptr;
             } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging) {
                 // 離したら最寄りの曲にスナップする（100ms）
@@ -1322,7 +1336,9 @@ void run_select(App& app) {
                 // 曲リストのスライダーをつかむ
                 if (!clicked)
                     for (const SkinObject& o : sk->sliders) {
-                        if ((o.src.op[2] != 1 && o.src.op[2] != 7) || o.src.op[3] == 1 || o.dst.empty() || !sctx.timers.on(o.dst.timer)) continue;
+                        int sty = o.src.op[2];
+                        if ((sty != 1 && sty != 7 && (sty < 17 || sty > 19)) || o.src.op[3] == 1 || o.dst.empty() || !sctx.timers.on(o.dst.timer))
+                            continue;
                         SkinDraw d = eval_dst(o.dst, sctx.timers.lapse(o.dst.timer, t));
                         if (!d.visible) continue;
                         float len = static_cast<float>(o.src.op[1]);
@@ -1544,7 +1560,7 @@ void run_select(App& app) {
                     for (const BgmEvent& b : p->chart.bgm) schedule.push_back({frame_of(b.time_us), b.sound});
                     for (const Note& n : p->chart.notes)
                         if ((n.kind == NoteKind::Normal || n.kind == NoteKind::Long) && n.sound)
-                            schedule.push_back({frame_of(n.time_us), n.sound});
+                            schedule.push_back({frame_of(n.time_us), n.sound, true});
                     preview = p;
                     app.mixer.set_song(&preview->bank.samples(), std::move(schedule));
                     app.mixer.start(0);

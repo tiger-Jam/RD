@@ -88,6 +88,7 @@ bool App::init(const char* argv0) {
         std::fprintf(stderr, "音声デバイスを開けない\n");
         return false;
     }
+    apply_volume();
     load_sound_set();
     frame_hooks_install([this] { mixer.play_system(kSysScreenshot); });
     if (!db.open(song_db_path())) std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
@@ -107,6 +108,12 @@ void App::load_sound_set() {
     std::string ss = cfg.sound_set.empty() ? resolve_lr2_path(lr2_root, "LR2files/Sound/lr2.lr2ss", false) : cfg.sound_set;
     if (lr2_root.empty() || ss.empty()) return;
     std::vector<Sample> sounds = load_system_sounds(lr2_root, ss, mixer.sample_rate());
+    // KEY 側のシステム音（パネル・フォルダ・オプション・難易度・スクリーンショット・地雷・皿）。それ以外は BGM 側（LR2 と同じ）
+    uint32_t key_side = 0;
+    for (int id : {kSysFolderOpen, kSysFolderClose, kSysPanelOpen, kSysPanelClose, kSysOptionChange, kSysDifficulty, kSysScreenshot,
+                   kSysMine, kSysScratch})
+        key_side |= 1u << id;
+    mixer.set_system_key_side(key_side);
     int n = 0;
     for (const Sample& smp : sounds) n += !smp.pcm.empty();
     std::printf("システム音: %d / %zu（%s）\n", n, sounds.size(), ss.c_str());
