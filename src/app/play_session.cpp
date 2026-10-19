@@ -182,6 +182,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         cfg.effect = saved_cfg.effect, cfg.assist = saved_cfg.assist, cfg.gas = saved_cfg.gas, cfg.hi_speed = saved_cfg.hi_speed;
         cfg.lane_cover = saved_cfg.lane_cover, cfg.lane_cover_v = saved_cfg.lane_cover_v, cfg.judge_timing = saved_cfg.judge_timing;
     }};
+    // 開発用：BMJ_INPUT_REPLAY のファイルの入力を、手で押したものとして流す（記録・ゴースト・リプレイの保存はふだんどおり）
+    bool feed_input = false;
+    if (const char* f = std::getenv("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) feed_input = load_replay(f, replay);
     if (opt.replay) {
         if (!load_replay(replay_path(sha256), replay) || replay.sha256 != sha256) {
             std::fprintf(stderr, "リプレイが無い: %s\n", chart_path.c_str());
@@ -939,6 +942,16 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 button_in.clear();
                 input.collect(now_ns, lane_in, button_in);
                 play_buttons(now_ms);
+                if (feed_input) {
+                    // 開発用：ファイルの入力を手で押したものとして渡す
+                    for (; replay_pos < replay.events.size() && replay.events[replay_pos].time_us <= song_us - 5000; ++replay_pos) {
+                        const ReplayEvent& ev = replay.events[replay_pos];
+                        LaneInput li;
+                        li.lane = ev.lane, li.down = ev.down;
+                        li.time_ns = now_ns - static_cast<uint64_t>(std::max<int64_t>(0, song_us - ev.time_us)) * 1000;
+                        lane_in.push_back(li);
+                    }
+                }
                 if (opt.replay) {
                     // リプレイ：記録した入力を、曲の時刻が来たものから判定に渡す（手元の鍵盤は判定に使わない）
                     for (; replay_pos < replay.events.size() && replay.events[replay_pos].time_us <= song_us - 5000; ++replay_pos) {

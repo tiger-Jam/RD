@@ -2210,6 +2210,12 @@ void run_select(App& app) {
                 else if (k == 'e') decide();
                 else if (k == 'b') back();
                 else if (k == 'k') run_key_wizard(r, text, app.keycfg, keyconfig_path());
+                else if (k == 'K' && !to_keyconfig) {
+                    // ボタン 13 と同じ（フェードアウトしてからスキンのキーコンフィグ）
+                    app.mixer.play_system(kSysOptionChange);
+                    sctx.timers.set(2, scene_ms());
+                    to_keyconfig = true;
+                }
                 else if (k == 'p') force_panel = true;
                 else if (k == 's') change_difficulty();
                 else if (k == 'z') run_skin_select(app, catalog), set_select_view();
