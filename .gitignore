@@ -7,3 +7,4 @@ testdata/generated/
 *.zip
 testdata/songs/
 win_shot.bmp
+.claude/worktrees/
