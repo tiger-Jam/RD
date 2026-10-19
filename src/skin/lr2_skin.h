@@ -166,9 +166,10 @@ std::string resolve_lr2_path(const std::string& lr2_root, const std::string& pat
 bool read_skin_header(const std::string& lr2_root, const std::string& skin_path, SkinHeader& out);
 
 // スキンを読み込む。options は読み込み時点のゲームのオプション（GetOptionFlag_dst 相当）。
-// header.customs の selected をカスタマイズとして反映する
+// header.customs の selected をカスタマイズとして反映する。
+// previous は前の画面で読んだスキン（#IMAGE,CONTINUE の番号は、LR2 と同じくその番号の画像をそのまま使い続ける）
 bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, const SkinHeader& header,
-                   const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error);
+                   const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error, const Lr2Skin* previous = nullptr);
 
 // 画像を1枚読む。use_trans なら、アルファの無い画像の trans 色を透明にする（DxLibと同じ）
 bool load_skin_image(const std::string& path, SkinImage& img, const uint8_t trans[3], bool use_trans);

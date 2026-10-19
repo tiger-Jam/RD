@@ -27,6 +27,8 @@ struct App {
     std::string cfg_path;
     std::string lr2_root;  // 実際に使うLR2のフォルダ（見つからなければ空）
     std::unique_ptr<Lr2Skin> play_skin, result_skin, select_skin, decide_skin, courseresult_skin;
+    // 最後に読んだスキン（次のスキンの #IMAGE,CONTINUE が画像を引き継ぐ。上のどれかを指す）
+    const Lr2Skin* last_skin = nullptr;
     std::unique_ptr<SkinRenderer> skin_renderer, result_renderer, select_renderer, decide_renderer;
     // 曲フォルダの監視（起動の画面の前から見て、そのあいだの変化も取りこぼさない）
     FolderWatcher watcher;

@@ -230,6 +230,9 @@ namespace {
 // .lr2skin を読む。configured が空なら LR2 の既定のスキン（default_rel）を使う
 std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, const char* default_rel,
                                    const std::array<bool, 1000>& options, SkinRenderer& renderer) {
+    // 引き継ぎ元は前に読んだスキン。読めなかったときに、置き換えで消えるスキンを指したまま残らないよう、先に外す
+    const Lr2Skin* previous = app.last_skin;
+    app.last_skin = nullptr;
     std::string skin_path = configured.empty() ? resolve_lr2_path(app.lr2_root, default_rel, false) : configured;
     SkinHeader header;
     if (app.lr2_root.empty() || skin_path.empty() || !read_skin_header(app.lr2_root, skin_path, header)) return nullptr;
@@ -245,7 +248,7 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
     auto skin = std::make_unique<Lr2Skin>();
     std::string err;
     const uint64_t t0 = SDL_GetTicksNS();
-    if (!load_lr2_skin(app.lr2_root, skin_path, header, options, *skin, err)) {
+    if (!load_lr2_skin(app.lr2_root, skin_path, header, options, *skin, err, previous)) {
         std::printf("スキンを読めない: %s\n", err.c_str());
         return nullptr;
     }
@@ -255,6 +258,7 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
         if (w.find(".dummy") == std::string::npos) std::printf("  スキン警告: %s\n", w.c_str());
     const uint64_t t1 = SDL_GetTicksNS();
     renderer.upload(*skin);
+    app.last_skin = skin.get();
     if (dev_env("BMJ_TIMING"))
         std::printf("  スキンの読み込み %.0f ms、GPU に送る %.0f ms\n", (t1 - t0) / 1e6, (SDL_GetTicksNS() - t1) / 1e6);
     return skin;
@@ -269,6 +273,7 @@ void App::load_play_skin(const std::array<bool, 1000>& options) {
 
 void App::load_select_skin(const std::array<bool, 1000>& options) {
     if (cfg.select_skin == "none") {
+        if (last_skin == select_skin.get()) last_skin = nullptr;
         select_skin.reset();
         return;
     }
@@ -277,6 +282,7 @@ void App::load_select_skin(const std::array<bool, 1000>& options) {
 
 void App::load_decide_skin(const std::array<bool, 1000>& options) {
     if (cfg.decide_skin == "none") {
+        if (last_skin == decide_skin.get()) last_skin = nullptr;
         decide_skin.reset();
         return;
     }
@@ -290,12 +296,14 @@ std::unique_ptr<Lr2Skin> App::load_scene_skin(const std::string& configured, con
 }
 
 void App::load_result_skin(const std::array<bool, 1000>& options) {
+    if (last_skin == courseresult_skin.get()) last_skin = nullptr;
     courseresult_skin.reset();
     result_skin = load_skin(*this, cfg.result_skin, "LR2files/Theme/LR2/Result/result.lr2skin", options, *result_renderer);
 }
 
 // コースリザルトは、リザルトと同じ描画器を使う（同時には出さないので）
 void App::load_courseresult_skin(const std::array<bool, 1000>& options) {
+    if (last_skin == result_skin.get()) last_skin = nullptr;
     result_skin.reset();
     courseresult_skin = load_skin(*this, cfg.courseresult_skin, "LR2files/Theme/LR2/CourseResult/courseresult.lr2skin", options,
                                   *result_renderer);

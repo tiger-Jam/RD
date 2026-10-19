@@ -306,6 +306,7 @@ struct Loader {
     std::vector<std::pair<std::string, std::string>> custom_files;
     int image_count = 0;
     std::vector<DecodeJob> jobs;
+    const Lr2Skin* previous = nullptr;  // 前の画面のスキン（#IMAGE,CONTINUE で画像を引き継ぐ）
 
     // 画像を読む予約。need_size なら大きさはすぐ決める（SRC の -1 に使う #IMAGE）。読めなければ false。
     // 画像フォントの絵は大きさを使わないので、ファイルにも触らずに予約だけする（.dxa の中だと 1 枚ずつ取り出すのが遅い）
@@ -393,7 +394,11 @@ struct Loader {
             if (image_count >= kMaxImages) return;
             std::string p = c.s(1);
             if (p == "CONTINUE") {
-                image_count++;
+                // LR2 は画面が変わっても画像を捨てずに持っていて、CONTINUE の番号は前のスキンの画像をそのまま使う
+                // （WMIX のリザルトは、プレイスキンのゲージの色の画像をグラフに使う）
+                const int index = image_count++;
+                if (previous && index < static_cast<int>(previous->images.size()) && index < static_cast<int>(sk.images.size()))
+                    sk.images[index] = previous->images[index];
                 return;
             }
             const int index = image_count++;
@@ -812,7 +817,7 @@ bool read_skin_header(const std::string& lr2_root, const std::string& skin_path,
 }
 
 bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, const SkinHeader& header,
-                   const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error) {
+                   const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error, const Lr2Skin* previous) {
     out = Lr2Skin{};
     out.header = header;
     out.width = header.width;
@@ -842,6 +847,7 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
         }
     }
     Loader ld{lr2_root, out, header, {0, 255, 0}, 0, {}, 0};
+    ld.previous = previous;
     auto tp0 = std::chrono::steady_clock::now();
     if (ld.read(skin_path, 0) == 0) {
         error = "スキンを読めない: " + skin_path;
