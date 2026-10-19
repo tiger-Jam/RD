@@ -17,6 +17,7 @@
 #include "game/judge.h"
 #include "render/text_cache.h"
 #include "skin/lr2_skin.h"
+#include "skin/skin_adjust.h"
 
 namespace bmj {
 
@@ -83,6 +84,7 @@ struct PlaySkinState {
     double base_speed = 100;     // 基本スクロールスピード（LR2: basespeed。%）
     bool result_flip = false;    // リザルトのフリップ（#FLIPRESULT）：自分のゲージの推移を 2P 側のグラフに描く
     float lift_px = 0;           // LIFT：判定ラインを持ち上げる量（スキンの座標）。ノーツと判定の表示をこの分だけ上げる
+    SkinAdjust adjust;           // スキンの位置の調整（演奏中に数字キー＋矢印で変えるもの）
     int effect = 0;              // HIDDEN / SUDDEN（LR2: m_HIDSUD。0=OFF 1=HIDDEN 2=SUDDEN 3=HID+SUD）
     bool autoplay = false;
     int judge_draw = 0;          // 直近の判定（0=空POOR..5=PGREAT）
@@ -146,9 +148,11 @@ private:
     void add(const SkinSrc& src, SkinDraw d, double src_time);
     void add_object(const SkinObject& o, const PlaySkinState& st, float dx, float dy);
     void add_numbers(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, int number, float x, float y);
-    void add_play_area(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, float sx, float sy, int alpha);
+    // size_x / size_y はノーツの大きさの調整（幅と高さに足し、中心は動かさない）
+    void add_play_area(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, float sx, float sy, int alpha,
+                       float size_x = 0, float size_y = 0);
     void add_ln(const SkinSrc& s, const SkinSrc& e, const SkinSrc& b, const SkinDst& dst, const PlaySkinState& st,
-                float shift_y, float long_y, int active);
+                float shift_y, float long_y, int active, float shift_x = 0, float size_x = 0, float size_y = 0);
     void add_notes(const Lr2Skin& skin, const PlaySkinState& st);
     void add_gauge(const SkinObject& o, const PlaySkinState& st);
     void add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st);
@@ -161,6 +165,7 @@ private:
     void add_readme(const Lr2Skin& skin, const PlaySkinState& st);
     void add_text(const SkinText& t, const PlaySkinState& st, const std::string& str, float dx, float dy);
     void flush(const Lr2Skin& skin);
+    SkinAdjust adjust_;  // いま描いている画面のスキンの位置の調整（flush で全体の位置と拡大率に使う）
     void draw_image(Item& it);
     void draw_text(const Lr2Skin& skin, Item& it);
     double src_time(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st) const;

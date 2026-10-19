@@ -175,3 +175,28 @@ TEST(lr2_skin_customize) {
     CHECK(sel[2].file.empty() && sel[2].index == 0);  // 範囲外の値は既定のまま
     fs::remove_all(root);
 }
+
+// LR2 のスキンの位置の調整（SkinCustomize の shift・size など）も引き継ぐ
+TEST(lr2_skin_adjust) {
+    namespace fs = std::filesystem;
+    fs::path root = fs::temp_directory_path() / "bmj_test_skinadjust";
+    fs::remove_all(root);
+    fs::create_directories(root / "LR2files" / "Theme" / "P");
+    fs::create_directories(root / "LR2files" / "SkinCustomize");
+    std::ofstream(root / "LR2files" / "Theme" / "P" / "play.lr2skin") << "#INFORMATION,0,P,me\n#ENDOFHEADER\n";
+    std::ofstream(root / "LR2files" / "SkinCustomize" / (md5_hex(std::string("LR2files\\Theme\\P\\play.lr2skin")) + ".xml"))
+        << "<?xml version=\"1.0\" encoding=\"shift_jis\"?>\n<skincustomize>\n<shift>\n<x>0</x>\n<y>0</y>\n</shift>\n"
+           "<judge>\n<x>10</x>\n<y>-20</y>\n</judge>\n<rate>\n<x>100</x>\n<y>100</y>\n</rate>\n<size>\n<x>0</x>\n<y>10</y>\n</size>\n"
+           "<dark>\n<type>0</type>\n</dark>\n<note_1p>\n<x>0</x>\n<y>0</y>\n</note_1p>\n</skincustomize>\n";
+    AppConfig cfg;
+    CHECK(import_lr2_skin_custom(root.string(), root.string(), cfg) == 1);
+    CHECK(cfg.skin_adjust.size() == 1);
+    if (!cfg.skin_adjust.empty()) {
+        const SkinAdjust& a = cfg.skin_adjust.begin()->second;
+        CHECK_EQ(a.size_y, 10);
+        CHECK_EQ(a.judge_x, 10);
+        CHECK_EQ(a.judge_y, -20);
+        CHECK_EQ(a.rate_x, 100);
+    }
+    fs::remove_all(root);
+}

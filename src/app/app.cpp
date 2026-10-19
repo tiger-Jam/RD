@@ -199,6 +199,7 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
         std::printf("スキンを読めない: %s\n", err.c_str());
         return nullptr;
     }
+    skin->path = skin_path;
     if (!header.has_resolution) guess_resolution(*skin);
     for (const auto& w : skin->warnings)
         if (w.find(".dummy") == std::string::npos) std::printf("  スキン警告: %s\n", w.c_str());

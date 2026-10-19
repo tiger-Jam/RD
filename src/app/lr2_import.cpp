@@ -36,7 +36,8 @@ int import_lr2_skin_custom(const std::string& lr2_dir, const std::string& skin_r
     int count = 0;
     for (const auto& [type, list] : cat.entries())
         for (const SkinEntry& e : list) {
-            if (e.header.customs.empty()) continue;
+            const bool play_skin = type >= 0 && type <= 4;  // プレイスキン（位置の調整も引き継ぐ）
+            if (e.header.customs.empty() && !play_skin) continue;
             // LR2 はスキンを「LR2files\\Theme\\…」の形（CP932）で覚え、その MD5 をファイル名にする
             std::u8string rel = fs::path(e.path).lexically_relative(root).u8string();
             std::string key(rel.begin(), rel.end());
@@ -44,6 +45,27 @@ int import_lr2_skin_custom(const std::string& lr2_dir, const std::string& skin_r
             std::string xml = read_all(dir / (md5_hex(utf8_to_cp932(key)) + ".xml"));
             if (xml.empty()) continue;
             xml = to_utf8_auto(xml);
+            if (play_skin) {
+                // 位置の調整（LR2: SkinCustomize の shift・rate・judge・size・dark・note_1p）
+                auto num = [&](const char* group, const char* item, int def) {
+                    std::smatch m;
+                    std::regex re(std::string("<") + group + ">[\\s\\S]*?<" + item + ">\\s*(-?\\d+)\\s*</" + item + ">[\\s\\S]*?</" + group + ">");
+                    return std::regex_search(xml, m, re) ? std::stoi(m[1].str()) : def;
+                };
+                SkinAdjust a;
+                a.shift_x = num("shift", "x", 0), a.shift_y = num("shift", "y", 0);
+                a.rate_x = num("rate", "x", 100), a.rate_y = num("rate", "y", 100);
+                a.judge_x = num("judge", "x", 0), a.judge_y = num("judge", "y", 0);
+                a.size_x = num("size", "x", 0), a.size_y = num("size", "y", 0);
+                a.dark = std::clamp(num("dark", "type", 0), 0, 2);
+                a.note_x = num("note_1p", "x", 0), a.note_y = num("note_1p", "y", 0);
+                if (!a.is_default()) cfg.skin_adjust[e.path] = a;
+                else cfg.skin_adjust.erase(e.path);
+            }
+            if (e.header.customs.empty()) {
+                count++;
+                continue;
+            }
             std::map<int, long long> values;
             std::map<int, std::string> files;
             for (auto it = std::sregex_iterator(xml.begin(), xml.end(), config_re); it != std::sregex_iterator(); ++it)

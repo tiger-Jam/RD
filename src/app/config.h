@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "skin/skin_adjust.h"
+
 namespace bmj {
 
 // スキンのカスタマイズの 1 項目の選択（LR2: LR2files/SkinCustomize の xml）。
@@ -72,6 +74,7 @@ struct AppConfig {
     int select_difficulty = 0, select_mode = 0, select_sort = 0;
     bool no_right_click_exit = false;
     bool folder_lamp = false;
+    std::map<std::string, SkinAdjust> skin_adjust;  // プレイスキンのパス → 位置の調整（LR2: SkinCustomize の shift など）
     int title_flash = 24;  // この時間（時間）より後に見つけた譜面を新曲にする（LR2: titleflash）  // フォルダのバーにランプを付ける（LR2: folderlamp）  // 演奏中の右クリックで曲を終えない（LR2: disableleftclickexit）
     // fps：0 はモニタのリフレッシュレート、-1 は上限なし。垂直同期は既定で使わない
     // （OpenLR2と同じく、描画を待つ間も入力と判定を回すため）

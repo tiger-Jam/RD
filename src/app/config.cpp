@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 
 #include "util/text.h"
 
@@ -136,6 +137,16 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "audio_buffer") audio_buffer = iv;
         else if (key.rfind("skin_custom ", 0) == 0)
             skin_custom[std::string(trim(std::string_view(key).substr(12)))] = parse_skin_custom(val);
+        else if (key.rfind("skin_adjust ", 0) == 0) {
+            // skin_adjust <スキンのパス> = 位置x,位置y,拡大x,拡大y,判定x,判定y,大きさx,大きさy,制限,ノーツx,ノーツy
+            SkinAdjust a;
+            int* f[] = {&a.shift_x, &a.shift_y, &a.rate_x, &a.rate_y, &a.judge_x, &a.judge_y, &a.size_x, &a.size_y, &a.dark,
+                        &a.note_x, &a.note_y};
+            std::istringstream in(val);
+            std::string item;
+            for (int i = 0; i < 11 && std::getline(in, item, ','); ++i) *f[i] = std::atoi(item.c_str());
+            skin_adjust[std::string(trim(std::string_view(key).substr(12)))] = a;
+        }
     }
     return true;
 }
@@ -213,6 +224,11 @@ bool AppConfig::save(const std::string& path) const {
     f << "audio_exclusive = " << (audio_exclusive ? 1 : 0) << "  # 1 = Windows の WASAPI 排他モード（音の遅れが小さい）\n";
     f << "audio_buffer = " << audio_buffer << "  # 1 回分のフレーム数。0 = 自動\n";
     for (const auto& [skin, sel] : skin_custom) f << "skin_custom " << skin << " = " << format_skin_custom(sel) << "\n";
+    for (const auto& [skin, a] : skin_adjust)
+        if (!a.is_default())
+            f << "skin_adjust " << skin << " = " << a.shift_x << "," << a.shift_y << "," << a.rate_x << "," << a.rate_y << ","
+              << a.judge_x << "," << a.judge_y << "," << a.size_x << "," << a.size_y << "," << a.dark << "," << a.note_x << ","
+              << a.note_y << "\n";
     return static_cast<bool>(f);
 }
 

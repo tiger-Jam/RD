@@ -106,6 +106,7 @@ struct SkinHeader {
 
 struct Lr2Skin {
     SkinHeader header;
+    std::string path;  // 読んだ .lr2skin（スキンごとの設定の鍵）
     int width = 640, height = 480;
 
     std::vector<SkinImage> images;  // #IMAGE の番号（0..99）と特殊番号（100以降）

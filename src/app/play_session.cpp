@@ -29,6 +29,7 @@
 #include "render/frame_hooks.h"
 #include "render/play_scene.h"
 #include "render/skin_play.h"
+#include "render/text_cache.h"
 #include "util/hash.h"
 #include "util/path.h"
 #include "video/video_decoder.h"
@@ -346,6 +347,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     double fps = cfg.fps == 0 ? app.refresh_hz : cfg.fps;
     uint64_t frame_ns = (cfg.vsync || cfg.fps < 0) ? 0 : static_cast<uint64_t>(1e9 / std::max(1.0, fps));
 
+    TextCache overlay_text(app.renderer);  // スキンの位置の調整の表示
     bool quit = false, retry = true, retried = false;
     PlayExit exit = PlayExit::Back;
     for (; retry && !quit; retried = true) {
@@ -593,6 +595,29 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         // ハイスピード固定のコースでは、ハイスピもカバーも変えられない
         const bool speed_locked = course && course->course->no_speed;
         // 演奏中の START / SELECT の操作（LR2: gameloop:163-327, 384-400）
+        // START・SELECT の片方か、マウスの左ボタンを 250ms 以内に 2 回押したら、カバーを出し入れする（LR2: gameloop:385）
+        auto cover_tap = [&](double now_ms) {
+            if (cover_dbl_ms == 0 || now_ms - cover_dbl_ms > 250.0) {
+                cover_dbl_ms = now_ms;
+                return;
+            }
+            cover_dbl_ms = 0;
+            if (floating && cfg.gear_mode == 1) {
+                cfg.fhs_green = start_green;
+                keep_green(start_green);
+            } else {
+                cover_display = !cover_display;
+                if (floating) keep_green(cfg.fhs_green);
+            }
+        };
+        // スキンの位置の調整で押している数字キー（1〜6。押していなければ 0）
+        auto adjust_key = [] {
+            const bool* ks = SDL_GetKeyboardState(nullptr);
+            const SDL_Scancode keys[] = {SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4, SDL_SCANCODE_5, SDL_SCANCODE_6};
+            for (int i = 0; i < 6; ++i)
+                if (ks[keys[i]]) return i + 1;
+            return 0;
+        };
         auto play_buttons = [&](double now_ms) {
             bool held_start = input.button_held(kStart), held_select = input.button_held(kSelect);
             ctx.cover_adjusting = held_start || held_select;
@@ -606,18 +631,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     // カバーは動かさず、曲の始まりの緑数字に戻す
                     bool other = b.button == kStart ? held_select : held_start;
                     if (other) continue;
-                    if (cover_dbl_ms == 0 || now_ms - cover_dbl_ms > 250.0) {
-                        cover_dbl_ms = now_ms;
-                    } else {
-                        cover_dbl_ms = 0;
-                        if (floating && cfg.gear_mode == 1) {
-                            cfg.fhs_green = start_green;
-                            keep_green(start_green);
-                        } else {
-                            cover_display = !cover_display;
-                            if (floating) keep_green(cfg.fhs_green);
-                        }
-                    }
+                    cover_tap(now_ms);
                     continue;
                 }
                 bool start_or_select = (held_start && b.button != kStart) || (held_select && b.button != kSelect);
@@ -699,11 +713,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                             break;
                         }
                     }
-                } else if (e.type == SDL_EVENT_MOUSE_MOTION && dragging) {
-                    drag_to(e.motion.x, e.motion.y);
-                } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) {
-                    dragging = nullptr;
                 }
+                // マウスの左ボタンの 2 度押しでもカバーを出し入れする（スライダーをつかんだときは除く）
+                if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && phase == Phase::Play && !speed_locked &&
+                    !dragging)
+                    cover_tap((SDL_GetTicksNS() - scene_start) / 1e6);
+                if (e.type == SDL_EVENT_MOUSE_MOTION && dragging) drag_to(e.motion.x, e.motion.y);
+                else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) dragging = nullptr;
                 // 演奏中の右クリックで曲を終える（LR2 と同じ。設定で止められる）
                 if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT && phase == Phase::Play &&
                     !cfg.no_right_click_exit)
@@ -730,6 +746,21 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         retry = true, done = true;
                     } else if (e.key.key == SDLK_F4) {
                         app.toggle_fullscreen();
+                    } else if ((e.key.key == SDLK_UP || e.key.key == SDLK_DOWN || e.key.key == SDLK_LEFT || e.key.key == SDLK_RIGHT) &&
+                               adjust_key() > 0 && skin) {
+                        // スキンの位置の調整（LR2: gameloop:426）。数字キーを押している間は、矢印でその項目を変えてスキンごとに残す
+                        SkinAdjust& a = cfg.skin_adjust[skin->path];
+                        int dx = e.key.key == SDLK_RIGHT ? 1 : e.key.key == SDLK_LEFT ? -1 : 0;
+                        int dy = e.key.key == SDLK_DOWN ? 1 : e.key.key == SDLK_UP ? -1 : 0;
+                        switch (adjust_key()) {
+                        case 1: a.shift_x += dx * 10, a.shift_y += dy * 10; break;
+                        case 2: a.rate_x += dx * 5, a.rate_y += dy * 5; break;
+                        case 3: a.judge_x += dx * 10, a.judge_y += dy * 10; break;
+                        case 4: a.size_x += dx, a.size_y -= dy; break;
+                        case 5: a.dark = ((a.dark + (dy != 0 ? -dy : -dx)) % 3 + 3) % 3; break;
+                        case 6: a.note_x += dx * 10, a.note_y += dy * 10; break;
+                        default: break;
+                        }
                     } else if ((e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) && (e.key.mod & SDL_KMOD_SHIFT)) {
                         // 判定タイミング（BMjoy の拡張。LR2 はオプション画面でしか変えられない）
                         int d = e.key.key == SDLK_RIGHT ? 1 : -1;
@@ -1145,6 +1176,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.hi_speed = hs;
                 st.speed_multiplier = speed_multiplier;
                 st.lift_px = cfg.lift ? static_cast<float>(lane_px * cfg.lift_v / 100.0) : 0.0f;
+                if (auto it = cfg.skin_adjust.find(skin->path); it != cfg.skin_adjust.end()) st.adjust = it->second;
                 st.base_speed = cfg.base_speed;
                 st.effect = cfg.effect;
                 st.autoplay = opt.autoplay;
@@ -1163,6 +1195,22 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
                 app.skin_renderer->draw_play(*skin, st);
+                if (int k = adjust_key()) {
+                    // 調整している項目と値（LR2: Main.cpp:2176 の表示）
+                    const SkinAdjust& a = st.adjust;
+                    static const char* names[] = {"", "スキン位置の変更", "スキン拡大率の変更", "ジャッジ表示位置の変更", "ノートサイズの変更",
+                                                  "スキン描画制限", "ノート位置の変更"};
+                    static const char* darks[] = {"OFF", "DARK 1", "DARK 2"};
+                    char v[64];
+                    if (k == 5) std::snprintf(v, sizeof(v), "%s", darks[std::clamp(a.dark, 0, 2)]);
+                    else {
+                        int x = k == 1 ? a.shift_x : k == 2 ? a.rate_x : k == 3 ? a.judge_x : k == 4 ? a.size_x : a.note_x;
+                        int y = k == 1 ? a.shift_y : k == 2 ? a.rate_y : k == 3 ? a.judge_y : k == 4 ? a.size_y : a.note_y;
+                        std::snprintf(v, sizeof(v), "x:%d  y:%d", x, y);
+                    }
+                    overlay_text.draw(4, 2, 14, SDL_Color{255, 255, 255, 255}, std::string(names[k]) + "（カーソルキーで調節）");
+                    overlay_text.draw(4, 20, 14, SDL_Color{255, 255, 255, 255}, v);
+                }
             } else if (!started) {
                 draw_loading(renderer, chart, load_done.load(), total_sounds);
             } else {
