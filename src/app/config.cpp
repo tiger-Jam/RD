@@ -72,6 +72,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "courseresult_skin") courseresult_skin = val;
         else if (key == "select_skin") select_skin = val;
         else if (key == "decide_skin") decide_skin = val;
+        else if (key == "keyconfig_skin") keyconfig_skin = val;
         else if (key == "sound_set") sound_set = val;
         else if (key == "skin_res") skin_res = val;
         else if (key == "song_dir") song_dirs.push_back(val);
@@ -150,6 +151,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "courseresult_skin = " << courseresult_skin << "\n";
     f << "select_skin = " << select_skin << "\n";
     f << "decide_skin = " << decide_skin << "\n";
+    f << "keyconfig_skin = " << keyconfig_skin << "\n";
     f << "sound_set = " << sound_set << "\n";
     f << "skin_res = " << skin_res << "\n";
     for (const std::string& d : song_dirs) f << "song_dir = " << d << "\n";

@@ -229,6 +229,12 @@ void App::load_decide_skin(const std::array<bool, 1000>& options) {
     decide_skin = load_skin(*this, cfg.decide_skin, "LR2files/Theme/LR2/Decide/decide.lr2skin", options, *decide_renderer);
 }
 
+std::unique_ptr<Lr2Skin> App::load_scene_skin(const std::string& configured, const char* default_rel,
+                                              const std::array<bool, 1000>& options, SkinRenderer& renderer) {
+    if (configured == "none") return nullptr;
+    return load_skin(*this, configured, default_rel, options, renderer);
+}
+
 void App::load_result_skin(const std::array<bool, 1000>& options) {
     courseresult_skin.reset();
     result_skin = load_skin(*this, cfg.result_skin, "LR2files/Theme/LR2/Result/result.lr2skin", options, *result_renderer);

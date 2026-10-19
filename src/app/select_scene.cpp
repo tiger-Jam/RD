@@ -1261,7 +1261,8 @@ void run_select(App& app) {
                     };
                     if (ty >= 1 && ty <= 8) set_panel(panel == ty ? -1 : ty);
                     else if (ty == 13) {
-                        if (run_key_wizard(r, text, app.keycfg, keyconfig_path())) app.mixer.play_system(kSysDecide);
+                        // キーコンフィグ（スキンがあれば選曲をフェードアウトしてからスキンの画面、無ければウィザード）
+                        if (!open_keyconfig_from_select(app, text, sctx, scene_ms)) quit = true;
                         input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
                         set_select_view();
                     } else if (ty == 15 || ty == 16) {

@@ -135,23 +135,26 @@
 
 ### 2.2 キーコンフィグ
 
+BMjoy 側の略記：`ks` = src/app/keyconfig_skin_scene.cpp、`ke` = src/app/keyconfig_editor.cpp、`kc` = src/input/keyconfig.cpp。
+
 | 項目 | LR2 | BMjoy | 判定 | 出典 |
 |---|---|---|---|---|
-| 入り方 | 選曲のボタン 13。選曲がフェードアウトしてから移る（タイマー2・決定音） | ボタン 13 と F1 で、フェードせずにすぐウィザードを開く。開発用に `--keyconfig` の一覧画面もある | 違う | O LR2_skinobject.cpp:3056-3061, Scene02_Songselect.cpp:2074-2094 / B select_scene.cpp:1120-1123, main.cpp:452-453 |
-| 画面 | スキン（型 8, keyconfig.csv）で描く | 専用の固定画面（スキンを使わない） | 違う | O Main.cpp:1373-1380 / H Theme/LR2/KeyConfig/keyconfig.csv / B src/render/keyconfig_scene.cpp:307-486 |
-| スキンの部品 | 文字 40-55（各スロットのキー名）、OP 400-402（鍵盤モード）、ボタン 101-139・140-143・150-157 | どれも無い | BMjoyに無い | O Scene06_Keyconfig.cpp:6-18, LR2_skinobject.cpp:1236-1244, 3591-3672 |
+| 入り方 | 選曲のボタン 13。タイマー2 を立て、システム音を止めてオプションの音を鳴らし、選曲の #FADEOUT の後に移る（決定音ではない） | 同じ。ただしフェードアウトの間は曲リストを描かない（選曲画面の描画の外で描いているため）。スキンが無ければこれまでのウィザードをすぐ開く | 直した（曲リストだけ違う） | O LR2_skinobject.cpp:3056-3061, Scene02_Songselect.cpp:2071-2094 / B ks `open_keyconfig_from_select`, select_scene.cpp のボタン 13 |
+| 画面 | スキン（型 8, keyconfig.csv）で描く | 同じ（`keyconfig_skin`。空なら LR2 の既定、"none" ならウィザード）。スキンセレクトの型 8 でも選べる | 直した | O Main.cpp:1373-1380 / H Theme/LR2/KeyConfig/keyconfig.csv / B ks, config.h, skin_catalog.cpp |
+| 入ったときの状態 | 7 鍵モード、1P の 1 鍵を選び、スロットは選んでいない | 同じ | 直した | O Main.cpp:1375-1378 / B keyconfig_editor.h |
+| スキンの部品 | 文字 40-55（各スロットのキー名。空きは "-"）、OP 400-402（鍵盤モード）、ボタン 101-139（項目を直接選ぶ。番号の下 2 桁が項目：1-7 鍵、10/11 皿、12 START、13 SELECT、21-27・30-33 は 2P）、140-142（各モードの項目を前後に送る）、143（鍵盤モード）、150-157（スロット） | 文字 40-55、OP 400（常に真）/401/402（常に偽）、ボタン 101-113 の 1P の分・140・150-157。2P の項目・141・142・143 は押しても何もしない | 直した（2P・9 ボタン・5 鍵は意図した違い） | O Scene06_Keyconfig.cpp:6-18, 684-733, LR2_skinobject.cpp:1236-1244, 3591-3672 / B ke |
 | 鍵盤モード | 7/14、9 ボタン、5/10 の 3 つをボタン 143 で切り替え。ファイルも別 | 7 鍵＋皿だけ | 意図した違い（7K+S 専用） | O LR2_skinobject.cpp:3637-3660 / H help/5.html |
-| 2P 側 | 7 鍵モードに 2P のキーも含む（22 項目） | 1P だけ | 意図した違い[?] | O Scene06_Keyconfig.cpp:684-733 |
-| 割り当てる項目 | 鍵盤・皿の上下・START・SELECT | ウィザードは 1〜7 鍵と皿の右・左回しだけ。START/SELECT は一覧画面でしか設定できない | 違う | B keyconfig_scene.cpp:309-354（一覧は :32-33） |
-| 操作の流れ | キーを選ぶ→スロットを選ぶ→押す。一つのキーに 8 スロット | 1 鍵から順に押していく。キーボード 1 つとパッド 1 つに置き換わる（一覧画面は数の制限なし） | 違う | O Scene06_Keyconfig.cpp:54-70 / H help/5.html / B keyconfig_scene.cpp:295-303 |
-| 割り当てできる機器 | キーボード、パッド（ボタンと軸の上下左右、複数台）、MIDI（ノート・ベンド・ペダル） | キーボード、パッド（ボタン・軸・ハット）、アナログ皿 | MIDI が BMjoyに無い／アナログ皿は LR2に無い | O Scene06_Keyconfig.cpp:638-678 / B keyconfig_scene.cpp:378-442 |
-| 割り当てられないキー | ESC・Enter・矢印・F1〜F12（help はテンキーでない数字キーも禁止と書くが、OpenLR2 の一覧には無い[?]） | ESC・Backspace・Enter（一部の手順）だけ予約。矢印と F キーは割り当てられる | 違う | O Scene06_Keyconfig.cpp:20-43 / H help/5.html / B keyconfig_scene.cpp:364-376 |
-| 1 スロットを消す | Delete | ウィザードには無い。一覧画面は Backspace/Delete で 1 行まるごと消す | 違う | O Scene06_Keyconfig.cpp:57 / B keyconfig_scene.cpp:141-147 |
-| 全部を消す・既定に戻す | F1 は既定に戻す、F2 は全部消す（help は「F1 で全部消す」[?]） | 一覧画面の F1 で既定に戻す。ウィザードには無い | 一部が BMjoyに無い | O Scene06_Keyconfig.cpp:72-93 / B keyconfig_scene.cpp:156-160 |
-| 保存 | 割り当てるたびに keyconfig*.xml に書き、選曲に戻るとき読み直す | ウィザードは最後に Enter で保存し、Esc では保存しない。保存先は SDL の設定フォルダの keyconfig.txt（独自形式） | 違う | O Scene06_Keyconfig.cpp:59-67, Main.cpp:1866-1868 / B keyconfig_scene.cpp:482-485, src/input/keyconfig.cpp:137-160 |
+| 2P 側 | 7 鍵モードに 2P のキーも含む（22 項目） | 1P だけ（ボタン 140 も 1P の 11 項目と「無し」だけを送る） | 意図した違い[?] | O Scene06_Keyconfig.cpp:684-733 |
+| 割り当てる項目 | 鍵盤・皿の上下・START・SELECT | 同じ | 直した | O LR2_configsave.cpp:67-90 / B ke `keyconfig_item_button` |
+| 操作の流れ | 項目を選ぶ→スロットを選ぶ→押す。一つのキーに 8 スロット。割り当てた後もスロットは選んだまま | 同じ。スロットは割り当ての並びの n 番目。空きは詰めて持つので、空いたスロットに入れると一番前の空きに入る。同じ項目のほかのスロットにある入力を入れると、そちらから移る | 直した（空きを詰める点だけ違う） | O Scene06_Keyconfig.cpp:54-70 / H help/5.html / B kc `set_slot` |
+| 割り当てできる機器 | キーボード、パッド（ボタンと軸の上下左右、複数台）、MIDI（ノート・ベンド・ペダル） | キーボード、パッド（ボタン・軸・ハット。全部のパッドを 1 つにまとめる）。アナログ皿はスキンの画面では設定しない（ウィザードと `--keyconfig` の一覧で設定する） | MIDI が BMjoyに無い／アナログ皿は LR2に無い | O Scene06_Keyconfig.cpp:638-678 / B ks |
+| 割り当てられないキー | ESC・Enter・矢印・F1〜F12（help はテンキーでない数字キーも禁止と書くが、OpenLR2 の一覧には無い[?]） | ESC・Enter・矢印・F1〜F12（数字キーは割り当てられる） | 直した | O Scene06_Keyconfig.cpp:20-43 / H help/5.html / B ke `keyconfig_reserved` |
+| 1 スロットを消す | Delete | 同じ（オプションの音も鳴らして保存する） | 直した | O Scene06_Keyconfig.cpp:57 / B ks |
+| 全部を消す・既定に戻す | OpenLR2 は F1 が既定に戻して保存、F2 が全部消す（保存しない）。help は「F1 で全スロットの割り当てを解除」、スキンの絵は「F1:リセット　F2:初期設定に戻す」で、OpenLR2 と逆に読める[?] | OpenLR2 と同じ（F1 既定、F2 全部消す）。F2 も保存する。アナログ皿の設定はどちらでも残す | 直した（F2 を保存するのは違う。LR2 は保存しないので、選曲に戻ると読み直して元に戻る） | O Scene06_Keyconfig.cpp:72-93 / B ke, ks |
+| 保存 | 割り当てるたびに keyconfig*.xml に書き、選曲に戻るとき読み直す | 割り当てる・消すたびに keyconfig.txt（BMjoy の形式）に書き、戻るとき読み直す。LR2 の XML は読み書きしない | 直した（ファイルの形式は意図した違い） | O Scene06_Keyconfig.cpp:59-67, Main.cpp:1866-1868 / B ks, kc |
 | LR2 の設定を引き継ぐ | — | keyconfig.xml の取り込みは無い | BMjoyに無い | B src/app/lr2_import.cpp |
-| 抜け方 | ESC・右クリック→フェードアウト→選曲 | Esc（保存せずにやめる）か Enter（保存）。フェードは無い | 違う | O Scene06_Keyconfig.cpp:94-98, 46-51 |
-| 入力の確認表示 | スキン側の光り方だけ | 押している鍵盤・軸の値・機器の一覧を表示（一覧画面） | LR2に無い | B keyconfig_scene.cpp:218-268 |
+| 抜け方 | ESC・右クリック→#FADEOUT→選曲 | 同じ。選曲の BGM を鳴らし直す | 直した | O Scene06_Keyconfig.cpp:94-98, 46-51 / B ks |
+| 入力の確認表示 | スキン側の光り方だけ | スキンの画面は同じ。`--keyconfig` の一覧画面では押している鍵盤・軸の値・機器の一覧を表示 | LR2に無い（一覧画面だけ） | B keyconfig_scene.cpp:218-268 |
 
 ### 2.3 スキンセレクト
 
@@ -444,8 +447,8 @@
 |---|---|---|---|---|
 | キーコンフィグのファイル | `LR2files/Config/keyconfig.xml`（CP932 XML。`<keyNN><id>番号</id>…`）。5 鍵は `_5`、9 ボタンは `_p` | 設定フォルダの `keyconfig.txt`（`key1 = key:Z \| joy:button 3`）。LR2 の XML は読まない | 違う | O LR2_configsave.cpp:59-90, LR2_skinobject.cpp:3645-3651 / B src/input/keyconfig.cpp:104-160 |
 | 入力元の番号 | 0〜255 = キーボード（DIK）、256〜 = パッド（32 ずつ）、0x200〜 = MIDI ノート、0x300/0x301 = ピッチベンド −/+、0x302 = ペダル | SDL スキャンコード、ボタン 64、軸 8、ハット 4 | 違う | O En_input.cpp:100-131,266-333 / B src/input/input.h:40-48 |
-| 割り当てられるボタン | 1P/2P の鍵盤 7・皿 2 方向・START・SELECT（key01-13, 21-33）と 9 ボタン用 | 1P の 11 個だけ | 意図した違い（DP・9K は対象外） | O LR2_configsave.cpp:67-90 / B keyconfig.h:12-14, 仕様書:34,52 |
-| 1 ボタンに割り当てられる数 | 8 個（help）。OpenLR2 は 16 [EXT] | 制限なし | LR2に無い | H help/5.html |
+| 割り当てられるボタン | 1P/2P の鍵盤 7・皿 2 方向・START・SELECT（key01-13, 21-33）と 9 ボタン用 | 1P の 11 個だけ（キーコンフィグの画面で START・SELECT も割り当てられる） | 意図した違い（DP・9K は対象外） | O LR2_configsave.cpp:67-90 / B keyconfig.h:12-14, 仕様書:34,52 |
+| 1 ボタンに割り当てられる数 | 8 個（help）。OpenLR2 は 16 [EXT] | キーコンフィグの画面からは 8 個（スロット）。ファイルと一覧画面では制限なし（9 個目以降は文字 48-55 に出るが選べない） | 直した（画面）／LR2に無い（ファイル） | H help/5.html / B kc `kKeySlots` |
 | 既定の割り当て | Z S X D C F V、皿は LCtrl/Space と LShift、Q/W。パッドは B4 B7 B3 B8 B2 B5 と左、皿は下/上、B9/B10 | 同じ | 同じ | Config/keyconfig_def.xml / B keyconfig.cpp:78-102 |
 | ジョイスティック | DirectInput。軸はしきい値で方向ボタン扱い。台ごとに番号を分ける | SDL と Windows Raw Input。軸のしきい値 16384 [?]。**全部のパッドを 1 つにまとめる** | 違う | O En_input.cpp:266-271 / B input.cpp:57-84, win_rawhid.h |
 | アナログ皿 | 無い（help/8.html：止めても回転信号が続くのはソフトで対処できない） | `analog_axis`。止まって `analog_release_ms`（100ms）で離す | LR2に無い（BMjoy の拡張） | H help/8.html / B keyconfig.h:25-28, input.cpp:89-107,157-162 |
@@ -600,8 +603,8 @@
 |---|---|---|
 | ミキサーの音量（MASTER / KEY / BGM）とスライダー 17〜19、config への保存 | ゲインの処理が一つも無い。リザルトの音のフェードアウト、EQ・ピッチなどすべての前提 | 4.3 |
 | F6 のスクリーンショット（PNG・スキン解像度・#SCREENSHOT の音・全画面共通） | LR2 の基本操作。いまは選曲の F6 がレーンカバーに使われていてぶつかる | 1.4, 4.7 |
-| キーコンフィグで START / SELECT を割り当てる手段（通常の画面から） | ウィザードでは割り当てられず、一覧画面は開発用 | 2.2 |
-| スキンで描くキーコンフィグ画面（型 8・文字 40-55・OP 400-402・ボタン 101-157）とスロット方式（8 枠・Delete で 1 つ消す・F1/F2） | LR2 の KeyConfig スキンがそのまま使えない | 2.2 |
+| ~~キーコンフィグで START / SELECT を割り当てる手段（通常の画面から）~~ 直した（スキンの画面で割り当てられる） | ウィザードでは割り当てられず、一覧画面は開発用 | 2.2 |
+| ~~スキンで描くキーコンフィグ画面（型 8・文字 40-55・OP 400-402・ボタン 101-157）とスロット方式（8 枠・Delete で 1 つ消す・F1/F2）~~ 直した | LR2 の KeyConfig スキンがそのまま使えない | 2.2 |
 | `scoregraph` / `defaulttarget` / `target` の設定と、選曲の sort / key / difficulty の保存 | scoregraph は LR2 の既定（OFF）と違う値で固定、ターゲットは 90 固定、選曲の状態は起動ごとに戻る | 3.6 |
 
 ### 中
@@ -662,8 +665,8 @@ LR2 の挙動を守る方針（memory: LR2挙動の維持）なので、どれ�
 13. **選曲の F6 がレーンカバー**（B select_scene.cpp:1295-1299）。LR2 ではスクリーンショット。F キー全体も F1 説明 / F5 IR / F7 FPS / F8 再読み込みと違う（判断）。
 14. **選曲の ESC**。LR2 はフォルダの中でもすぐ終了、BMjoy は一つ戻る（B select_scene.cpp:1278-1282）。LR2 に合わせるか、意図した違いとして仕様書に書くか（判断）。
 15. ~~**決定画面**。`#SCENETIME` が無い（0 の）スキンで LR2 はすぐプレイへ進むが、BMjoy は待ち続ける（B decide_scene.cpp:96）。LR2 はタイマー3 の後は ESC を受け付けず、戻るときにシステム音を止める。~~ 直した。
-16. **キーコンフィグ**。Esc で抜けると保存しない（LR2 は割り当てるたびに保存）。矢印と F1〜F12 を割り当てられる（LR2 は禁止。選曲の操作とぶつかる恐れ）。
-17. **キーコンフィグとスキンセレクトに入るときにフェードしない**。LR2 は選曲がフェードアウトしてから移る。スキンセレクトは LR2 では毎回 7KEYS から始まる [?]。
+16. ~~**キーコンフィグ**。Esc で抜けると保存しない（LR2 は割り当てるたびに保存）。矢印と F1〜F12 を割り当てられる（LR2 は禁止。選曲の操作とぶつかる恐れ）。~~ スキンの画面で直した（ウィザードはスキンが無いときだけ出る）。
+17. **スキンセレクトに入るときにフェードしない**（キーコンフィグは直した）。LR2 は選曲がフェードアウトしてから移る。スキンセレクトは LR2 では毎回 7KEYS から始まる [?]。
 18. **F5 ですぐリトライ**（B play_session.cpp:670）と **プレイ中の F4**（B play_session.cpp:673）は LR2 に無い操作（判断）。
 
 ### 音声
