@@ -25,6 +25,7 @@ struct AppConfig {
     std::string courseresult_skin; // コースリザルトスキンの .lr2skin（空なら LR2 の既定）
     std::string select_skin;       // 選曲スキンの .lr2skin（空なら LR2 の既定。"none" なら BMjoy の仮の画面）
     std::string decide_skin;       // 決定画面のスキン（空なら LR2 の既定。"none" なら決定画面を出さない）
+    std::string keyconfig_skin;    // キーコンフィグのスキン（空なら LR2 の既定。"none" ならスキンを使わない画面）
     std::string sound_set;         // サウンドセットの .lr2ss（空なら LR2 の既定）
     std::string skin_res;          // "", "sd", "hd", "fhd"
     std::map<std::string, std::vector<SkinCustomChoice>> skin_custom;  // スキンのパス → カスタマイズの選択（項目の順）

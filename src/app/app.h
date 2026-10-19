@@ -40,6 +40,9 @@ struct App {
     void load_courseresult_skin(const std::array<bool, 1000>& options);
     void load_select_skin(const std::array<bool, 1000>& options);
     void load_decide_skin(const std::array<bool, 1000>& options);
+    // そのほかの画面のスキンを読む（configured が空なら LR2 の既定 default_rel。"none" なら読まない）。読めなければ nullptr
+    std::unique_ptr<Lr2Skin> load_scene_skin(const std::string& configured, const char* default_rel,
+                                             const std::array<bool, 1000>& options, SkinRenderer& renderer);
     // 描画の論理解像度を変える。resize_window ならウィンドウの大きさも合わせる
     void set_view(int w, int h, bool resize_window = true);
     void window_size(int skin_w, int skin_h, int& w, int& h) const;

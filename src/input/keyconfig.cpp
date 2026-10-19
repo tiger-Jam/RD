@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -71,6 +73,56 @@ std::string describe(const Binding& b) {
     case Binding::Type::JoyButton: std::snprintf(buf, sizeof(buf), "joy:button %d", b.index); break;
     case Binding::Type::JoyAxis: std::snprintf(buf, sizeof(buf), "joy:axis %d%c", b.index, b.dir < 0 ? '-' : '+'); break;
     case Binding::Type::JoyHat: std::snprintf(buf, sizeof(buf), "joy:hat %d %s", b.index, hat_name(b.dir)); break;
+    }
+    return buf;
+}
+
+void set_slot(KeyConfig& cfg, int button, int slot, const Binding& b) {
+    if (button < 0 || button >= kButtonCount || slot < 0 || slot >= kKeySlots) return;
+    auto& v = cfg.buttons[button];
+    auto it = std::find(v.begin(), v.end(), b);
+    if (it != v.end()) {
+        int j = static_cast<int>(it - v.begin());
+        if (j == slot) return;
+        v.erase(it);
+        if (j < slot) --slot;  // 前のスロットが詰まった分
+    }
+    if (slot < static_cast<int>(v.size())) v[slot] = b;
+    else v.push_back(b);
+}
+
+void clear_slot(KeyConfig& cfg, int button, int slot) {
+    if (button < 0 || button >= kButtonCount || slot < 0) return;
+    auto& v = cfg.buttons[button];
+    if (slot < static_cast<int>(v.size())) v.erase(v.begin() + slot);
+}
+
+void clear_bindings(KeyConfig& cfg) {
+    for (auto& v : cfg.buttons) v.clear();
+}
+
+std::string binding_label(const Binding& b) {
+    char buf[64];
+    switch (b.type) {
+    case Binding::Type::Key: {
+        std::string s = SDL_GetScancodeName(static_cast<SDL_Scancode>(b.index));
+        if (s.empty()) s = "KEY" + std::to_string(b.index);
+        for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        return s;
+    }
+    case Binding::Type::JoyButton: std::snprintf(buf, sizeof(buf), "JOY:BUTTON%d", b.index + 1); break;
+    case Binding::Type::JoyAxis:
+        // 軸 0 は左右、軸 1 は上下（LR2 の方向の名前に合わせる）
+        if (b.index == 0) std::snprintf(buf, sizeof(buf), "JOY:%s", b.dir < 0 ? "LEFT" : "RIGHT");
+        else if (b.index == 1) std::snprintf(buf, sizeof(buf), "JOY:%s", b.dir < 0 ? "UP" : "DOWN");
+        else std::snprintf(buf, sizeof(buf), "JOY:AXIS%d%c", b.index + 1, b.dir < 0 ? '-' : '+');
+        break;
+    case Binding::Type::JoyHat: {
+        std::string d = hat_name(b.dir);
+        for (char& c : d) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        std::snprintf(buf, sizeof(buf), "JOY:HAT%d %s", b.index + 1, d.c_str());
+        break;
+    }
     }
     return buf;
 }

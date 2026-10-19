@@ -32,6 +32,19 @@ struct KeyConfig {
     bool save(const std::string& path) const;
 };
 
+// キーコンフィグ画面のスロット（1 つのボタンに 8 個。LR2 と同じ数）。
+// スロット n は buttons[ボタン] の n 番目の割り当て。空きは詰めて持つので、空いたスロットに入れると末尾に足す
+// （= 一番前の空きスロットに入る）。スロットを消すと後ろの割り当てが 1 つずつ前へ詰まる
+constexpr int kKeySlots = 8;
+// スロットに割り当てる。同じボタンのほかのスロットに同じ入力があれば、そちらを外して移す
+void set_slot(KeyConfig& cfg, int button, int slot, const Binding& b);
+// スロットを空ける（空なら何もしない）
+void clear_slot(KeyConfig& cfg, int button, int slot);
+// 鍵盤・皿・START・SELECT の割り当てを全部消す（アナログ皿の設定は残す）
+void clear_bindings(KeyConfig& cfg);
+// キーコンフィグ画面に出す入力の名前（キー名は大文字、パッドは JOY:BUTTON1 など。番号は 1 から）
+std::string binding_label(const Binding& b);
+
 const char* button_name(int button);
 std::string describe(const Binding& b);
 // 設定ファイルの置き場所（macOS なら ~/Library/Application Support/BMjoy/keyconfig.txt）
