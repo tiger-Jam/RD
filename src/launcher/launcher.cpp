@@ -14,10 +14,12 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <thread>
 #include <string>
 #include <vector>
 
 #include "app/config.h"
+#include "app/lr2_import.h"
 #include "db/song_db.h"
 #include "render/text_cache.h"
 
@@ -373,6 +375,18 @@ int main(int, char**) {
     int song_sel = -1, song_scroll = 0, table_sel = -1, table_scroll = 0;
     std::string table_input;
     std::string message;
+    // LR2 からの引き継ぎ（裏で動かす。曲が多いと更新日時を読むのに時間がかかる）
+    struct ImportJob {
+        std::thread th;
+        std::mutex mu;
+        std::string status;
+        bool running = false, done = false;
+        Lr2ImportResult res;
+        std::vector<std::string> song_dirs;
+        ~ImportJob() {
+            if (th.joinable()) th.join();
+        }
+    } job;
     bool quit = false, start = false;
     bool autostart = std::getenv("BMJ_LAUNCHER_AUTOSTART") != nullptr;  // 開発用：すぐ起動する
 
@@ -571,6 +585,26 @@ int main(int, char**) {
             g.check(X + 22, Y + 328, "高精度なタイマーを使用する(基本的に外して下さい)", d_true, false);
         } else if (tab == 6) {
             // BMjoy だけの設定（LR2 SETUP には無い）
+            if (g.button(X + 268, Y + 10, 146, 22, "LR2 から引き継ぐ", !job.running)) {
+                pick_folder(window, [&](const std::string& dir) {
+                    job.running = true, job.done = false;
+                    job.status = "LR2 から引き継いでいます";
+                    job.th = std::thread([&job, dir, base = cfg] {
+                        AppConfig c = base;
+                        SongDb db;
+                        Lr2ImportResult r;
+                        if (!db.open(song_db_path())) r.error = "曲データベースを開けません";
+                        else r = import_from_lr2(dir, c, db, [&job](const std::string& s) {
+                            std::lock_guard<std::mutex> lock(job.mu);
+                            job.status = s;
+                        });
+                        std::lock_guard<std::mutex> lock(job.mu);
+                        job.res = r;
+                        job.song_dirs = c.song_dirs;
+                        job.done = true;
+                    });
+                });
+            }
             if (g.button(X + 420, Y + 10, 146, 22, "曲データベースの再作成")) {
                 SongDb db;
                 message = db.open(song_db_path()) && db.clear_charts() ? "次回の起動時に曲データベースを再作成します"
@@ -644,6 +678,21 @@ int main(int, char**) {
         }
         g.combo_popup();
 
+        if (job.running) {
+            std::lock_guard<std::mutex> lock(job.mu);
+            message = job.status;
+            if (job.done) {
+                job.th.join();
+                job.running = false;
+                if (job.res.ok) {
+                    cfg.song_dirs = job.song_dirs;
+                    message = "LR2 から引き継ぎました（曲フォルダ " + std::to_string(job.res.song_dirs) + "、譜面 " +
+                              std::to_string(job.res.charts) + "、スコア " + std::to_string(job.res.scores) + "）";
+                } else {
+                    message = job.res.error;
+                }
+            }
+        }
         if (!message.empty()) g.label(10, kH - 50 + 14, message);
         if (g.button(10, kH - 29, 87, 21, "BMjoyの起動") || autostart) start = true, autostart = false;
         g.button(115, kH - 29, 87, 21, "プレイオプション", false);

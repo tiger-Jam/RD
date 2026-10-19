@@ -81,6 +81,16 @@ public:
     // LR2のスコアデータベース（LR2files/Database/Score/<名前>.db）を取り込む。取り込んだ件数を返す（失敗なら -1）。
     // 手元に無い譜面のスコアも MD5 のまま残し、表示するときに BMjoy の記録と合わせて良いほうを使う
     int import_lr2_scores(const std::string& lr2_score_db, std::string* error = nullptr);
+    // LR2 の曲データベース（song.db）から譜面の情報を取り込む。譜面ファイルは開かず、更新日時と大きさだけを読む。
+    // 7 鍵の譜面は仮の記録（sha256 の欄が "md5:<md5>"）として入れ、それ以外の譜面は「読まない譜面」として覚える。
+    // 取り込んだ 7 鍵の譜面の数を返す（失敗は -1）
+    int import_lr2_songs(const std::string& lr2_song_db, std::string* error = nullptr,
+                         const std::function<void(int, int)>& progress = {});
+    // 仮の記録の譜面を、最大 limit 件だけ実際に読んで置き換える。読んだ数を返す（0 なら残り無し）
+    int fill_provisional(int limit, int threads);
+    int provisional_count() const;
+    // 1 つの譜面を読み直す（仮の記録の譜面を遊んだあとなど）
+    bool refresh_chart(const std::string& path);
 
 private:
     sqlite3* db_ = nullptr;

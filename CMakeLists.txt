@@ -77,6 +77,7 @@ add_executable(BMjoybody WIN32
     src/app/select_scene.cpp
     src/app/select_context.cpp
     src/app/course.cpp
+    src/app/lr2_import.cpp
     src/app/decide_scene.cpp
     src/app/skin_catalog.cpp
     src/app/skin_select_scene.cpp
@@ -107,7 +108,7 @@ if(WIN32)
 endif()
 
 # 起動前の設定アプリ（LR2 の LR2.exe に相当）。「起動」で BMjoybody を黒い画面つきで立ち上げる
-add_executable(BMjoy WIN32 src/launcher/launcher.cpp src/app/config.cpp src/render/text_cache.cpp)
+add_executable(BMjoy WIN32 src/launcher/launcher.cpp src/app/config.cpp src/app/lr2_import.cpp src/render/text_cache.cpp)
 target_link_libraries(BMjoy PRIVATE bmj_core SDL3::SDL3)
 if(WIN32)
     target_sources(BMjoy PRIVATE src/app/bmjoy.manifest)

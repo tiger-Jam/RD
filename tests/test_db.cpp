@@ -168,3 +168,39 @@ TEST(song_db_ln_mode_and_course_scores) {
     for (const ScoreRecord& s : db.all_scores(0)) found = found || s.sha256 == "course-hash";
     CHECK(found);
 }
+
+TEST(song_db_import_lr2_songs) {
+    fs::path dir = fs::temp_directory_path() / "bmj_test_lr2songs";
+    fs::remove_all(dir);
+    std::string seven = "#TITLE S\n#BPM 120\n#00111:01\n";
+    write(dir / "songs" / "s" / "s.bms", seven);
+    write(dir / "songs" / "d" / "dp.bme", "#TITLE D\n#BPM 120\n#00121:01\n");
+    std::string lr2 = (dir / "song.db").string();
+    sqlite3* db = nullptr;
+    sqlite3_open(lr2.c_str(), &db);
+    sqlite3_exec(db, "CREATE TABLE song(hash TEXT ,title TEXT ,subtitle TEXT ,genre TEXT,artist TEXT,subartist TEXT,tag TEXT ,"
+                     "path TEXT primary key ,type INTEGER,folder TEXT,stagefile TEXT,banner TEXT,backbmp TEXT,parent TEXT,"
+                     "level INTEGER,difficulty INTEGER,maxbpm INTEGER,minbpm INTEGER,mode INTEGER,judge INTEGER,longnote INTEGER,"
+                     "bga INTEGER,random INTEGER,date INTEGER,favorite INTEGER,txt INTEGER,karinotes INTEGER,adddate INTEGER,exlevel INTEGER)",
+                 nullptr, nullptr, nullptr);
+    std::string s_path = (dir / "songs" / "s" / "s.bms").string(), d_path = (dir / "songs" / "d" / "dp.bme").string();
+    std::string ins = "INSERT INTO song(hash,title,path,level,difficulty,maxbpm,minbpm,mode,judge,longnote,karinotes) VALUES('" +
+                      md5_hex(seven) + "','S（LR2）','" + s_path + "',5,2,120,120,7,2,0,1),('x','D','" + d_path + "',3,2,120,120,14,2,0,1)";
+    sqlite3_exec(db, ins.c_str(), nullptr, nullptr, nullptr);
+    sqlite3_close(db);
+
+    SongDb sdb;
+    CHECK(sdb.open((dir / "songs.db").string()));
+    CHECK_EQ(sdb.import_lr2_songs(lr2), 1);  // 7 鍵だけ
+    auto charts = sdb.all_charts();
+    CHECK(charts.size() == 1 && charts[0].sha256 == "md5:" + md5_hex(seven) && charts[0].title == "S（LR2）");
+    CHECK_EQ(sdb.provisional_count(), 1);
+    // 曲フォルダを読み直しても、取り込んだ譜面と 7 鍵以外の譜面は読まない
+    ScanStats st = sdb.scan({(dir / "songs").string()}, 2);
+    CHECK_EQ(st.added + st.updated, 0);
+    // 裏で読むと、本物の情報に置き換わる
+    CHECK_EQ(sdb.fill_provisional(10, 2), 1);
+    charts = sdb.all_charts();
+    CHECK(charts.size() == 1 && charts[0].sha256 == sha256_hex(seven) && charts[0].title == "S");
+    CHECK_EQ(sdb.provisional_count(), 0);
+}

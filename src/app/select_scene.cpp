@@ -1,6 +1,7 @@
 #include "app/select_scene.h"
 
 #include <algorithm>
+#include <chrono>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -263,6 +264,7 @@ void run_select(App& app) {
     std::mutex mu;
     std::shared_ptr<Library> pending;
     std::atomic<bool> busy{false};
+    std::atomic<bool> stop_worker{false};  // 選曲画面を抜けるときに、裏の読み込みを止める
     std::string status = "";
     std::thread worker;
     // scan_songs：曲フォルダも読み直すか（false なら難易度表だけ取りに行く）
@@ -283,9 +285,33 @@ void run_select(App& app) {
             char buf[160];
             std::snprintf(buf, sizeof(buf), "%d 譜面（追加 %d／変更 %d／削除 %d）%.1f 秒", st.found, st.added, st.updated,
                           st.removed, st.seconds);
-            std::lock_guard<std::mutex> lock(mu);
-            pending = next;
-            status = buf;
+            {
+                std::lock_guard<std::mutex> lock(mu);
+                pending = next;
+                status = buf;
+            }
+            // LR2 から取り込んだ仮の譜面を、裏で少しずつ読んで本物の情報に置き換える。
+            // 20 秒ごと（と終わったとき）に一覧へ反映する
+            const int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency() / 2));
+            int total = wdb.provisional_count(), done = 0;
+            auto last = std::chrono::steady_clock::now();
+            while (total > 0 && !stop_worker) {
+                int n = wdb.fill_provisional(200, threads);
+                done += n;
+                bool finished = n == 0 || done >= total;
+                if (finished || std::chrono::steady_clock::now() - last > std::chrono::seconds(20)) {
+                    auto lib2 = std::make_shared<Library>();
+                    lib2->charts = wdb.all_charts();
+                    for (const ScoreRecord& s : wdb.all_scores(ln_mode)) lib2->scores[s.sha256] = s;
+                    lib2->tables = next->tables;
+                    std::snprintf(buf, sizeof(buf), "譜面を読んでいます %d / %d", done, total);
+                    std::lock_guard<std::mutex> lock(mu);
+                    pending = lib2;
+                    status = finished ? "譜面を読み終えた" : buf;
+                    last = std::chrono::steady_clock::now();
+                }
+                if (finished) break;
+            }
             busy = false;
         });
     };
@@ -601,12 +627,27 @@ void run_select(App& app) {
                 po.decide_sound = !app.decide_skin;
             }
             PlayExit ex = course ? run_course(app, *course, po) : run_play(app, path, po);
+            // LR2 から取り込んだ仮の譜面を遊んだら、その譜面を読んで本物の情報にする（記録のキーがそろう）
+            bool refreshed = false;
+            if (e->chart && e->chart->sha256.rfind("md5:", 0) == 0) refreshed = app.db.refresh_chart(path);
+            if (course)
+                for (const CourseStage& st : course->stages)
+                    if (st.chart && st.chart->sha256.rfind("md5:", 0) == 0) refreshed = app.db.refresh_chart(st.chart->path) || refreshed;
             app.save_config();  // 演奏中に変えたハイスピードやカバーを残す
             app.mixer.play_system(kSysSelect, true);
             set_select_view();
             input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
             // スコアとプレイヤーの累計を読み直す
-            for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
+            if (refreshed) {
+                auto lib2 = std::make_shared<Library>();
+                lib2->charts = app.db.all_charts();
+                lib2->tables = lib->tables;
+                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib2->scores[s.sha256] = s;
+                std::lock_guard<std::mutex> lock(mu);
+                pending = lib2;
+            } else {
+                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
+            }
             sctx.player = app.db.player_stats();
             if (ex == PlayExit::Quit) quit = true;
         } else if (e->kind == Entry::Kind::Missing) {
@@ -1528,6 +1569,7 @@ void run_select(App& app) {
     app.mixer.stop_system(kSysSelect);
     if (banner_thread.joinable()) banner_thread.join();
     if (banner_tex) app.select_renderer->set_image_override(102, nullptr), SDL_DestroyTexture(banner_tex);
+    stop_worker = true;
     if (worker.joinable()) worker.join();
 }
 

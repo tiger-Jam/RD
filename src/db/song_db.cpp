@@ -79,6 +79,10 @@ struct Stmt {
         return *this;
     }
     bool step() { return sqlite3_step(s) == SQLITE_ROW; }
+    void reset() {
+        sqlite3_reset(s);
+        sqlite3_clear_bindings(s);
+    }
     void run() {
         sqlite3_step(s);
         sqlite3_reset(s);
@@ -122,6 +126,9 @@ ChartRecord read_chart_row(const Stmt& st) {
     r.ln_free = static_cast<int>(st.col_i64(25));
     return r;
 }
+
+// 仮の記録（LR2 から取り込んで、まだ譜面を読んでいないもの）の sha256 の欄
+constexpr const char* kProvisional = "md5:";
 
 const char* kChartColumns =
     "path, folder, sha256, md5, title, subtitle, artist, subartist, genre, playlevel, difficulty, notes, ln, rank, "
@@ -230,6 +237,21 @@ void SongDb::close() {
     db_ = nullptr;
 }
 
+namespace {
+// 譜面の記録を 1 件書く（ins は INSERT OR REPLACE INTO chart の文）
+void put_chart(Stmt& ins, const ChartRecord& r) {
+    ins.text(1, r.path).text(2, r.folder).text(3, r.sha256).text(4, r.md5).text(5, r.title).text(6, r.subtitle)
+        .text(7, r.artist).text(8, r.subartist).text(9, r.genre).i64(10, r.playlevel).i64(11, r.difficulty)
+        .i64(12, r.notes).i64(13, r.ln).i64(14, r.rank).i64(15, r.total).dbl(16, r.bpm_min).dbl(17, r.bpm_max)
+        .dbl(18, r.bpm_main).i64(19, r.length_ms).i64(20, r.scratch).i64(21, r.mtime).i64(22, r.size)
+        .text(23, r.banner).text(24, r.stagefile).text(25, r.backbmp).i64(26, r.ln_free);
+    ins.run();
+}
+std::string insert_chart_sql() {
+    return std::string("INSERT OR REPLACE INTO chart(") + kChartColumns + ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+}
+}  // namespace
+
 ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
                        const std::function<void(int, int, const std::string&)>& progress) {
     auto t0 = std::chrono::steady_clock::now();
@@ -330,8 +352,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
     // 4. 1トランザクションで書く（prepared statement を使い回す）
     sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
     {
-        std::string sql = std::string("INSERT OR REPLACE INTO chart(") + kChartColumns +
-                          ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        std::string sql = insert_chart_sql();
         Stmt ins(db_, sql.c_str());
         Stmt del(db_, "DELETE FROM chart WHERE path = ?");
         Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
@@ -346,13 +367,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
                 continue;
             }
             unskip.text(1, to_parse[i]).run();
-            const ChartRecord& r = records[i];
-            ins.text(1, r.path).text(2, r.folder).text(3, r.sha256).text(4, r.md5).text(5, r.title).text(6, r.subtitle)
-                .text(7, r.artist).text(8, r.subartist).text(9, r.genre).i64(10, r.playlevel).i64(11, r.difficulty)
-                .i64(12, r.notes).i64(13, r.ln).i64(14, r.rank).i64(15, r.total).dbl(16, r.bpm_min).dbl(17, r.bpm_max)
-                .dbl(18, r.bpm_main).i64(19, r.length_ms).i64(20, r.scratch).i64(21, r.mtime).i64(22, r.size)
-                .text(23, r.banner).text(24, r.stagefile).text(25, r.backbmp).i64(26, r.ln_free);
-            ins.run();
+            put_chart(ins, records[i]);
         }
         for (const std::string& p : to_remove) del.text(1, p).run(), unskip.text(1, p).run();
     }
@@ -570,4 +585,170 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
     ps.run();
 }
 
+int SongDb::import_lr2_songs(const std::string& lr2_song_db, std::string* error,
+                             const std::function<void(int, int)>& progress) {
+    if (!db_) return -1;
+    sqlite3* src = nullptr;
+    if (sqlite3_open_v2(lr2_song_db.c_str(), &src, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        if (error) *error = "開けない: " + lr2_song_db;
+        sqlite3_close(src);
+        return -1;
+    }
+    struct Row {
+        ChartRecord r;
+        int mode = 0;
+        bool exists = false;
+    };
+    std::vector<Row> rows;
+    {
+        Stmt st(src, "SELECT path, hash, title, subtitle, genre, artist, subartist, level, difficulty, maxbpm, minbpm, mode, "
+                     "judge, longnote, karinotes, stagefile, banner, backbmp FROM song");
+        if (!st.s) {
+            if (error) *error = "LR2 の曲データベースではない: " + lr2_song_db;
+            sqlite3_close(src);
+            return -1;
+        }
+        // 文字は UTF-8 のものと Shift_JIS のものがある（ツールで直した LR2 の DB がある）ので、見分けて UTF-8 にそろえる
+        auto text = [&](int col) { return to_utf8_auto(st.col_text(col)); };
+        while (st.step()) {
+            Row w;
+            ChartRecord& r = w.r;
+            r.path = text(0);
+            r.folder = fs::path(r.path).parent_path().string();
+            r.md5 = st.col_text(1);
+            for (char& ch : r.md5) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            r.sha256 = std::string(kProvisional) + r.md5;
+            r.title = text(2), r.subtitle = text(3), r.genre = text(4), r.artist = text(5), r.subartist = text(6);
+            r.playlevel = static_cast<int>(st.col_i64(7));
+            r.difficulty = static_cast<int>(st.col_i64(8));
+            r.bpm_max = st.col_dbl(9), r.bpm_min = st.col_dbl(10), r.bpm_main = r.bpm_max;
+            w.mode = static_cast<int>(st.col_i64(11));
+            r.rank = static_cast<int>(st.col_i64(12));
+            r.ln = static_cast<int>(st.col_i64(13));
+            r.ln_free = r.ln;  // LR2 の譜面は種類を決めていない LN として扱う（読み直せば正しい数になる）
+            r.notes = static_cast<int>(st.col_i64(14));
+            r.stagefile = text(15), r.banner = text(16), r.backbmp = text(17);
+            rows.push_back(std::move(w));
+        }
+    }
+    sqlite3_close(src);
+    // 更新日時と大きさを並列に読む（ファイルの中身は開かない）
+    std::atomic<size_t> next{0};
+    std::atomic<int> done{0};
+    auto worker = [&] {
+        for (;;) {
+            size_t i = next.fetch_add(1);
+            if (i >= rows.size()) return;
+            std::error_code ec;
+            fs::directory_entry e(fs::path(rows[i].r.path), ec);
+            if (!ec && e.is_regular_file(ec)) {
+                rows[i].exists = true;
+                rows[i].r.mtime = mtime_of(e);
+                rows[i].r.size = static_cast<int64_t>(e.file_size(ec));
+            }
+            done.fetch_add(1);
+        }
+    };
+    {
+        std::vector<std::thread> pool;
+        for (int t = 0; t < 8; ++t) pool.emplace_back(worker);
+        while (progress && done.load() < static_cast<int>(rows.size())) {
+            progress(done.load(), static_cast<int>(rows.size()));
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        for (auto& th : pool) th.join();
+    }
+    int imported = 0;
+    sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
+    {
+        std::string sql = insert_chart_sql();
+        Stmt ins(db_, sql.c_str());
+        Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
+        Stmt has(db_, "SELECT 1 FROM chart WHERE path = ? AND sha256 NOT LIKE 'md5:%'");
+        for (const Row& w : rows) {
+            if (!w.exists) continue;
+            if (w.mode != 7) {
+                // 7 鍵以外（BMjoy では遊べない譜面）は、読み直さないように覚えておく
+                skip.text(1, w.r.path).i64(2, w.r.mtime).i64(3, w.r.size).run();
+                continue;
+            }
+            // すでに BMjoy が読んだ譜面は、そのまま残す
+            has.text(1, w.r.path);
+            bool already = has.step();
+            has.reset();
+            if (already) continue;
+            put_chart(ins, w.r);
+            imported++;
+        }
+    }
+    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+    return imported;
+}
+
+int SongDb::provisional_count() const {
+    if (!db_) return 0;
+    Stmt st(db_, "SELECT COUNT(*) FROM chart WHERE sha256 LIKE 'md5:%'");
+    return st.step() ? static_cast<int>(st.col_i64(0)) : 0;
+}
+
+int SongDb::fill_provisional(int limit, int threads) {
+    if (!db_) return 0;
+    std::vector<std::pair<std::string, std::pair<int64_t, int64_t>>> paths;
+    {
+        Stmt st(db_, "SELECT path, mtime, size FROM chart WHERE sha256 LIKE 'md5:%' LIMIT ?");
+        st.i64(1, limit);
+        while (st.step()) paths.push_back({st.col_text(0), {st.col_i64(1), st.col_i64(2)}});
+    }
+    std::vector<ChartRecord> recs(paths.size());
+    std::vector<char> ok(paths.size(), 0);
+    std::atomic<size_t> next{0};
+    auto worker = [&] {
+        for (;;) {
+            size_t i = next.fetch_add(1);
+            if (i >= paths.size()) return;
+            ok[i] = make_chart_record(paths[i].first, recs[i]);
+            recs[i].mtime = paths[i].second.first;
+            recs[i].size = paths[i].second.second;
+        }
+    };
+    {
+        std::vector<std::thread> pool;
+        for (int t = 0; t < std::max(1, threads); ++t) pool.emplace_back(worker);
+        for (auto& th : pool) th.join();
+    }
+    sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
+    {
+        std::string sql = insert_chart_sql();
+        Stmt ins(db_, sql.c_str());
+        Stmt del(db_, "DELETE FROM chart WHERE path = ?");
+        Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
+        for (size_t i = 0; i < paths.size(); ++i) {
+            if (ok[i]) {
+                put_chart(ins, recs[i]);
+            } else {
+                // 読めない譜面は一覧から外し、変わるまで読み直さない
+                del.text(1, paths[i].first).run();
+                skip.text(1, paths[i].first).i64(2, paths[i].second.first).i64(3, paths[i].second.second).run();
+            }
+        }
+    }
+    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+    return static_cast<int>(paths.size());
+}
+
+bool SongDb::refresh_chart(const std::string& path) {
+    if (!db_) return false;
+    ChartRecord r;
+    std::error_code ec;
+    fs::directory_entry e(fs::path(path), ec);
+    if (ec || !make_chart_record(path, r)) return false;
+    r.mtime = mtime_of(e);
+    r.size = static_cast<int64_t>(e.file_size(ec));
+    std::string sql = insert_chart_sql();
+    Stmt ins(db_, sql.c_str());
+    put_chart(ins, r);
+    return true;
+}
+
 }  // namespace bmj
+

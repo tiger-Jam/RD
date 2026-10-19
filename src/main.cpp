@@ -17,6 +17,7 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <future>
@@ -34,6 +35,7 @@
 #include "chart/bms_parser.h"
 #include "chart/chart_loader.h"
 #include "db/difficulty_table.h"
+#include "app/lr2_import.h"
 #include "db/song_db.h"
 #include "game/judge.h"
 #include "input/joystick_init.h"
@@ -66,6 +68,7 @@ struct Options {
     std::vector<std::string> table_urls;  // 開発用：難易度表を取得して表示する
     std::vector<std::string> add_song_dirs, add_tables;
     std::string import_lr2;  // LR2のスコアデータベース
+    std::string import_lr2_dir;  // LR2 のフォルダ（曲フォルダの登録・曲の情報・スコアをまとめて引き継いで終わる）
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000, effect = -1;
     bool gas = false;
@@ -100,6 +103,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--add-song-dir") o.add_song_dirs.push_back(next());
         else if (a == "--add-table") o.add_tables.push_back(next());
         else if (a == "--import-lr2") o.import_lr2 = next();
+        else if (a == "--import-lr2-dir") o.import_lr2_dir = next();
         else if (a == "--skin-opt") {
             std::string v = next();
             size_t eq = v.find('=');
@@ -402,6 +406,20 @@ int main(int argc, char** argv) {
         joystick_init().start(c.joystick_directinput);
         raw_hid().start();
         if (!app.init(argv[0])) return 1;
+        if (!opt.import_lr2_dir.empty()) {
+            auto t0 = std::chrono::steady_clock::now();
+            Lr2ImportResult r = import_from_lr2(opt.import_lr2_dir, c, app.db, [](const std::string& s) { std::printf("%s\n", s.c_str()); });
+            double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            if (!r.ok) {
+                std::printf("LR2 から引き継げない: %s\n", r.error.c_str());
+                return 1;
+            }
+            std::printf("LR2 から引き継いだ：プレイヤー %s、曲フォルダ %d、7 鍵の譜面 %d、スコア %d（%.1f 秒）\n", r.player.c_str(),
+                        r.song_dirs, r.charts, r.scores, sec);
+            for (const std::string& d : c.song_dirs) std::printf("  曲フォルダ: %s\n", d.c_str());
+            app.save_config();
+            return 0;
+        }
         // LR2 と同じ起動の画面。曲データベースと難易度表の更新もここで行う（設定で「手動」なら選曲画面の F5 だけ）
         if (opt.chart_path.empty() && !opt.keyconfig) {
             bool update = c.db_update == 0;
