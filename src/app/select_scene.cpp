@@ -953,7 +953,7 @@ void run_select(App& app) {
         app.mixer.play_system(app.mixer.has_system(kSysDifficulty) ? kSysDifficulty : kSysFolderOpen);
     };
     // 絞り込みやソートを変えたら、いまの一覧を作り直して、同じ要素にカーソルを合わせる
-    auto reapply_view = [&] {
+    auto reapply_view = [&](bool sound = true) {
         const Entry* e = current();
         std::string label = e ? e->label : "";
         const ChartRecord* chart = e && e->kind == Entry::Kind::Chart ? e->chart : nullptr;
@@ -967,7 +967,7 @@ void run_select(App& app) {
             }
         }
         snap();
-        app.mixer.play_system(kSysOptionChange);
+        if (sound) app.mixer.play_system(kSysOptionChange);
     };
     // F3 + 矢印（LR2 と同じ）：↑↓ で難易度を 1〜5 の輪で、←→ でレベルを 0〜99 の輪で変えて、曲データベースに書く。
     // 難易度で絞り込んでいれば、絞り込みも新しい難易度にする
@@ -1267,7 +1267,9 @@ void run_select(App& app) {
                         // 鍵盤数の絞り込み・ソート（左右どちらでも +1。ソートは LR2 と同じく 0..4）
                         int& v = ty == 11 ? mode_filter : sort_mode;
                         v = (v + 1) % (ty == 11 ? kModeCount : kSortCount);
-                        reapply_view();
+                        reapply_view(false);
+                        // 音は難易度の切り替えの音（無ければフォルダを開く音。LR2 と同じ）
+                        app.mixer.play_system(app.mixer.has_system(kSysDifficulty) ? kSysDifficulty : kSysFolderOpen);
                     }
                     else if (ty >= 91 && ty <= 96) change_difficulty(ty - 91);
                     else if (ty == 44) app.cfg.assist = !app.cfg.assist, app.mixer.play_system(kSysOptionChange);
@@ -1450,7 +1452,12 @@ void run_select(App& app) {
             else if (b.button == kKey1 + 5) {
                 // 6 番：オートで開始。リプレイがあれば押している間を数え、2 秒でリプレイ、その前に離せばオート（LR2: タイマー 172）
                 const Entry* e = current();
-                if (e && e->kind == Entry::Kind::Chart) {
+                if (e && e->kind == Entry::Kind::Course) {
+                    bool was = autoplay;
+                    autoplay = true;
+                    decide();
+                    autoplay = was;
+                } else if (e && e->kind == Entry::Kind::Chart) {
                     if (sctx.replay_exists) {
                         sctx.timers.set(172, t_ms);
                     } else {
