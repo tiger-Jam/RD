@@ -229,3 +229,36 @@ TEST(song_db_scan_only_under) {
     db.close();
     fs::remove_all(dir);
 }
+
+// 皿の自動演奏や SCATTER などのプレイは、ランプ・回数・オプション履歴だけを残す（LR2: statplay.cpp:895）
+TEST(song_db_lamp_only) {
+    fs::path dir = fs::temp_directory_path() / "bmj_test_lamp_only";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    SongDb db;
+    CHECK(db.open((dir / "songs.db").string()));
+    PlayRecord a;
+    a.lamp_only = true, a.clear = 2, a.exscore = 500, a.bp = 3, a.max_combo = 100, a.op_history = 0x1000000;
+    a.judge = {200, 100, 0, 0, 3};
+    db.save_score("h", a);
+    ScoreRecord r;
+    CHECK(db.get_score("h", r));
+    CHECK_EQ(r.clear, 2);
+    CHECK_EQ(r.exscore, 0);
+    CHECK_EQ(r.bp, -1);
+    CHECK_EQ(r.max_combo, 0);
+    CHECK_EQ(r.playcount, 1);
+    CHECK(r.op_history == 0x1000000u);
+    PlayRecord b;
+    b.clear = 3, b.exscore = 300, b.bp = 10, b.max_combo = 50;
+    db.save_score("h", b);
+    a.clear = 2, a.exscore = 900;
+    db.save_score("h", a);
+    CHECK(db.get_score("h", r));
+    CHECK_EQ(r.clear, 3);
+    CHECK_EQ(r.exscore, 300);
+    CHECK_EQ(r.bp, 10);
+    CHECK_EQ(r.playcount, 3);
+    db.close();
+    fs::remove_all(dir);
+}

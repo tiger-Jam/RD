@@ -14,7 +14,5 @@ enum RandomOption : int { kRandomOff = 0, kMirror = 1, kRandom = 2, kSRandom = 3
 // 並べ替えで重なったノーツは、譜面の読み込みと同じ規則で捨てる
 void apply_random_option(Chart& chart, int option, Lr2Random& rng);
 
-// このオプションで付くランプの上限（LR2: SCATTER と皿の自動演奏は EASY 止まり）
-bool forces_easy(int random_option, bool assist);
 
 }  // namespace bmj

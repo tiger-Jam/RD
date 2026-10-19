@@ -102,26 +102,28 @@ bool is_movie_file(const std::string& p) {
 }
 
 // リザルトに入ったときに1回だけ記録する。途中でやめたときもLR2と同じくFAILEDとして記録する
-void record_score(App& app, const std::string& sha256, const JudgeEngine& j, bool quit_early, int lamp, const AppConfig& cfg,
-                  bool assist, bool course_stage, int ln_mode) {
+// クリアしたときのオプションの履歴（LR2: statplay.cpp ConvertOptionHistory）。
+// 皿の自動演奏でのクリアは 1 ビットだけ。EASY ランプは EASY ゲージのときだけ。それより上のランプはゲージ・ランダム・HIDDEN/SUDDEN を残す
+uint32_t option_history(int lamp, int gauge_type, const AppConfig& cfg, bool assist) {
+    if (assist) return lamp > 1 ? 0x1000000u : 0u;
+    if (lamp == 2) return gauge_type == kEasy ? 8u : 0u;
+    if (lamp > 2) return (1u << gauge_type) | (0x100u << std::clamp(cfg.random, 0, 7)) | (0x10000u << std::clamp(cfg.effect, 0, 3));
+    return 0;
+}
+
+// lamp_only：ランプ・回数・オプション履歴だけを残す（皿の自動演奏・CONSTANT・SCATTER・CONVERGE。LR2: statplay.cpp:895）
+void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int lamp, const AppConfig& cfg, bool assist,
+                  bool lamp_only, bool course_stage, int ln_mode) {
     const PlayStats& s = j.stats();
     PlayRecord rec;
     rec.course_stage = course_stage;
+    rec.lamp_only = lamp_only;
     rec.ln_mode = ln_mode;
     rec.clear = lamp, rec.exscore = s.exscore(), rec.max_combo = s.max_combo;
     rec.judge = {s.judge_count[kPGreat], s.judge_count[kGreat], s.judge_count[kGood], s.judge_count[kBad], s.judge_count[kPoor]};
-    // クリアしたときのオプションの履歴（LR2: statplay.cpp ConvertOptionHistory）。
-    // 皿の自動演奏でのクリアは 1 ビットだけ。EASY ランプは EASY ゲージのときだけ。それより上のランプはゲージ・ランダム・HIDDEN/SUDDEN を残す
-    if (assist) {
-        if (lamp > 1) rec.op_history = 0x1000000;
-    } else if (lamp == 2) {
-        if (j.gauge_type() == kEasy) rec.op_history = 8;
-    } else if (lamp > 2) {
-        rec.op_history = (1u << j.gauge_type()) | (0x100u << std::clamp(cfg.random, 0, 7)) | (0x10000u << std::clamp(cfg.effect, 0, 3));
-    }
-    // 途中でやめたときは、残りのノーツもBPに入れる（LR2: statplay.cpp:659）
-    int bp = s.bp() + (quit_early ? s.total_notes - s.note_current : 0);
-    rec.bp = bp;
+    rec.op_history = option_history(lamp, j.gauge_type(), cfg, assist);
+    // 処理しなかったノーツは、どう終わっても BP に入れる（途中でやめたときも閉店したときも。LR2: statplay.cpp:992）
+    rec.bp = s.bp() + s.total_notes - s.note_current;
     app.db.save_score(sha256, rec);
 }
 
@@ -177,16 +179,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     apply_random_option(parsed.chart, cfg.random, parsed.rng);
     // CONVERGE のときは皿の自動演奏を切る（LR2: bmsload:2102）
     const bool assist = cfg.assist && cfg.random != kConverge;
-    // HS-FIX の CONSTANT：一定の速さで流す。LR2 と同じく、スコアは残さず、BPM が変わる譜面のクリアは EASY 扱い
+    // HS-FIX の CONSTANT：一定の速さで流す
     const bool constant = cfg.hs_fix == 4;
-    bool constant_easy = false;
-    if (constant) {
-        double lo, hi;
-        note_bpm_range(parsed.chart, lo, hi);
-        constant_easy = hi != lo;
-        parsed.chart.make_constant_speed();
-        opt.save_score = false;
-    }
+    if (constant) parsed.chart.make_constant_speed();
+    // 皿の自動演奏・CONSTANT・SCATTER・CONVERGE は、ランプを EASY まで（フルコンボも EASY）にして、
+    // ランプ・回数・オプション履歴だけを残す。コースのステージでは何も残さない（LR2: statplay.cpp:7, 895）
+    const bool lamp_only = assist || constant || cfg.random >= kScatter;
     // BGA の無い譜面は、LR2files/Movie の動画を 1 本ランダムに選んで、頭から繰り返し流す（LR2: bmsload:4089。コースでは流さない）。
     // 探す順は mpg → avi → wmv → mp4 → ogv で、最初に見つかった種類の中から選ぶ
     // BGA の設定（LR2: bga）。OFF なら画像も動画も読まない。NO MISS はミスのときの絵を出さない
@@ -422,9 +420,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 return;
             }
             phase = Phase::Result;
-            // 途中でやめたらゲージを0にして、グラフの残りを埋める（LR2: Play.cpp:1659）
+            // 途中でやめたときと閉店したときはゲージを0にして、グラフの残りを埋める（LR2: Play.cpp:1659）
             std::array<double, kGaugeCount> hp{};
-            for (int g = 0; g < kGaugeCount; ++g) hp[g] = quit_early ? 0.0 : judge.gauge().hp(g);
+            for (int g = 0; g < kGaugeCount; ++g) hp[g] = quit_early || judge.failed() ? 0.0 : judge.gauge().hp(g);
             graph.finish(hp, ps.combo, ps.exscore(), ctx.best.exscore(), ctx.target.exscore());
             ctx.quit_early = quit_early;
             {
@@ -434,23 +432,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 input.collect(SDL_GetTicksNS() + 100000000ull, li, bi);
             }
             ctx.result_clear = (quit_early || judge.failed()) ? 1 : judge.clear();
-            // SCATTER と皿の自動演奏は EASY 止まり。フルコンボは、自動演奏でなく SCATTER でない（か BPM が一定の）ときだけ残す（LR2: statplay.cpp:780）
-            if (constant_easy && ctx.result_clear > 2 && ctx.result_clear < 5) ctx.result_clear = 2;
-            if (forces_easy(cfg.random, assist) && ctx.result_clear > 2) {
-                // BPM が一定か（LR2 はノーツのある BPM の最小と最大で見る）
-                double lo = 1e18, hi = 0;
-                for (const Note& n : chart.notes)
-                    if (n.kind != NoteKind::Invisible) lo = std::min(lo, chart.bpm_at(n.time_us)), hi = std::max(hi, chart.bpm_at(n.time_us));
-                bool keep_fc = ctx.result_clear >= 5 && !assist && (cfg.random != kScatter || lo == hi);
-                if (!keep_fc) ctx.result_clear = 2;
-            }
+            if (lamp_only && ctx.result_clear > 2) ctx.result_clear = 2;
             // 比較に使う「このプレイの前の自己ベスト」は、記録する前に取っておく
             ctx.old_exscore = has_best ? best_score.exscore : 0;
             ctx.old_maxcombo = has_best ? best_score.max_combo : 0;
             ctx.old_minbp = has_best ? best_score.bp : -1;
             ctx.old_total_notes = has_best ? ps.total_notes : 0;
-            if (!recorded && opt.save_score && !opt.autoplay && started) {
-                record_score(app, sha256, judge, quit_early, ctx.result_clear, cfg, assist, course != nullptr, score_ln_mode);
+            if (!recorded && opt.save_score && !opt.autoplay && started && !(course && lamp_only)) {
+                record_score(app, sha256, judge, ctx.result_clear, cfg, assist, lamp_only, course != nullptr, score_ln_mode);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
                 // （コースのステージではフルコンボのときだけ上がる）
                 if (!course || ctx.result_clear >= 5) ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
@@ -490,8 +479,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 chart_op4 = static_cast<int>(t);  // グラフを最後まで描く
             } else if (rtimers.lapse(151, t) <= rskin->startinput_rank || rtimers.on(152)) {
                 if (rtimers.lapse(152, t) > rskin->startinput_update && !rtimers.on(2)) rtimers.set(2, t);
-            } else if (!opt.save_score || opt.autoplay) {
-                // 記録しないプレイ（オートなど）は、更新の表示を飛ばしてフェードアウトへ（LR2 と同じ）
+            } else if (!opt.save_score || opt.autoplay || lamp_only) {
+                // 記録しないプレイ（オートなど）とランプだけを残すプレイは、更新の表示を飛ばしてフェードアウトへ（LR2 と同じ）
                 if (!rtimers.on(2)) rtimers.set(2, t);
             } else {
                 rtimers.set(152, t);
@@ -1160,9 +1149,8 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
         else if (hp > 2.0 && total.note_current == total.total_notes)
             clear = (gtype == kHard || gtype == kGAttack || gtype == kPAttack) ? 4 : gtype == kEasy ? 2 : 3;
     }
-    // SCATTER と皿の自動演奏は EASY 止まり（フルコンボは自動演奏でなく SCATTER でないときだけ残す）
+    // LR2 と同じく、コースのランプには EASY の上限をかけない（ステージは記録していない。LR2: Scene13_Courseresult.cpp）
     const bool assist = cfg.assist && cfg.random != kConverge;
-    if (forces_easy(cfg.random, assist) && clear > 2 && !(clear >= 5 && !assist && cfg.random != kScatter)) clear = 2;
 
     ScoreRecord best;
     const bool has_best = app.db.get_score(course.hash, best);
@@ -1191,8 +1179,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
                      total.judge_count[kPoor]};
         // 途中で終わったときは、残りのノーツも BP に入れる
         rec.bp = total.bp() + total.total_notes - total.note_current;
-        if (clear > 2) rec.op_history = (1u << gtype) | (0x100u << std::clamp(cfg.random, 0, 7)) | (0x10000u << std::clamp(cfg.effect, 0, 3));
-        else if (clear == 2 && gtype == kEasy) rec.op_history = 8;
+        rec.op_history = option_history(clear, gtype, cfg, assist);
         app.db.save_score(course.hash, rec);
         ctx.best_clear = std::max(ctx.best_clear, clear);
     }

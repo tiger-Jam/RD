@@ -612,13 +612,15 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
             r.op_history = static_cast<uint32_t>(st.col_i64(11));
         }
     }
-    // 判定の内訳は、EX スコアを更新したとき（初めてのときも）だけ入れ替える
-    if (!had || exscore > r.exscore) r.judge = play.judge;
     r.op_history |= play.op_history;
     if (!play.course_stage || clear >= 5) r.clear = std::max(r.clear, clear);
-    r.exscore = std::max(r.exscore, exscore);
-    r.bp = (r.bp < 0 || !had) ? bp : std::min(r.bp, bp);
-    r.max_combo = std::max(r.max_combo, max_combo);
+    if (!play.lamp_only) {
+        // 判定の内訳は、EX スコアを更新したとき（初めてのときも）だけ入れ替える
+        if (!had || exscore > r.exscore) r.judge = play.judge;
+        r.exscore = std::max(r.exscore, exscore);
+        r.bp = (r.bp < 0 || !had) ? bp : std::min(r.bp, bp);
+        r.max_combo = std::max(r.max_combo, max_combo);
+    }
     if (!play.course_stage) {
         r.playcount++;
         if (clear >= 2) r.clearcount++;

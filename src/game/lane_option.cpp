@@ -108,6 +108,4 @@ void apply_random_option(Chart& chart, int option, Lr2Random& rng) {
     drop_overlaps(notes);
 }
 
-bool forces_easy(int random_option, bool assist) { return assist || random_option == kScatter; }
-
 }  // namespace bmj
