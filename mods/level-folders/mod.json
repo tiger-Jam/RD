@@ -1,0 +1,9 @@
+{
+  "id": "level-folders",
+  "name": "推定難易度のフォルダ",
+  "version": "1",
+  "author": "BMjoy",
+  "description": "ノーツの密度から難易度をざっくり推定して、段階ごとのフォルダに分ける",
+  "touches": ["control"],
+  "script": "main.lua"
+}

@@ -28,6 +28,8 @@ add_library(bmj_third_party STATIC third_party/third_party_impl.c third_party/st
     third_party/sqlite/sqlite3.c third_party/yyjson/yyjson.c)
 # Lua（MOD のスクリプト。仕様書14章）
 file(GLOB BMJ_LUA_SOURCES ${CMAKE_SOURCE_DIR}/third_party/lua/*.c)
+# C++ として組む（スクリプトの失敗を longjmp ではなく例外で戻し、本体の C++ のデストラクタを飛ばさない）
+set_source_files_properties(${BMJ_LUA_SOURCES} PROPERTIES LANGUAGE CXX)
 target_sources(bmj_third_party PRIVATE ${BMJ_LUA_SOURCES})
 target_include_directories(bmj_third_party SYSTEM PUBLIC third_party third_party/sqlite third_party/yyjson third_party/lua)
 target_compile_definitions(bmj_third_party PUBLIC SQLITE_THREADSAFE=2 SQLITE_DEFAULT_WAL_SYNCHRONOUS=1 SQLITE_OMIT_LOAD_EXTENSION)
@@ -63,7 +65,7 @@ add_library(bmj_core STATIC
     src/db/difficulty_table.cpp
     src/db/custom_folder.cpp
     src/db/folder_watch.cpp
-    src/mod/mod.cpp
+    src/mod/mod.cpp src/mod/script.cpp
     src/audio/dsp.cpp
 )
 target_include_directories(bmj_core PUBLIC src)
@@ -134,7 +136,7 @@ if(WIN32)
 endif()
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
-    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp tests/test_dsp.cpp tests/test_mod.cpp src/input/input.cpp src/input/keyconfig.cpp src/input/midi.cpp
+    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp tests/test_dsp.cpp tests/test_mod.cpp tests/test_mod_script.cpp src/input/input.cpp src/input/keyconfig.cpp src/input/midi.cpp
     src/app/config.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/keyconfig_editor.cpp src/audio/sound_bank.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

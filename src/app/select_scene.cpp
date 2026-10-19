@@ -35,6 +35,7 @@
 #include "input/input.h"
 #include "input/joystick_init.h"
 #include "input/win_rawhid.h"
+#include "mod/script.h"
 #include "render/frame_hooks.h"
 #include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
@@ -83,10 +84,17 @@ struct Library {
     // カスタムフォルダ（.lr2folder）。中身は曲と記録から作った LR2 の形の表で集める
     std::vector<CustomFolderNode> custom_nodes;
     std::shared_ptr<CustomFolderQuery> custom_query;
+    // MOD が作ったフォルダ（仕様書14章「フォルダの作成」）
+    std::vector<ModFolder> mod_folders;
 };
 
 // カスタムフォルダを読み、中身を集める表を作り直す（曲・記録・お気に入りが変わったとき）
-void load_custom(Library& lib, const AppConfig& cfg, const std::unordered_map<std::string, int>& favs) {
+// MOD のフォルダも、ここで作り直す
+void load_custom(Library& lib, App& app, const std::unordered_map<std::string, int>& favs) {
+    const AppConfig& cfg = app.cfg;
+    std::vector<std::string> errors;
+    lib.mod_folders = build_mod_folders(app.active_mods(), lib.charts, lib.scores, mod_data_dir(""), &errors);
+    for (const std::string& e : errors) std::printf("MOD のフォルダを作れない：%s\n", e.c_str());
     lib.custom_nodes.clear();
     for (const std::string& d : cfg.custom_folder_dirs) {
         std::vector<CustomFolderNode> n = load_custom_folders(d);
@@ -353,7 +361,25 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
         }
         song_roots.push_back(std::move(g));
     }
-    // 並び：難易度表 → 登録した曲フォルダ → カスタムフォルダ → NEW SONG → COURSE / 段位認定（LR2 のルートと同じく、コースのフォルダは後ろ）
+    // MOD のフォルダ（カスタムフォルダの後ろ）
+    std::function<Entry(const ModFolder&)> mod_entry = [&](const ModFolder& mf) {
+        Entry f;
+        f.label = mf.title;
+        for (const ModFolder& c : mf.children) {
+            Entry sub = mod_entry(c);
+            f.owned += sub.owned, f.total += sub.total;
+            f.children.push_back(std::move(sub));
+        }
+        for (const std::string& sha : mf.charts) {
+            auto it = by_sha256.find(sha);
+            if (it == by_sha256.end() || fav_of(it->second->md5) == 2) continue;
+            f.children.push_back(chart_entry(it->second, std::to_string(it->second->playlevel)));
+            f.owned++, f.total++;
+        }
+        return f;
+    };
+    for (const ModFolder& mf : lib.mod_folders) song_roots.push_back(mod_entry(mf));
+    // 並び：難易度表 → 登録した曲フォルダ → カスタムフォルダ → MOD のフォルダ → NEW SONG → COURSE / 段位認定（LR2 のルートと同じく、コースのフォルダは後ろ）
     std::vector<Entry> courses(std::make_move_iterator(root.end() - 2), std::make_move_iterator(root.end()));
     root.erase(root.end() - 2, root.end());
     for (Entry& f : song_roots) root.push_back(std::move(f));
@@ -516,7 +542,7 @@ void run_select(App& app) {
     const int profile = app.mod_profile();  // MOD の組み合わせごとに記録を分ける
     for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
     std::unordered_map<std::string, int> favs = app.db.favorites();
-    load_custom(*lib, app.cfg, favs);
+    load_custom(*lib, app, favs);
     std::vector<Entry> root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
     // フォルダランプ（LR2: folderlamp）。フォルダの中の譜面のランプの一番低いもの。記録か一覧が変わったら数え直す
     std::unordered_map<const Entry*, int> folder_lamps;
@@ -1058,10 +1084,8 @@ void run_select(App& app) {
                 for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
                 folder_lamps.clear();
                 // 記録で集めるカスタムフォルダ（クリアやランク）を作り直す
-                if (!lib->custom_nodes.empty()) {
-                    load_custom(*lib, app.cfg, favs);
-                    rebuild();
-                }
+                load_custom(*lib, app, favs);
+                rebuild();
             }
             sctx.player = app.db.player_stats();
             if (ex == PlayExit::Quit) quit = true;
@@ -1537,7 +1561,7 @@ void run_select(App& app) {
                             v = (v + (dir > 0 ? 1 : 2)) % 3;
                             app.db.set_favorite(cur->chart->md5, v);
                             app.mixer.play_system(kSysOptionChange);
-                            if (!lib->custom_nodes.empty()) load_custom(*lib, app.cfg, favs);
+                            load_custom(*lib, app, favs);
                             rebuild();
                         }
                     }
@@ -1802,7 +1826,7 @@ void run_select(App& app) {
             if (pending) {
                 lib = pending;
                 pending.reset();
-                load_custom(*lib, app.cfg, favs);
+                load_custom(*lib, app, favs);
                 folder_charts.clear();
                 rebuild();
             }

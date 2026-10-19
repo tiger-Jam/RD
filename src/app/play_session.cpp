@@ -25,6 +25,7 @@
 #include "game/hispeed.h"
 #include "game/judge.h"
 #include "game/lane_option.h"
+#include "mod/script.h"
 #include "input/input.h"
 #include "input/joystick_init.h"
 #include "render/frame_hooks.h"
@@ -421,6 +422,32 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         }
         JudgeEngine judge(chart, jcfg);
         ctx.judge = &judge;
+        // MOD のスクリプト（プレーごとに作り直す。ゲームの状態は写しを渡すだけ）
+        ModScripts scripts;
+        scripts.load(app.active_mods(), mod_data_dir(""));
+        auto report_mod_errors = [&] {
+            for (const std::string& e : scripts.take_errors()) std::printf("MOD が止まった：%s\n", e.c_str());
+        };
+        if (!scripts.empty()) {
+            ModPlayInfo info;
+            info.sha256 = sha256, info.path = chart_path;
+            info.title = chart.meta.title, info.subtitle = chart.meta.subtitle, info.artist = chart.meta.artist;
+            info.genre = chart.meta.genre, info.playlevel = chart.meta.playlevel;
+            info.notes = judge.stats().total_notes, info.total = static_cast<int>(chart.total), info.rank = chart.judge_rank;
+            info.keys = key_count(chart), info.length_ms = static_cast<int>(chart.end_us / 1000);
+            info.bpm_min = info.bpm_max = chart.initial_bpm;
+            for (const ScrollSeg& sg : chart.scroll)
+                if (sg.bpm > 0) info.bpm_min = std::min(info.bpm_min, sg.bpm), info.bpm_max = std::max(info.bpm_max, sg.bpm);
+            static const char* gauge_names[kGaugeCount] = {"GROOVE", "HARD", "HAZARD", "EASY", "P-ATTACK", "G-ATTACK"};
+            info.gauge = judge.custom_play() >= 0 ? cfg.custom_gauge : gauge_names[judge.gauge_type()];
+            info.random = cfg.random, info.autoplay = opt.autoplay, info.replay = opt.replay, info.course = course != nullptr;
+            info.view_w = skin ? skin->width : app.view_w, info.view_h = skin ? skin->height : app.view_h;
+            const JudgeWindows& w = judge.windows();
+            info.pgreat[0] = w.pgreat, info.pgreat[1] = w.pgreat_late, info.great[0] = w.great, info.great[1] = w.great_late;
+            info.good[0] = w.good, info.good[1] = w.good_late, info.bad[0] = w.bad, info.bad[1] = w.bad_late;
+            scripts.play_start(info);
+            report_mod_errors();
+        }
         ctx.timers = SkinTimers();
         ctx.song_ms = -1;
         ctx.judge_draw = 0;
@@ -541,6 +568,21 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             }
             ctx.result_clear = (quit_early || judge.failed()) ? 1 : judge.clear();
             if (lamp_only && ctx.result_clear > 2) ctx.result_clear = 2;
+            if (!scripts.empty()) {
+                ModPlayResult mr;
+                mr.clear = ctx.result_clear, mr.exscore = ps.exscore(), mr.max_combo = ps.max_combo;
+                mr.bp = ps.bp() + ps.total_notes - ps.note_current, mr.total_notes = ps.total_notes;
+                for (int k = 0; k < 6; ++k) mr.judge[k] = ps.judge_count[k];
+                mr.judge[kPoor] -= ps.empty_poor, mr.judge[kEmptyPoor] = ps.empty_poor;  // POOR に数えた空POOR を分ける
+                mr.fast = ps.fast, mr.slow = ps.slow, mr.quit_early = quit_early;
+                static const char* gauge_names[kGaugeCount] = {"GROOVE", "HARD", "HAZARD", "EASY", "P-ATTACK", "G-ATTACK"};
+                for (int g = 0; g < kGaugeCount; ++g) mr.gauges.push_back({gauge_names[g], judge.gauge().hp(g)});
+                const auto keys = app.custom_gauges();
+                for (int k = 0; k < judge.custom_count() && k < static_cast<int>(keys.size()); ++k)
+                    mr.gauges.push_back({keys[k].first, judge.custom_hp(k)});
+                scripts.play_end(mr);
+                report_mod_errors();
+            }
             // 比較に使う「このプレイの前の自己ベスト」は、記録する前に取っておく
             ctx.old_exscore = has_best ? best_score.exscore : 0;
             ctx.old_maxcombo = has_best ? best_score.max_combo : 0;
@@ -1051,6 +1093,15 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 judge.sounds_to_stop().clear();
                 judge.sounds_to_play().clear();
                 for (const JudgeEvent& je : judge.events()) {
+                    if (!scripts.empty()) {
+                        ModJudgeInfo mi;
+                        mi.time_ms = je.time_us / 1000.0, mi.lane = je.lane;
+                        mi.judge = je.judge >= 100 ? je.judge - 100 : je.judge;
+                        mi.has_offset = je.has_offset, mi.offset_ms = je.offset_ms, mi.fast = je.fast;
+                        mi.mine = je.mine, mi.ln_end = je.ln_end;
+                        mi.combo = judge.stats().combo, mi.exscore = judge.stats().exscore(), mi.hp = judge.play_hp();
+                        scripts.judge(mi);
+                    }
                     if (je.mine) {
                         // 地雷：前の判定の絵をもう一度出す
                         ctx.timers.set(46, scene_ms_of(je.time_us));
@@ -1286,6 +1337,25 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
                 app.skin_renderer->draw_play(*skin, st);
+                if (!scripts.empty()) {
+                    // MOD が描くもの（スキンの座標で、スキンの上に重ねる）
+                    ModDrawState ds;
+                    ds.now_ms = now_ms, ds.song_ms = ctx.song_ms;
+                    ds.combo = judge.stats().combo, ds.exscore = judge.stats().exscore(), ds.hp = judge.play_hp();
+                    ds.view_w = skin->width, ds.view_h = skin->height;
+                    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+                    for (const ModDrawCmd& c : scripts.draw(ds)) {
+                        const uint8_t cr = (c.rgb >> 16) & 0xff, cg = (c.rgb >> 8) & 0xff, cb = c.rgb & 0xff;
+                        if (c.kind == ModDrawCmd::Kind::Rect) {
+                            SDL_SetRenderDrawColor(renderer, cr, cg, cb, c.alpha);
+                            SDL_FRect rc{c.x, c.y, c.w, c.h};
+                            SDL_RenderFillRect(renderer, &rc);
+                        } else {
+                            overlay_text.draw(c.x, c.y, c.size, SDL_Color{cr, cg, cb, c.alpha}, c.text, c.align);
+                        }
+                    }
+                    report_mod_errors();
+                }
                 if (int k = adjust_key()) {
                     // 調整している項目と値（LR2: Main.cpp:2176 の表示）
                     const SkinAdjust& a = st.adjust;

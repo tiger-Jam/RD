@@ -1,0 +1,9 @@
+{
+  "id": "judge-log",
+  "name": "判定の記録を書き出す",
+  "version": "1",
+  "author": "BMjoy",
+  "description": "1 回のプレーの判定を全部 CSV に書き出す（設定フォルダの moddata/judge-log/）",
+  "touches": ["evaluation"],
+  "script": "main.lua"
+}

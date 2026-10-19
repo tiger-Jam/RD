@@ -1,0 +1,9 @@
+{
+  "id": "judge-bar",
+  "name": "判定のずれのバー",
+  "version": "1",
+  "author": "BMjoy",
+  "description": "押したずれを横のバーに印で出す（左が早い、右が遅い）",
+  "touches": ["visual"],
+  "script": "main.lua"
+}
