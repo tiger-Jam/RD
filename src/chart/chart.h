@@ -85,6 +85,8 @@ struct Chart {
     double main_bpm = 130.0;
     int judge_rank = 2;  // LR2の#RANK。0=VERY HARD, 1=HARD, 2=NORMAL, 3=EASY
     double judge_scale = 1.0;  // 判定幅の倍率（bmson の judge_rank。100% = 1.0）
+    // BGA を持たない譜面（LR2: soundonly。BMS は 04・07 のチャンネルが 1 行も無い）。LR2files/Movie の動画を流す
+    bool sound_only = true;
     int64_t end_us = 0;  // 最後のイベントの時刻
 
     // 時刻からスクロール位置を求める（描画用）

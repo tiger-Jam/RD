@@ -32,6 +32,8 @@ public:
     bool open(const std::string& path, int key = -1);
     // 頭から再生し直す（LR2 は BGA に出るたびに頭から再生する）
     void restart();
+    // 終わったら頭に戻って繰り返す（BGA の無い譜面で流す LR2files/Movie の動画。LR2 と同じ）
+    void set_loop(bool loop) { loop_ = loop; }
     // 動画の時刻 t_ms までに出すべき一番新しいフレームを取り出す（新しいフレームが無ければ false）
     bool take(double t_ms, Frame& out);
     int width() const { return w_; }
@@ -47,6 +49,8 @@ private:
     std::condition_variable cv_;
     std::deque<Frame> queue_;
     bool stop_ = false, eof_ = false, restart_ = false;
+    bool loop_ = false;
+    double loop_offset_ = 0, last_t_ = 0;  // 繰り返すとき、2 周目からのフレームの時刻に足す分
     int key_ = -1;
 };
 

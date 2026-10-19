@@ -126,6 +126,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
             std::isdigit(static_cast<unsigned char>(up[5]))) {
             int measure = (up[1] - '0') * 100 + (up[2] - '0') * 10 + (up[3] - '0');
             int ch = (up[5] - '0') + hex_char(up[4]) * 10;
+            if (ch == 4 || ch == 7) res.chart.sound_only = false;
             std::string data = org.size() > 7 ? org.substr(7) : std::string();
             if (ch == 2) {
                 double len = std::atof(data.c_str());

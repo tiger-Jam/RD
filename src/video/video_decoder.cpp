@@ -1,5 +1,6 @@
 #include "video/video_decoder.h"
 
+#include <algorithm>
 #include <cstdio>
 
 namespace bmj {
@@ -57,6 +58,7 @@ void VideoDecoder::run() {
             if (restart_) {
                 restart_ = false, eof_ = false;
                 queue_.clear();
+                loop_offset_ = last_t_ = 0;
                 lock.unlock();
                 impl_->rewind();
                 continue;
@@ -64,10 +66,19 @@ void VideoDecoder::run() {
         }
         Frame f;
         if (!impl_->next(f)) {
+            if (loop_ && last_t_ > 0) {
+                // 繰り返す：1 フレーム分（約 1/30 秒）の間を空けて頭からつなぐ
+                loop_offset_ += last_t_ + 1000.0 / 30.0;
+                last_t_ = 0;
+                impl_->rewind();
+                continue;
+            }
             std::lock_guard<std::mutex> lock(mu_);
             if (!restart_) eof_ = true;
             continue;
         }
+        last_t_ = std::max(last_t_, f.t_ms);
+        f.t_ms += loop_offset_;
         if (key_ >= 0) {
             // 透過色の画素を透明にする（LR2 の SetTransColor と同じく、色がぴったり同じものだけ）
             const uint8_t kr = key_ >> 16 & 255, kg = key_ >> 8 & 255, kb = key_ & 255;

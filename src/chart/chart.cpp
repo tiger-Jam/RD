@@ -41,6 +41,8 @@ void Chart::make_constant_speed() {
 }
 
 void Chart::finish_import() {
+    for (const BgaEvent& b : bga)
+        if (b.layer != BgaEvent::Layer::Poor) sound_only = false;
     double pos = 0;
     for (size_t i = 0; i < scroll.size(); ++i) {
         ScrollSeg& s = scroll[i];

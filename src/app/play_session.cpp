@@ -185,6 +185,25 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         parsed.chart.make_constant_speed();
         opt.save_score = false;
     }
+    // BGA の無い譜面は、LR2files/Movie の動画を 1 本ランダムに選んで、頭から繰り返し流す（LR2: bmsload:4089。コースでは流さない）。
+    // 探す順は mpg → avi → wmv → mp4 → ogv で、最初に見つかった種類の中から選ぶ
+    std::string default_movie;
+    int default_movie_id = -1;
+    if (parsed.chart.sound_only && !opt.course && VideoDecoder::available()) {
+        for (const char* pat : {"LR2files/Movie/*.mpg", "LR2files/Movie/*.avi", "LR2files/Movie/*.wmv", "LR2files/Movie/*.mp4",
+                                "LR2files/Movie/*.ogv"})
+            if (!app.lr2_root.empty() && !(default_movie = resolve_lr2_path(app.lr2_root, pat, true)).empty()) break;
+        if (!default_movie.empty()) {
+            if (parsed.chart.bmp.empty()) parsed.chart.bmp.push_back("");
+            default_movie_id = static_cast<int>(parsed.chart.bmp.size());
+            parsed.chart.bmp.push_back("");
+            BgaEvent e;
+            e.time_us = 0;
+            e.layer = BgaEvent::Layer::Base;
+            e.image = static_cast<uint16_t>(default_movie_id);
+            parsed.chart.bga.insert(parsed.chart.bga.begin(), e);
+        }
+    }
     const Chart& chart = parsed.chart;
     // ハイスピのモード（仕様書6章）。フローティングは HS-FIX の倍率を使わず、基準の BPM で緑数字を合わせる
     const bool floating = cfg.hs_mode == 1;
@@ -251,6 +270,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     int total_sounds = static_cast<int>(std::count_if(paths.begin(), paths.end(), [](auto& p) { return !p.empty(); }));
     // BGAの画像と動画（動画は FFmpeg が読み込めたときだけ出す）
     std::vector<std::string> bga_paths = resolve_images(chart);
+    if (default_movie_id >= 0) bga_paths[default_movie_id] = default_movie;
     std::vector<std::unique_ptr<VideoDecoder>> videos(bga_paths.size());
     int total_images = 0;
     for (std::string& p : bga_paths) {
@@ -279,6 +299,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             if (bga_paths[i].empty()) continue;
             if (is_movie_file(bga_paths[i])) {
                 auto v = std::make_unique<VideoDecoder>();
+                v->set_loop(static_cast<int>(i) == default_movie_id);
                 if (v->open(bga_paths[i], video_key(bga_paths[i]))) videos[i] = std::move(v);
                 else std::printf("動画を開けない: %s\n", bga_paths[i].c_str());
             } else {
