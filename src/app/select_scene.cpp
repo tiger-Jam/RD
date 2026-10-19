@@ -486,37 +486,70 @@ void run_select(App& app) {
             }
             // 譜面だけを並べ替える（フォルダは元の順のまま前、持っていない譜面は後ろ）。
             // 記録で並べるもの（CLEAR / SCORE / MISSCOUNT）は、記録の無い譜面を後ろに回す。同じならタイトル順
-            if (sort_mode != 0)
+            if (sort_mode != 0) {
+                // 文字の並びは LR2 と同じく、Shift_JIS にして英字を大文字にしたもののバイト順
+                std::unordered_map<std::string, std::string> memo;
+                auto key = [&](const std::string& s) -> const std::string& {
+                    auto [it, fresh] = memo.try_emplace(s);
+                    if (fresh) {
+                        std::string k = utf8_to_cp932(s);
+                        for (size_t i = 0; i < k.size(); ++i) {
+                            unsigned char ch = static_cast<unsigned char>(k[i]);
+                            if ((ch >= 0x81 && ch <= 0x9F) || (ch >= 0xE0 && ch <= 0xFC)) {
+                                ++i;
+                                continue;
+                            }
+                            if (ch >= 'a' && ch <= 'z') k[i] = static_cast<char>(ch - 32);
+                        }
+                        it->second = std::move(k);
+                    }
+                    return it->second;
+                };
+                auto less_str = [&](const std::string& x, const std::string& y) {
+                    const std::string& kx = key(x);
+                    const std::string& ky = key(y);
+                    return std::lexicographical_compare(kx.begin(), kx.end(), ky.begin(), ky.end(), [](char p, char q) {
+                        return static_cast<unsigned char>(p) < static_cast<unsigned char>(q);
+                    });
+                };
+                auto title_of = [](const Entry& e) -> const std::string& {
+                    return e.kind == Entry::Kind::Chart ? e.chart->title : e.kind == Entry::Kind::Missing ? e.missing.title : e.label;
+                };
+                auto artist_of = [](const Entry& e) -> const std::string& {
+                    return e.kind == Entry::Kind::Chart ? e.chart->artist : e.kind == Entry::Kind::Missing ? e.missing.artist : e.sub;
+                };
+                // 譜面だけを並べ替える（フォルダは元の順のまま前）。曲名・アーティストは持っていない譜面も一緒に並べる。
+                // それ以外（BPM・長さ・レベル・記録）は持っていない譜面を後ろに回し、記録で並べるものは記録の無い譜面も後ろ。同じなら曲名順
                 std::stable_sort(v->begin(), v->end(), [&](const Entry& a, const Entry& b) {
                     bool fa = a.kind == Entry::Kind::Folder || a.kind == Entry::Kind::Course,
                          fb = b.kind == Entry::Kind::Folder || b.kind == Entry::Kind::Course;
                     if (fa || fb) return fa && !fb;
+                    auto by_title = [&] {
+                        const std::string& ta = title_of(a);
+                        const std::string& tb = title_of(b);
+                        if (ta != tb) return less_str(ta, tb);
+                        int da = a.kind == Entry::Kind::Chart ? a.chart->difficulty : 0, db = b.kind == Entry::Kind::Chart ? b.chart->difficulty : 0;
+                        return da < db;
+                    };
+                    if (sort_mode == 1) return by_title();
+                    if (sort_mode == 2) {
+                        const std::string& xa = artist_of(a);
+                        const std::string& xb = artist_of(b);
+                        return xa != xb ? less_str(xa, xb) : by_title();
+                    }
                     const ChartRecord* ca = a.kind == Entry::Kind::Chart ? a.chart : nullptr;
                     const ChartRecord* cb = b.kind == Entry::Kind::Chart ? b.chart : nullptr;
-                    if (!ca || !cb) return ca != nullptr && cb == nullptr;
-                    auto lower = [](std::string s) {
-                        for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-                        return s;
-                    };
-                    auto by_title = [&] {
-                        std::string ta = lower(ca->title), tb = lower(cb->title);
-                        return ta != tb ? ta < tb : ca->difficulty < cb->difficulty;
-                    };
+                    if (!ca || !cb) return ca ? true : cb ? false : by_title();
                     const ScoreRecord* sa = nullptr;
                     const ScoreRecord* sb = nullptr;
                     if (auto it = lib->scores.find(ca->sha256); it != lib->scores.end() && it->second.playcount > 0) sa = &it->second;
                     if (auto it = lib->scores.find(cb->sha256); it != lib->scores.end() && it->second.playcount > 0) sb = &it->second;
-                    auto by_record = [&](auto key) {
+                    auto by_record = [&](auto k) {
                         if (!sa || !sb) return sa != nullptr && sb == nullptr ? true : (!sa && !sb ? by_title() : false);
-                        auto ka = key(*sa, *ca), kb = key(*sb, *cb);
+                        auto ka = k(*sa, *ca), kb = k(*sb, *cb);
                         return ka != kb ? ka < kb : by_title();
                     };
                     switch (sort_mode) {
-                    case 1: return by_title();
-                    case 2: {
-                        std::string xa = lower(ca->artist), xb = lower(cb->artist);
-                        return xa != xb ? xa < xb : by_title();
-                    }
                     case 3: return ca->bpm_max != cb->bpm_max ? ca->bpm_max < cb->bpm_max : by_title();
                     case 4: return ca->length_ms != cb->length_ms ? ca->length_ms < cb->length_ms : by_title();
                     case 5:
@@ -524,12 +557,14 @@ void run_select(App& app) {
                         return ca->difficulty != cb->difficulty ? ca->difficulty < cb->difficulty : by_title();
                     case 6: return by_record([](const ScoreRecord& s, const ChartRecord&) { return static_cast<double>(s.clear); });
                     case 7:
-                        return by_record([](const ScoreRecord& s, const ChartRecord& c) {
-                            return c.notes > 0 ? static_cast<double>(s.exscore) / (c.notes * 2) : 0.0;
+                        return by_record([&](const ScoreRecord& s, const ChartRecord& c) {
+                            int n = c.notes + (app.cfg.ln_mode > 0 ? c.ln_free : 0);
+                            return n > 0 ? static_cast<double>(s.exscore) / (n * 2) : 0.0;
                         });
                     default: return by_record([](const ScoreRecord& s, const ChartRecord&) { return static_cast<double>(s.bp); });
                     }
                 });
+            }
             lv.view = v;
             lv.list = v.get();
         }
@@ -1715,6 +1750,13 @@ void run_select(App& app) {
             static size_t step = 0;
             const char* keys = std::getenv("BMJ_SELECT_KEYS");
             if (keys && keys[step]) {
+                // 開発用：BMJ_SELECT_FRAMES を指定すると、操作している間の毎フレームを保存する
+                if (const char* dir = std::getenv("BMJ_SELECT_FRAMES")) {
+                    static int frame_no = 0;
+                    char name[512];
+                    std::snprintf(name, sizeof(name), "%s/f%04d.bmp", dir, frame_no++);
+                    if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, name), SDL_DestroySurface(sf);
+                }
                 char k = keys[step++];
                 if (k == 'd') move(1);
                 else if (k == 'D') move(10);

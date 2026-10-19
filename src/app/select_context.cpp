@@ -254,8 +254,9 @@ int SelectContext::button(int t) const {
         return mode_filter >= 0 && mode_filter < 8 ? lr2[mode_filter] : 0;
     }
     case 12: {
-        // LR2 の並び（OFF, TITLE, LEVEL, FOLDER, CLEAR, RANK）に同じものがあればそのコマ。ARTIST・BPM・LENGTH・MISSCOUNT は LR2 に無いので OFF の絵
-        static const int lr2[] = {0, 1, 0, 0, 0, 2, 4, 5, 0};
+        // LR2 本体のソートの番号（0 フォルダ 1 レベル 2 曲名 3 クリア 4 スコア。docs/lr2_songlist_spec.md 4.4）のコマ。
+        // スキンの絵もこの並び。ARTIST・BPM・LENGTH・MISSCOUNT は LR2 に無いので OFF の絵
+        static const int lr2[] = {0, 2, 0, 0, 0, 1, 3, 4, 0};
         return sort_mode >= 0 && sort_mode < 9 ? lr2[sort_mode] : 0;
     }
     case 40: return cfg->gauge;
