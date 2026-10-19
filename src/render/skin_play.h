@@ -37,7 +37,9 @@ struct PlayContext {
     bool lane_cover_on = false;  // レーンカバーを使っていて、いま出している
     bool cover_adjusting = false;  // START か SELECT を押している（スキンの270：カバーの調整中）
     bool in_result = false;      // リザルト画面を描いている（タイマー40 は立たないので op80 が真）
-    bool result_flip = false;    // リザルトで 1P と 2P を入れ替える（#FLIPRESULT。入れ替えは未実装なので今は常に偽）
+    // リザルトで 1P と 2P を入れ替える（#FLIPRESULT。プレイスキンにあり、リザルトスキンに #DISABLEFLIP が無いとき）。
+    // 自分のスコアを 2P 側の番号に、ターゲットを 1P 側の番号に出す。更新の比較（170〜178・330〜335）とクリア（90/91）は自分のまま
+    bool result_flip = false;
     bool assist = false;         // 皿の自動演奏（op54/55）
     bool has_stagefile = false, has_backbmp = false;  // 画像を読めたか（op 190/191・194/195）
     // 表示用に補間した値（LR2: score_print / HP_print）。負なら補間せず実値を使う（リザルトなど）
@@ -73,6 +75,9 @@ struct PlayContext {
     bool option(int op) const;
     int number(int id) const;
     bool bargraph(int type, double& val, double& max) const;
+    bool option_raw(int op) const;
+    int number_raw(int id) const;
+    bool bargraph_raw(int type, double& val, double& max) const;
     bool slider(int type, int& val, int& lo, int& hi) const;
     std::string text(int id) const;
     int button(int type) const;

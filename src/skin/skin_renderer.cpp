@@ -411,8 +411,9 @@ void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
 
 // LR2: Proc_Result（Scene05_Result.cpp:30）。ゲージの推移グラフは80%未満とそれ以上で画像を描き分ける
 void SkinRenderer::add_gauge_chart(const Lr2Skin& skin, const PlaySkinState& st) {
-    const SkinObject& lo = skin.gaugechart[0];
-    const SkinObject& hi = skin.gaugechart[1];
+    const auto& chart = st.result_flip ? skin.gaugechart_2p : skin.gaugechart;
+    const SkinObject& lo = chart[0];
+    const SkinObject& hi = chart[1];
     if (!st.graph || lo.src.op[0] <= 0 || lo.dst.empty()) return;
     const PlayGraph& g = *st.graph;
     int gauge = std::clamp(st.graph_gauge, 0, kGaugeCount - 1);

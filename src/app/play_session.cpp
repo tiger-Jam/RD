@@ -395,16 +395,20 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             mixer.play_system(ctx.result_clear < 2 ? kSysFail : kSysClear);
             // リザルトスキンは、結果が決まってから読む（#IF でクリア・失敗などを見るスキンがあるため）
             ctx.in_result = true;
+            // リザルトのフリップ：プレイスキンの #FLIPRESULT で入れ替え、リザルトスキンの #DISABLEFLIP で打ち消す
+            ctx.result_flip = skin && skin->flip_result;
             app.load_result_skin(ctx.load_options());
             rskin = app.result_skin.get();
+            if (rskin && rskin->disable_flip) ctx.result_flip = false;
             // リザルトのスキンのカスタマイズ（op 900〜）は、リザルトのスキンの値を見る
             if (rskin) ctx.skin = rskin;
             rtimers = SkinTimers();
             rtimers.set(0, 0);
             result_start_ns = SDL_GetTicksNS();
             if (rskin) {
-                chart_op3 = rskin->gaugechart[0].src.op[2];
-                chart_op4 = rskin->gaugechart[0].src.op[3];
+                const auto& gc = ctx.result_flip ? rskin->gaugechart_2p : rskin->gaugechart;
+                chart_op3 = gc[0].src.op[2];
+                chart_op4 = gc[0].src.op[3];
                 app.set_view(rskin->width, rskin->height, false);
             }
         };
@@ -537,9 +541,51 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.cover_adjusting = held_start || held_select;
         };
 
+        // スライダー 4（レーンカバー）と 27（LIFT）をマウスでつかんで動かす（LR2: SliderByTime）
+        const SkinObject* dragging = nullptr;
+        auto slider_value = [&](const SkinObject& o, float mx, float my) {
+            SkinDraw d = eval_dst(o.dst, ctx.timers.lapse(o.dst.timer, (SDL_GetTicksNS() - scene_start) / 1e6));
+            float len = static_cast<float>(std::max(1, o.src.op[1]));
+            float r = o.src.op[0] == 0 ? (d.y + d.h / 2 - my) / len : o.src.op[0] == 1 ? (mx - d.x - d.w / 2) / len
+                      : o.src.op[0] == 2 ? (my - d.y - d.h / 2) / len : (d.x + d.w / 2 - mx) / len;
+            return static_cast<int>(std::lround(std::clamp(r, 0.0f, 1.0f) * 100));
+        };
+        auto drag_to = [&](float mx, float my) {
+            int v = slider_value(*dragging, mx, my);
+            if (dragging->src.op[2] == 27) cfg.lift_v = v;
+            else cfg.lane_cover_v = v;
+            if (floating) keep_green(cfg.fhs_green);
+        };
         while (!done) {
             SDL_Event e;
             while (SDL_PollEvent(&e)) {
+                if (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP)
+                    SDL_ConvertEventToRenderCoordinates(app.renderer, &e);
+                if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && skin && phase == Phase::Play &&
+                    !speed_locked && cover_movable()) {
+                    for (const SkinObject& o : skin->sliders) {
+                        int ty = o.src.op[2];
+                        bool usable = (ty == 4 && cfg.lane_cover) || (ty == 27 && cfg.lift);
+                        if (!usable || o.src.op[3] == 1 || o.dst.empty()) continue;
+                        SkinDraw d = eval_dst(o.dst, ctx.timers.lapse(o.dst.timer, (SDL_GetTicksNS() - scene_start) / 1e6));
+                        if (!d.visible) continue;
+                        float len = static_cast<float>(o.src.op[1]);
+                        SDL_FRect rc{d.x, d.y, d.w, d.h};
+                        if (o.src.op[0] == 0) rc.y -= len, rc.h += len;
+                        else if (o.src.op[0] == 1) rc.w += len;
+                        else if (o.src.op[0] == 2) rc.h += len;
+                        else rc.x -= len, rc.w += len;
+                        if (e.button.x >= rc.x && e.button.x < rc.x + rc.w && e.button.y >= rc.y && e.button.y < rc.y + rc.h) {
+                            dragging = &o;
+                            drag_to(e.button.x, e.button.y);
+                            break;
+                        }
+                    }
+                } else if (e.type == SDL_EVENT_MOUSE_MOTION && dragging) {
+                    drag_to(e.motion.x, e.motion.y);
+                } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) {
+                    dragging = nullptr;
+                }
                 switch (e.type) {
                 case SDL_EVENT_QUIT: quit = true, done = true, exit = PlayExit::Quit; break;
                 case SDL_EVENT_JOYSTICK_ADDED: SDL_OpenJoystick(e.jdevice.which); break;
@@ -882,6 +928,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.total_notes = judge.stats().total_notes;
                 st.chart_op3 = chart_op3;
                 st.chart_op4 = chart_op4;
+                st.result_flip = ctx.result_flip;
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
                 SDL_RenderClear(renderer);
                 app.result_renderer->draw_result(*rskin, st);
@@ -1053,9 +1100,11 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     std::printf("コースの結果: %s ランプ %d / EX %d / MAX COMBO %d / %d ノーツ\n", course.name.c_str(), clear, total.exscore(),
                 total.max_combo, total.total_notes);
     mixer.play_system(clear < 2 ? kSysCourseFail : kSysCourseClear);
+    ctx.result_flip = app.play_skin && app.play_skin->flip_result;
     app.load_courseresult_skin(ctx.load_options());
     Lr2Skin* rskin = app.courseresult_skin.get();
     if (!rskin) return PlayExit::Back;
+    if (rskin->disable_flip) ctx.result_flip = false;
     ctx.skin = rskin;
     app.set_view(rskin->width, rskin->height, false);
 
@@ -1115,6 +1164,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
         st.total_notes = total.total_notes;
         st.chart_op3 = chart_op3;
         st.chart_op4 = chart_op4;
+        st.result_flip = ctx.result_flip;
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         app.result_renderer->draw_result(*rskin, st);

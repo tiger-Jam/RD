@@ -5,7 +5,35 @@
 
 namespace bmj {
 
-bool PlayContext::option(int option) const {
+namespace {
+// フリップ中の番号の読み替え：1P 側 lo1..hi1 と 2P 側（+d）を入れ替える
+int flip_id(int id, int lo1, int hi1, int d) {
+    if (id >= lo1 && id <= hi1) return id + d;
+    if (id >= lo1 + d && id <= hi1 + d) return id - d;
+    return id;
+}
+}  // namespace
+
+bool PlayContext::option(int op) const {
+    if (result_flip && in_result) {
+        int a = op < 0 ? -op : op;
+        a = flip_id(a, 300, 308, 10);  // ランク（300〜307）と EX 0（308）↔ 2P（310〜318）
+        return option_raw(op < 0 ? -a : a);
+    }
+    return option_raw(op);
+}
+
+int PlayContext::number(int id) const {
+    if (result_flip && in_result) id = flip_id(id, 100, 116, 20);  // スコア・判定数など ↔ 2P（120〜136）
+    return number_raw(id);
+}
+
+bool PlayContext::bargraph(int type, double& val, double& max) const {
+    if (result_flip && in_result) type = flip_id(type, 20, 27, 10);  // 判定の割合など ↔ 2P（30〜37）
+    return bargraph_raw(type, val, max);
+}
+
+bool PlayContext::option_raw(int option) const {
     bool ret = option >= 0;
     if (!ret) option = -option;
     const PlayStats* st = stats();
@@ -135,7 +163,7 @@ bool PlayContext::option(int option) const {
 }
 
 // LR2: SetObjectValue_Num（skinobject:1643）。知らない番号は -1、知っている番号で値が無いものは 0
-int PlayContext::number(int id) const {
+int PlayContext::number_raw(int id) const {
     switch (id) {
     case 10: case 11: return hi_speed;
     case 12: return judge_timing;
@@ -256,7 +284,7 @@ int PlayContext::number(int id) const {
     }
 }
 
-bool PlayContext::bargraph(int type, double& val, double& max) const {
+bool PlayContext::bargraph_raw(int type, double& val, double& max) const {
     const PlayStats* st = stats();
     switch (type) {
     case 1:
@@ -288,7 +316,7 @@ bool PlayContext::bargraph(int type, double& val, double& max) const {
     case 23: val = st->judge_count[kBad]; max = n; return true;
     case 24: val = st->judge_count[kPoor]; max = n; return true;
     case 25: val = st->max_combo; max = n; return true;
-    case 26: val = number(100); max = 200000; return true;
+    case 26: val = number_raw(100); max = 200000; return true;
     default: return false;
     }
 }
@@ -297,6 +325,7 @@ bool PlayContext::slider(int type, int& val, int& lo, int& hi) const {
     switch (type) {
     case 2: val = hi_speed, lo = 10, hi = 990; return true;
     case 4: val = lane_cover_on ? lane_cover : 0, lo = 0, hi = 100; return true;
+    case 27: case 28: val = lift, lo = 0, hi = 100; return true;  // LIFT（OpenLR2 の拡張）
     case 6:
         if (song_ms >= 0 && chart) val = static_cast<int>(song_ms), lo = 0, hi = static_cast<int>(chart->end_us / 1000);
         else val = 0, lo = 0, hi = 1;

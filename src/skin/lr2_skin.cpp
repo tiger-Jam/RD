@@ -441,14 +441,16 @@ struct Loader {
             int i = lane_idx(5);
             if (i < 0) return;
             read_dst(sk.nowcombo[p][i].dst, c, t_skin);
-        } else if (cmd == "#SRC_GAUGECHART_1P" || cmd == "#SRC_SCORECHART") {
-            bool g = cmd == "#SRC_GAUGECHART_1P";
+        } else if (cmd == "#SRC_GAUGECHART_1P" || cmd == "#SRC_GAUGECHART_2P" || cmd == "#SRC_SCORECHART") {
+            bool g = cmd != "#SRC_SCORECHART";
             int i = lane_idx(g ? 1 : 2);
-            if (i >= 0) src_into(g ? sk.gaugechart[i].src : sk.scorechart[i].src);
-        } else if (cmd == "#DST_GAUGECHART_1P" || cmd == "#DST_SCORECHART") {
-            bool g = cmd == "#DST_GAUGECHART_1P";
+            auto& gc = cmd == "#SRC_GAUGECHART_2P" ? sk.gaugechart_2p : sk.gaugechart;
+            if (i >= 0) src_into(g ? gc[i].src : sk.scorechart[i].src);
+        } else if (cmd == "#DST_GAUGECHART_1P" || cmd == "#DST_GAUGECHART_2P" || cmd == "#DST_SCORECHART") {
+            bool g = cmd != "#DST_SCORECHART";
             int i = lane_idx(g ? 1 : 2);
-            if (i >= 0) read_dst(g ? sk.gaugechart[i].dst : sk.scorechart[i].dst, c, t_skin);
+            auto& gc = cmd == "#DST_GAUGECHART_2P" ? sk.gaugechart_2p : sk.gaugechart;
+            if (i >= 0) read_dst(g ? gc[i].dst : sk.scorechart[i].dst, c, t_skin);
         } else if (cmd == "#SRC_GROOVEGAUGE" || cmd == "#SRC_LINE" || cmd == "#SRC_JUDGELINE") {
             int i = lane_idx(1);
             if (i < 0) return;

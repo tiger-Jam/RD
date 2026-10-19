@@ -118,6 +118,7 @@ struct Lr2Skin {
     std::array<std::array<SkinObject, 6>, 2> nowjudge, nowcombo;
     // リザルト画面のグラフ（ゲージの推移：0=80%未満, 1=それ以上／スコアの推移：0=自分, 1=自己ベスト, 2=ターゲット）
     std::array<SkinObject, 2> gaugechart;
+    std::array<SkinObject, 2> gaugechart_2p;  // 2P 側（#FLIPRESULT のとき自分のグラフをここに描く）
     std::array<SkinObject, 3> scorechart;
 
     // 選曲画面：曲リストのバー（本体の種類 0..29、タイトル 0..4、レベル 0..10、ランプ類 0..9）
