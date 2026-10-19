@@ -51,6 +51,9 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "score_graph") score_graph = iv != 0;
         else if (key == "replay_save") replay_save = std::clamp(iv, 0, 4);
         else if (key == "no_right_click_exit") no_right_click_exit = iv != 0;
+        else if (key == "select_difficulty") select_difficulty = std::clamp(iv, 0, 5);
+        else if (key == "select_mode") select_mode = std::clamp(iv, 0, 7);
+        else if (key == "select_sort") select_sort = std::clamp(iv, 0, 8);
         else if (key == "ln_mode") ln_mode = iv;
         else if (key == "fhs_green") fhs_green = iv;
         else if (key == "fhs_base") fhs_base = iv;
@@ -124,6 +127,9 @@ bool AppConfig::save(const std::string& path) const {
     f << "ghost = " << ghost << "  # ゴーストの位置 0=OFF 1=TYPE A 2=TYPE B 3=TYPE C\n";
     f << "score_graph = " << (score_graph ? 1 : 0) << "  # スコアグラフ 0=OFF 1=ON\n";
     f << "replay_save = " << replay_save << "  # リプレイの保存 0=OFF 1=ALWAYS 2=HISCORE 3=CLEAR 4=FULLCOMBO\n";
+    f << "select_difficulty = " << select_difficulty << "  # 選曲の難易度の絞り込み 0=ALL 1〜5\n";
+    f << "select_mode = " << select_mode << "  # 選曲の鍵盤数の絞り込み 0=ALL 1=7KEY 2=14KEY 3=9KEY 4=5KEY 5=10KEY 6=SINGLE 7=DOUBLE\n";
+    f << "select_sort = " << select_sort << "  # 選曲のソート 0=OFF 1=TITLE 2=ARTIST 3=BPM 4=LENGTH 5=LEVEL 6=CLEAR 7=SCORE 8=MISSCOUNT\n";
     f << "no_right_click_exit = " << (no_right_click_exit ? 1 : 0) << "  # 1=演奏中の右クリックで曲を終えない\n";
     f << "bga = " << bga << "  # BGA 0=OFF 1=ON 2=オートプレイのときだけ 3=NO MISS\n";
     f << "hs_mode = " << hs_mode << "  # ハイスピ 0=クラシック 1=フローティング\n";

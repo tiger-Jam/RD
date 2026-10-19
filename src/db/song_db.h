@@ -22,6 +22,7 @@ struct ChartRecord {
     double bpm_min = 0, bpm_max = 0, bpm_main = 0;
     int length_ms = 0;
     bool scratch = true;
+    int keys = 7;  // 鍵盤数（5 か 7。6・7 鍵にノーツが無ければ 5。LR2: songmanage:3003）
     std::string banner, stagefile, backbmp;  // 譜面に書かれた画像のファイル名（譜面のフォルダからの相対）
     int64_t mtime = 0, size = 0;
 };

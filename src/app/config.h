@@ -57,6 +57,8 @@ struct AppConfig {
     bool score_graph = false; // スコアグラフ（LR2: scoregraph）
     // リプレイの保存（LR2: replaysave）。0=OFF 1=ALWAYS 2=HISCORE（EX がベスト以上） 3=CLEAR 4=FULLCOMBO
     int replay_save = 0;
+    // 選曲の絞り込みとソート（LR2: select.difficulty など）。0=ALL / OFF
+    int select_difficulty = 0, select_mode = 0, select_sort = 0;
     bool no_right_click_exit = false;  // 演奏中の右クリックで曲を終えない（LR2: disableleftclickexit）
     // fps：0 はモニタのリフレッシュレート、-1 は上限なし。垂直同期は既定で使わない
     // （OpenLR2と同じく、描画を待つ間も入力と判定を回すため）

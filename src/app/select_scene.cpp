@@ -46,7 +46,15 @@ namespace {
 constexpr int kSortCount = 9, kModeCount = 8;
 const char* const kSortNames[kSortCount] = {"OFF", "TITLE", "ARTIST", "BPM", "LENGTH", "LEVEL", "CLEAR", "SCORE", "MISSCOUNT"};
 const char* const kModeNames[kModeCount] = {"ALL", "7KEY", "14KEY", "9KEY", "5KEY", "10KEY", "SINGLE", "DOUBLE"};
-const bool kModeShows7[kModeCount] = {true, true, false, false, false, false, true, false};
+// 鍵盤数の絞り込みで、その譜面を出すか。BMjoy の譜面は 7 鍵と 5 鍵だけ（持っていない譜面は 7 鍵として扱う）
+bool mode_shows(int mode, int keys) {
+    switch (mode) {
+    case 0: case 6: return true;  // ALL・SINGLE
+    case 1: return keys == 7;
+    case 4: return keys == 5;
+    default: return false;        // 14KEY・9KEY・10KEY・DOUBLE
+    }
+}
 
 struct Entry {
     enum class Kind { Folder, Chart, Missing, Course } kind = Kind::Folder;
@@ -108,8 +116,10 @@ std::vector<Entry> build_tree(const Library& lib) {
             Entry lf;
             lf.badge = t.symbol + lv;
             lf.label = t.symbol + lv;
+            std::set<std::string> seen;  // 同じ譜面は 1 回だけ（LR2 と同じ）
             for (const TableChart& tc : t.charts) {
                 if (tc.level != lv) continue;
+                if (!tc.md5.empty() && !seen.insert(tc.md5).second) continue;
                 auto it = by_md5.find(tc.md5);
                 if (it != by_md5.end()) {
                     lf.children.push_back(chart_entry(it->second, lf.badge));
@@ -441,17 +451,14 @@ void run_select(App& app) {
     // 起動の画面で読み直し済みなら、ここでは読み直さない
     if (app.cfg.db_update == 0 && !app.updated_at_start) refresh();
 
+    // 絞り込みとソートは設定に残し、次に起動しても同じにする（LR2 と同じ）。
     // 難易度の絞り込み（LR2: select.difficulty。0=ALL 1..5=BEGINNER..INSANE）。譜面の並ぶ一覧だけに効く
-    int difficulty_filter = 0;
+    int& difficulty_filter = app.cfg.select_difficulty;
     // 鍵盤数の絞り込みとソートは、LR2 ではなく beatoraja の項目と並びに合わせる（BMjoy の拡張。LR2 のソートは実用にならないため）。
-    // 鍵盤数：kModeNames の順。BMjoy の譜面は 7 鍵だけなので、ALL / 7KEY / SINGLE 以外では譜面が出ない
-    int mode_filter = 0;
+    // 鍵盤数：kModeNames の順。BMjoy の譜面は 7 鍵と 5 鍵だけなので、14KEY などでは譜面が出ない（出る項目まで進める）
+    int& mode_filter = app.cfg.select_mode;
     // ソート：kSortNames の順。0 の OFF は並べ替えない（難易度表やフォルダの順のまま）
-    int sort_mode = 0;
-    auto lamp_of = [&](const ChartRecord* c) {
-        auto it = lib->scores.find(c->sha256);
-        return it != lib->scores.end() ? it->second.clear : 0;
-    };
+    int& sort_mode = app.cfg.select_sort;
     struct Level {
         const std::vector<Entry>* full;  // 絞り込む前の一覧
         int cursor;
@@ -464,6 +471,17 @@ void run_select(App& app) {
     auto make_level = [&](const std::vector<Entry>* full, int cursor, const std::string& name, bool lr2_filter = false,
                           std::string dir = {}) {
         Level lv{full, cursor, name, nullptr, full, lr2_filter, std::move(dir)};
+        // 鍵盤数の絞り込みで譜面が 1 つも出なくなるなら、出る項目まで進める（LR2: songmanage:2590）
+        auto keys_of = [](const Entry& e) { return e.kind == Entry::Kind::Chart && e.chart ? e.chart->keys : 7; };
+        bool any_song = false;
+        for (const Entry& e : *full) any_song = any_song || e.kind == Entry::Kind::Chart || e.kind == Entry::Kind::Missing;
+        for (int tries = 0; any_song && tries < kModeCount; ++tries) {
+            bool shown = false;
+            for (const Entry& e : *full)
+                if ((e.kind == Entry::Kind::Chart || e.kind == Entry::Kind::Missing) && mode_shows(mode_filter, keys_of(e))) shown = true;
+            if (shown) break;
+            mode_filter = (mode_filter + 1) % kModeCount;
+        }
         // 難易度の絞り込み（LR2: songmanage:2034）。曲フォルダ（同じフォルダの差分）ごとに、選んだ難易度以下で一番上の譜面を出す。
         // 以下が無ければ一番下の譜面。曲は消えない。選んだ難易度の譜面が一覧に 1 つも無ければ、難易度を自動で進める
         bool use_diff = lr2_filter && difficulty_filter != 0;
@@ -487,11 +505,11 @@ void run_select(App& app) {
             }
             for (auto& [f, r] : range) shown_diff[f] = r.first >= 0 ? r.first : r.second;
         }
-        if (use_diff || !kModeShows7[mode_filter] || sort_mode != 0) {
+        if (use_diff || mode_filter != 0 || sort_mode != 0) {
             auto v = std::make_shared<std::vector<Entry>>();
             for (const Entry& e : *full) {
                 if (e.kind != Entry::Kind::Folder && e.kind != Entry::Kind::Course) {
-                    if (!kModeShows7[mode_filter]) continue;
+                    if (!mode_shows(mode_filter, keys_of(e))) continue;
                     if (use_diff && e.kind == Entry::Kind::Chart && e.chart->difficulty != shown_diff[e.chart->folder]) continue;
                 }
                 v->push_back(e);
@@ -618,12 +636,7 @@ void run_select(App& app) {
     sctx.catalog = &catalog;
     sctx.player = app.db.player_stats();
     std::unordered_map<std::string, bool> folder_has_text;  // 曲のフォルダに .txt があるか（op 175）
-    auto set_select_view = [&] {
-        if (sk) app.set_view(sk->width, sk->height);
-        else app.set_view(1280, 720);
-    };
-    set_select_view();
-    const uint64_t scene_start = SDL_GetTicksNS();
+    uint64_t scene_start = SDL_GetTicksNS();
     auto scene_ms = [&] { return (SDL_GetTicksNS() - scene_start) / 1e6; };
     sctx.timers.set(0, 0);
     // 曲リストのスクロール（仕様 3.1・3.5。1曲=1000。カーソルの曲は lv.cursor が持ち、見た目だけを補間する）
@@ -631,6 +644,20 @@ void run_select(App& app) {
     double move_start = 0, move_end = 0;
     float mouse_x = -1, mouse_y = -1;
     double mouse_moved_ms = -1e9;
+    // 描く大きさを選曲スキンに合わせる。restart なら画面を始め直す（LR2 と同じく、プレイ・決定画面・キーコンフィグ・
+    // スキンセレクトから戻るたびに、タイマー 0 から入場の演出をやり直し、#STARTINPUT まで入力を受けない）
+    auto set_select_view = [&](bool restart = true) {
+        if (sk) app.set_view(sk->width, sk->height);
+        else app.set_view(1280, 720);
+        if (!restart) return;
+        scene_start = SDL_GetTicksNS();
+        sctx.timers = SkinTimers();
+        sctx.timers.set(0, 0);
+        move_start = move_end = 0;
+        list_top = old_bar = now_bar;
+        mouse_moved_ms = -1e9;
+    };
+    set_select_view(false);
     const SkinObject* dragging = nullptr;  // つかんでいるスライダー（種別1：曲リスト、7：カスタマイズ項目）
     // 選曲スキン（やそのカスタマイズ）を替えたら、読み直して描き直す
     auto reload_select_skin = [&] {
@@ -981,6 +1008,7 @@ void run_select(App& app) {
     bool editing = false;
     std::string edit_buf;
     std::list<std::vector<Entry>> search_results;  // 検索結果の一覧（スタックから指すので消さずに持つ）
+    bool search_failed = false;
     auto run_search = [&](const std::string& q) {
         if (q.empty()) return;
         auto lower = [](std::string x) {
@@ -1000,6 +1028,7 @@ void run_select(App& app) {
         }
         std::string lq = lower(q);
         std::vector<Entry> hits;
+        std::set<std::string> seen;  // 同じ譜面（md5）は 1 回だけ（LR2 と同じ）
         for (const ChartRecord& c : lib->charts) {
             bool ok;
             if (bpm >= 0) ok = static_cast<int>(c.bpm_max) == bpm || static_cast<int>(c.bpm_min) == bpm;
@@ -1008,7 +1037,7 @@ void run_select(App& app) {
                 ok = lower(c.title).find(lq) != std::string::npos || lower(c.subtitle).find(lq) != std::string::npos ||
                      lower(c.artist).find(lq) != std::string::npos || lower(c.subartist).find(lq) != std::string::npos ||
                      lower(c.genre).find(lq) != std::string::npos;
-            if (!ok) continue;
+            if (!ok || !seen.insert(c.md5).second) continue;
             Entry e;
             e.kind = Entry::Kind::Chart;
             e.chart = &c;
@@ -1019,6 +1048,8 @@ void run_select(App& app) {
         }
         std::string name = q + (hits.size() == 1 ? " (1 HIT)" : " (" + std::to_string(hits.size()) + " HITS)");
         std::printf("検索: %s\n", name.c_str());
+        // 見つからなければ検索欄に「SEARCH FAILED」と出す（LR2 と同じ。次に入力を始めるまで）
+        search_failed = hits.empty();
         if (hits.empty()) return;
         search_results.push_back(std::move(hits));
         stack.push_back(make_level(&search_results.back(), 0, name));
@@ -1168,10 +1199,14 @@ void run_select(App& app) {
                         input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
                         set_select_view();
                     } else if (ty == 15 || ty == 16) {
-                        bool was = autoplay;
-                        autoplay = ty == 16;
-                        decide();
-                        autoplay = was;
+                        // 通常 / オートで始める。曲とコースのときだけ（フォルダは開かない。LR2 と同じ）
+                        const Entry* cur = current();
+                        if (cur && (cur->kind == Entry::Kind::Chart || cur->kind == Entry::Kind::Course)) {
+                            bool was = autoplay;
+                            autoplay = ty == 16;
+                            decide();
+                            autoplay = was;
+                        }
                     } else if (ty == 40) loop(app.cfg.gauge, kGroove, kGAttack);
                     else if (ty == 46) app.cfg.lane_cover = !app.cfg.lane_cover, app.mixer.play_system(kSysOptionChange);
                     else if (ty == 42) loop(app.cfg.random, 0, 5);
@@ -1613,7 +1648,8 @@ void run_select(App& app) {
                 }
                 sctx.has_text = it->second;
             }
-            sctx.folder_name = editing ? edit_buf + "|" : stack.size() > 1 ? lv.name : "検索語句を入力";
+            if (editing) search_failed = false;
+            sctx.folder_name = editing ? edit_buf + "|" : search_failed ? "SEARCH FAILED" : stack.size() > 1 ? lv.name : "検索語句を入力";
             sctx.panel = panel;
             sctx.difficulty_filter = difficulty_filter;
             sctx.mode_filter = mode_filter;

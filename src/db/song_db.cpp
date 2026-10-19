@@ -14,6 +14,7 @@
 
 #include "chart/bms_parser.h"
 #include "chart/chart_loader.h"
+#include "game/lane_option.h"
 #include "sqlite3.h"
 #include "util/hash.h"
 #include "util/text.h"
@@ -31,7 +32,7 @@ CREATE TABLE IF NOT EXISTS chart(
     title TEXT, subtitle TEXT, artist TEXT, subartist TEXT, genre TEXT,
     playlevel INTEGER, difficulty INTEGER, notes INTEGER, ln INTEGER, rank INTEGER, total INTEGER,
     bpm_min REAL, bpm_max REAL, bpm_main REAL, length_ms INTEGER, scratch INTEGER,
-    mtime INTEGER, size INTEGER, banner TEXT, stagefile TEXT, backbmp TEXT, ln_free INTEGER DEFAULT 0);
+    mtime INTEGER, size INTEGER, banner TEXT, stagefile TEXT, backbmp TEXT, ln_free INTEGER DEFAULT 0, keys INTEGER DEFAULT 7);
 CREATE INDEX IF NOT EXISTS chart_md5 ON chart(md5);
 CREATE INDEX IF NOT EXISTS chart_sha256 ON chart(sha256);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
@@ -126,6 +127,7 @@ ChartRecord read_chart_row(const Stmt& st) {
     r.stagefile = st.col_text(23);
     r.backbmp = st.col_text(24);
     r.ln_free = static_cast<int>(st.col_i64(25));
+    r.keys = static_cast<int>(st.col_i64(26));
     return r;
 }
 
@@ -134,7 +136,7 @@ constexpr const char* kProvisional = "md5:";
 
 const char* kChartColumns =
     "path, folder, sha256, md5, title, subtitle, artist, subartist, genre, playlevel, difficulty, notes, ln, rank, "
-    "total, bpm_min, bpm_max, bpm_main, length_ms, scratch, mtime, size, banner, stagefile, backbmp, ln_free";
+    "total, bpm_min, bpm_max, bpm_main, length_ms, scratch, mtime, size, banner, stagefile, backbmp, ln_free, keys";
 
 }  // namespace
 
@@ -180,6 +182,7 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     r.bpm_main = c.main_bpm;
     r.length_ms = static_cast<int>(c.end_us / 1000);
     r.scratch = c.layout == KeyLayout::K7S;
+    r.keys = key_count(c);
     r.banner = c.meta.banner;
     r.stagefile = c.meta.stagefile;
     r.backbmp = c.meta.backbmp;
@@ -253,9 +256,17 @@ bool SongDb::open(const std::string& path) {
         if (!has_ln_free && has_banner)
             sqlite3_exec(db_, "ALTER TABLE chart ADD COLUMN ln_free INTEGER DEFAULT 0; UPDATE chart SET mtime = 0;", nullptr, nullptr, nullptr);
     }
+    // 古いデータベースに鍵盤数の欄を足す（読み方の版を上げてあるので、次の読み直しで入る）
+    {
+        bool has_keys = false;
+        Stmt info(db_, "PRAGMA table_info(chart)");
+        while (info.step())
+            if (info.col_text(1) == "keys") has_keys = true;
+        if (!has_keys && has_banner) sqlite3_exec(db_, "ALTER TABLE chart ADD COLUMN keys INTEGER DEFAULT 7;", nullptr, nullptr, nullptr);
+    }
     // 譜面の読み方を変えたら kParserVersion を上げる。古い版で読んだ譜面は、次の読み直しで全部読み直させる
     {
-        constexpr int kParserVersion = 2;  // 2: 題名と副題の分け方・#GENRE の難易度・曲データベースの #IF 1（2026-10-19）
+        constexpr int kParserVersion = 2;  // 2: 題名と副題の分け方・#GENRE の難易度・曲データベースの #IF 1・鍵盤数（2026-10-19）
         int64_t v = 0;
         Stmt get(db_, "SELECT value FROM meta WHERE key = 'parser_version'");
         if (get.step()) v = get.col_i64(0);
@@ -269,6 +280,7 @@ bool SongDb::open(const std::string& path) {
         sqlite3_exec(db_,
                      "ALTER TABLE chart ADD COLUMN banner TEXT; ALTER TABLE chart ADD COLUMN stagefile TEXT; "
                      "ALTER TABLE chart ADD COLUMN backbmp TEXT; ALTER TABLE chart ADD COLUMN ln_free INTEGER DEFAULT 0; "
+                     "ALTER TABLE chart ADD COLUMN keys INTEGER DEFAULT 7; "
                      "UPDATE chart SET mtime = 0;",
                      nullptr, nullptr, nullptr);
     }
@@ -287,11 +299,11 @@ void put_chart(Stmt& ins, const ChartRecord& r) {
         .text(7, r.artist).text(8, r.subartist).text(9, r.genre).i64(10, r.playlevel).i64(11, r.difficulty)
         .i64(12, r.notes).i64(13, r.ln).i64(14, r.rank).i64(15, r.total).dbl(16, r.bpm_min).dbl(17, r.bpm_max)
         .dbl(18, r.bpm_main).i64(19, r.length_ms).i64(20, r.scratch).i64(21, r.mtime).i64(22, r.size)
-        .text(23, r.banner).text(24, r.stagefile).text(25, r.backbmp).i64(26, r.ln_free);
+        .text(23, r.banner).text(24, r.stagefile).text(25, r.backbmp).i64(26, r.ln_free).i64(27, r.keys);
     ins.run();
 }
 std::string insert_chart_sql() {
-    return std::string("INSERT OR REPLACE INTO chart(") + kChartColumns + ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    return std::string("INSERT OR REPLACE INTO chart(") + kChartColumns + ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 }
 }  // namespace
 

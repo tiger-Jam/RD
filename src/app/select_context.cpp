@@ -85,11 +85,15 @@ bool SelectContext::option(int op) const {
     case 54: return !cfg->assist;
     case 55: return cfg->assist;
     case 56: return true;  // 2P のアシスト OFF
-    case 61: return true;   // スコアが保存される
+    // スコアが残るか（LR2: CheckScoreSaveConditon）。皿の自動演奏・CONSTANT・SCATTER・CONVERGE はランプだけ
+    case 60: case 61: {
+        bool lamp_only = cfg->assist || cfg->hs_fix == 4 || cfg->random >= 4;
+        return lamp_only == (op == 60);
+    }
     case 62: case 63: case 64: case 65: case 66: {
-        // SCATTER と皿の自動演奏は EASY 止まり
+        // 取れるランプの上限（LR2: CheckClearLampChallenge）。上の 4 つは EASY 止まり
         int lamp = gauge_lamp(cfg->gauge);
-        if ((cfg->assist && cfg->random != 5) || cfg->random == 4) lamp = std::min(lamp, 1);
+        if (cfg->assist || cfg->hs_fix == 4 || cfg->random >= 4) lamp = std::min(lamp, 1);
         return lamp == op - 62;
     }
     case 100: case 101: case 102: case 103: case 104: case 105: return (song || course) && lamp == op - 100;
