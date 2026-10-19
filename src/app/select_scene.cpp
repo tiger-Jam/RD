@@ -532,18 +532,31 @@ void run_select(App& app) {
     app.set_view(1280, 720);
 
     // 手元にあるものですぐに一覧を出し、曲フォルダの読み直しと難易度表の更新は裏で行う
+    // 開発用：BMJ_TIMING があれば、最初の絵までの内訳を出す
+    uint64_t lap_ns = SDL_GetTicksNS();
+    auto lap = [&](const char* what) {
+        if (!dev_env("BMJ_TIMING")) return;
+        uint64_t now = SDL_GetTicksNS();
+        std::printf("  選曲画面の準備：%s %.0f ms\n", what, (now - lap_ns) / 1e6);
+        lap_ns = now;
+    };
     auto lib = std::make_shared<Library>();
     load_charts(*lib, app.db, app.cfg);
+    lap("譜面");
     for (const std::string& u : app.cfg.tables) {
         DifficultyTable t;
         if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
         lib->tables.push_back(std::move(t));
     }
     const int profile = app.mod_profile();  // MOD の組み合わせごとに記録を分ける
+    lap("難易度表");
     for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
+    lap("記録");
     std::unordered_map<std::string, int> favs = app.db.favorites();
     load_custom(*lib, app, favs);
+    lap("カスタムフォルダ");
     std::vector<Entry> root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
+    lap("一覧");
     // フォルダランプ（LR2: folderlamp）。フォルダの中の譜面のランプの一番低いもの。記録か一覧が変わったら数え直す
     std::unordered_map<const Entry*, int> folder_lamps;
 
@@ -771,7 +784,8 @@ void run_select(App& app) {
     std::vector<Level> stack{make_level(&root, 0, "BMjoy")};
     // フォルダ → その中の譜面（一覧を差し替えたら作り直す）
     std::unordered_map<std::string, std::vector<const ChartRecord*>> folder_charts;
-    app.mixer.play_system(kSysSelect, true);  // 選曲BGM（ループ）
+    // 選曲 BGM（ループ）は、最初の絵を出してから鳴らす（準備のあいだに音だけが先に鳴らないように）
+    bool bgm_pending = true;
     bool autoplay = false;
     InputMapper input(app.keycfg);
     input.set_min_hold_ms(app.cfg.input_interval);
@@ -787,6 +801,7 @@ void run_select(App& app) {
 
     // 選曲スキン（docs/lr2_select_spec.md）。読めなければ BMjoy の仮の画面
     OptionNames opt_names;
+    lap("そのほか");
     opt_names.load(app.lr2_root);
     SelectContext sctx;
     sctx.cfg = &app.cfg;
@@ -798,6 +813,7 @@ void run_select(App& app) {
     }
     Lr2Skin* sk = app.select_skin.get();
     sctx.skin = sk;
+    lap("スキン");
     // スキンセレクト（WMIX のパネル2・LR2 標準のスキンセレクト画面）
     SkinCatalog catalog;
     catalog.scan(app.lr2_root);
@@ -1004,6 +1020,45 @@ void run_select(App& app) {
     bool to_skin_select = false;  // スキンセレクトへ移るためにフェードアウトしている
     std::string replay_checked;  // リプレイの有無を見た譜面（遊んだあとは空にして見直す）
     bool replay_found = false;
+    bool resort_pending = false;  // 記録で並べているときに、記録が変わったので並べ直す（次のフレームで）
+    // 遊んだあとに、スコアとプレイヤーの累計を読み直す（refreshed：仮の譜面を読み直したので一覧から作り直す）。
+    // played は遊んだ譜面（コースならコースとステージ）の sha256。空なら全部の記録を読み直す
+    auto reload_after_play = [&](bool refreshed, const std::vector<std::string>& played = {}) {
+        const uint64_t t0 = SDL_GetTicksNS();
+        auto ms = [](uint64_t a, uint64_t b) { return (b - a) / 1e6; };
+        if (refreshed) {
+            auto lib2 = std::make_shared<Library>();
+            load_charts(*lib2, app.db, app.cfg);
+            lib2->tables = lib->tables;
+            for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib2->scores[s.sha256] = s;
+            std::lock_guard<std::mutex> lock(mu);
+            pending = lib2;
+        } else {
+            if (played.empty()) {
+                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
+            } else {
+                // 遊んだ譜面の記録だけを読み直す（全部を読み直すと、譜面が多いときに選曲画面へ戻るのが遅い）
+                for (const std::string& sha : played) {
+                    ScoreRecord r;
+                    if (app.db.get_score(sha, r, app.cfg.ln_mode, profile)) lib->scores[sha] = r;
+                }
+            }
+            const uint64_t t1 = SDL_GetTicksNS();
+            folder_lamps.clear();
+            // 記録で集めるフォルダ（カスタムフォルダ・MOD のフォルダ）があるときだけ一覧を作り直す。
+            // 無ければ、記録で並べているときに並べ直すだけ
+            bool record_folders = !lib->custom_nodes.empty();
+            for (const ModManifest* m : app.active_mods())
+                if (!m->script.empty() && (m->touches & static_cast<uint32_t>(ModTouch::Control))) record_folders = true;
+            if (record_folders) load_custom(*lib, app, favs);
+            const uint64_t t2 = SDL_GetTicksNS();
+            if (record_folders) rebuild();
+            else if (sort_mode >= 6) resort_pending = true;
+            std::printf("選曲画面に戻る：記録 %.0f ms、カスタムフォルダ %.0f ms、一覧 %.0f ms\n", ms(t0, t1), ms(t1, t2),
+                        ms(t2, SDL_GetTicksNS()));
+        }
+        sctx.player = app.db.player_stats();
+    };
     auto decide = [&] {
         const Entry* e = current();
         if (!e) return;
@@ -1054,7 +1109,7 @@ void run_select(App& app) {
                 DecideResult dr = run_decide(app, dc);
                 if (dr != DecideResult::Play) {
                     if (dr == DecideResult::Quit) quit = true;
-                    app.mixer.play_system(kSysSelect, true);
+                    bgm_pending = true;
                     set_select_view();
                     return;
                 }
@@ -1069,25 +1124,18 @@ void run_select(App& app) {
                 for (const CourseStage& st : course->stages)
                     if (st.chart && st.chart->sha256.rfind("md5:", 0) == 0) refreshed = app.db.refresh_chart(st.chart->path) || refreshed;
             app.save_config();  // 演奏中に変えたハイスピードやカバーを残す
-            app.mixer.play_system(kSysSelect, true);
+            bgm_pending = true;
             set_select_view();
             input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
-            // スコアとプレイヤーの累計を読み直す
-            if (refreshed) {
-                auto lib2 = std::make_shared<Library>();
-                load_charts(*lib2, app.db, app.cfg);
-                lib2->tables = lib->tables;
-                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib2->scores[s.sha256] = s;
-                std::lock_guard<std::mutex> lock(mu);
-                pending = lib2;
-            } else {
-                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
-                folder_lamps.clear();
-                // 記録で集めるカスタムフォルダ（クリアやランク）を作り直す
-                load_custom(*lib, app, favs);
-                rebuild();
+            std::vector<std::string> played;
+            if (course) {
+                played.push_back(course->hash);
+                for (const CourseStage& st : course->stages)
+                    if (st.chart) played.push_back(st.chart->sha256);
+            } else if (e->chart) {
+                played.push_back(e->chart->sha256);
             }
-            sctx.player = app.db.player_stats();
+            reload_after_play(refreshed, played);
             if (ex == PlayExit::Quit) quit = true;
         } else if (e->kind == Entry::Kind::Missing) {
             std::lock_guard<std::mutex> lock(mu);
@@ -2275,6 +2323,7 @@ void run_select(App& app) {
                 else if (k == 'o') sort_mode = (sort_mode + 1) % kSortCount, reapply_view();
                 else if (k == 'a') autoplay = !autoplay;
                 else if (k == '_') SDL_Delay(10);  // 待つだけ
+                else if (k == 'r') reload_after_play(false);  // 遊んで戻ったときの読み直し
                 else if (k == '6') {
                     // F6（スクリーンショット）を押したことにする
                     SDL_Event ev{};
@@ -2286,8 +2335,13 @@ void run_select(App& app) {
                 quit = true;
             }
         }
-        frame_hooks_before_present(r);
-        SDL_RenderPresent(r);
+        if (resort_pending) resort_pending = false, reapply_view(false);
+        frame_present(r);
+        if (bgm_pending) bgm_pending = false, app.mixer.play_system(kSysSelect, true);
+        if (app.scene_end_ns) {
+            std::printf("選曲画面の最初の絵まで %.0f ms\n", (SDL_GetTicksNS() - app.scene_end_ns) / 1e6);
+            app.scene_end_ns = 0;
+        }
         SDL_DelayPrecise(4'000'000);
     }
     stop_preview(false);

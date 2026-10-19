@@ -66,6 +66,7 @@ public:
     void draw() {
         if (!tex_) return;
         SDL_Renderer* r = app_.renderer;
+        SDL_Texture* prev_target = SDL_GetRenderTarget(r);  // 画面の描き先（frame_target_set）に戻す
         SDL_SetRenderTarget(r, tex_);
         float tw = 0, th = 0;
         SDL_GetTextureSize(tex_, &tw, &th);
@@ -96,7 +97,7 @@ public:
             else renderer_.draw_select(*skin_, st);
             SDL_SetRenderLogicalPresentation(r, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
         }
-        SDL_SetRenderTarget(r, nullptr);
+        SDL_SetRenderTarget(r, prev_target);
     }
 
 private:
@@ -245,8 +246,7 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             done = true;
         }
-        frame_hooks_before_present(app.renderer);
-        SDL_RenderPresent(app.renderer);
+        frame_present(app.renderer);
         SDL_DelayPrecise(2'000'000);
     }
     return select_changed;

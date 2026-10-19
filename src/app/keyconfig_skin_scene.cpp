@@ -169,8 +169,7 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             done = true;
         }
-        frame_hooks_before_present(app.renderer);
-        SDL_RenderPresent(app.renderer);
+        frame_present(app.renderer);
         SDL_DelayPrecise(2'000'000);
     }
     // 選曲に戻るときに読み直す（LR2 と同じ）
@@ -233,8 +232,7 @@ bool open_keyconfig_from_select(App& app, TextCache& text, SelectContext& sctx, 
             SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
             SDL_RenderClear(app.renderer);
             app.select_renderer->draw_select(*sel, st);
-            frame_hooks_before_present(app.renderer);
-            SDL_RenderPresent(app.renderer);
+            frame_present(app.renderer);
             SDL_DelayPrecise(2'000'000);
         }
         if (quit) return false;

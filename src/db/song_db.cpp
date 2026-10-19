@@ -592,21 +592,27 @@ std::string merged_scores_sql(int ln_mode, bool with_ghost = false, int profile 
     std::string m = std::to_string(ln_mode);
     const std::string p = std::to_string(profile);
     const std::string gs = with_ghost ? ", s.ghost" : "", gl = with_ghost ? ", l.ghost" : "";
+    // 記録の表（数千件）の側から、譜面の表（数万件）を索引で引く（CROSS JOIN で順番を決める）。
+    // 譜面の表の側から回すと、記録が少なくても遅い
     return R"SQL(
-SELECT c.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
+SELECT s.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
        s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history, s.rseed, s.op_best)SQL" + gs + R"SQL(
-  FROM score s JOIN (SELECT sha256, MAX(ln_free) AS ln_free FROM chart GROUP BY sha256) c ON c.sha256 = s.sha256
- WHERE s.judge_profile = )SQL" + p + R"SQL( AND s.ln_mode = (CASE WHEN c.ln_free > 0 THEN )SQL" + m + R"SQL( ELSE 0 END)
+  FROM score s CROSS JOIN chart c ON c.sha256 = s.sha256
+ WHERE s.judge_profile = )SQL" + p + R"SQL(
+ GROUP BY s.rowid
+HAVING s.ln_mode = (CASE WHEN MAX(c.ln_free) > 0 THEN )SQL" + m + R"SQL( ELSE 0 END)
 UNION ALL
 SELECT s.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
        s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history, s.rseed, s.op_best)SQL" + gs + R"SQL(
   FROM score s
- WHERE s.judge_profile = )SQL" + p + R"SQL( AND s.ln_mode = 0 AND s.sha256 NOT IN (SELECT sha256 FROM chart)
+ WHERE s.judge_profile = )SQL" + p + R"SQL( AND s.ln_mode = 0 AND NOT EXISTS (SELECT 1 FROM chart c WHERE c.sha256 = s.sha256)
 UNION ALL
 SELECT c.sha256, l.clear, l.exscore, l.bp, l.max_combo, l.playcount, l.clearcount, 0, 1,
        l.pg, l.gr, l.gd, l.bd, l.pr, l.op_history, l.rseed, l.op_best)SQL" + gl + R"SQL(
-  FROM lr2_score l JOIN (SELECT sha256, md5, MAX(ln_free) AS ln_free FROM chart GROUP BY sha256, md5) c ON c.md5 = l.md5
- WHERE (c.ln_free = 0 OR )SQL" + m + " = 0) AND " + p + " = 0\n";  // LR2 の記録は MOD を使っていないときだけ
+  FROM lr2_score l CROSS JOIN chart c ON c.md5 = l.md5
+ WHERE )SQL" + p + R"SQL( = 0
+ GROUP BY c.sha256, l.md5
+HAVING MAX(c.ln_free) = 0 OR )SQL" + m + " = 0\n";  // LR2 の記録は MOD を使っていないときだけ
 }
 
 }  // namespace

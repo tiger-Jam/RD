@@ -47,6 +47,7 @@ struct App {
     double refresh_hz = 60.0;
     bool updated_at_start = false;  // 起動の画面で曲データベースと難易度表を更新した（選曲画面では読み直さない）
     double last_draw_ms = -1, last_present_ms = 0;  // 開発用の計測
+    uint64_t scene_end_ns = 0;  // 前の画面を抜けた時刻（次の画面が最初の絵を出すまでの時間を測る）
 
     ~App();
     bool init(const char* argv0);

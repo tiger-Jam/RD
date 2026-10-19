@@ -128,8 +128,7 @@ DecideResult run_decide(App& app, const SelectContext& base) {
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             result = DecideResult::Back, done = true;
         }
-        frame_hooks_before_present(app.renderer);
-        SDL_RenderPresent(app.renderer);
+        frame_present(app.renderer);
         SDL_DelayPrecise(2'000'000);
     }
     for (int id : {100, 101, 102}) app.decide_renderer->set_image_override(id, nullptr);

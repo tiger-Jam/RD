@@ -227,6 +227,7 @@ int latency_test(bool exclusive, int buffer) {
 // 閉じられたら false
 bool startup_screen(App& app, bool update) {
     // LR2（DxLib の printfDx）と同じく、拡大せずにウィンドウの画素にそのまま、ぼかさない 16px の文字で描く
+    frame_target_set(app.renderer, 0, 0);
     SDL_SetRenderLogicalPresentation(app.renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
     app.view_w = app.view_h = 0;  // 次の set_view で必ず設定し直す
     const float px = std::max(1.0f, SDL_GetWindowPixelDensity(app.window));
@@ -258,8 +259,7 @@ bool startup_screen(App& app, bool update) {
         }
         if (startup_shot)
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, startup_shot), SDL_DestroySurface(sf);
-        frame_hooks_before_present(app.renderer);
-        SDL_RenderPresent(app.renderer);
+        frame_present(app.renderer);
     };
     draw({});
     if (update) {
@@ -479,6 +479,7 @@ int main(int argc, char** argv) {
         if (opt.keyconfig) {
             run_keyconfig(app.window, app.renderer, app.keycfg, keyconfig_path());
         } else if (opt.chart_path.empty()) {
+            app.scene_end_ns = SDL_GetTicksNS();
             run_select(app);
         } else {
             run_play(app, opt.chart_path, opt.play);

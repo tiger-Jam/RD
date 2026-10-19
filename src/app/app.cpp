@@ -222,7 +222,7 @@ void App::set_view(int w, int h, bool resize_window) {
     view_w = w;
     view_h = h;
     // スキン解像度で描いて拡大する（LR2と同じ見た目）
-    SDL_SetRenderLogicalPresentation(renderer, w, h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    frame_target_set(renderer, w, h);
 }
 
 namespace {

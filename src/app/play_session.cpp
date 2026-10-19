@@ -1408,13 +1408,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             }
             {
                 uint64_t d0 = SDL_GetTicksNS();
-                frame_hooks_before_present(renderer);
-                SDL_RenderPresent(renderer);
+                frame_present(renderer);
                 app.last_draw_ms = (SDL_GetTicksNS() - now_ns) / 1e6;
                 app.last_present_ms = (SDL_GetTicksNS() - d0) / 1e6;
             }
             if (opt.quit_after > 0 && now_ms / 1000 > opt.quit_after) quit = true, done = true, exit = PlayExit::Quit;
         }
+        app.scene_end_ns = SDL_GetTicksNS();
         mixer.stop();
         for (int id : {kSysDecide, kSysClear, kSysFail, kSysStop}) mixer.stop_system(id);
         mixer.wait_callback();
@@ -1584,8 +1584,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             rtimers.set(2, t);
         }
-        frame_hooks_before_present(app.renderer);
-        SDL_RenderPresent(app.renderer);
+        frame_present(app.renderer);
     }
     for (int id : {kSysCourseClear, kSysCourseFail}) mixer.stop_system(id);
     mixer.wait_callback();

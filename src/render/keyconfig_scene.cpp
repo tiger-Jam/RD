@@ -41,7 +41,7 @@ constexpr int kRows = kButtonCount + 2;
 }  // namespace
 
 void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const std::string& path) {
-    SDL_SetRenderLogicalPresentation(r, 640, 480, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    frame_target_set(r, 640, 480);
     int row = 0;
     bool capturing = false;
     std::string message = "ENTER: ADD  BACKSPACE: CLEAR ROW  ESC: SAVE & QUIT";
@@ -278,8 +278,7 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
             if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             quit = true;
         }
-        frame_hooks_before_present(r);
-        SDL_RenderPresent(r);
+        frame_present(r);
     }
     for (auto& [id, j] : joys) SDL_CloseJoystick(j);
     if (cfg.save(path)) std::printf("キーコンフィグを保存した: %s\n", path.c_str());
@@ -488,8 +487,7 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
             if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             canceled = true;
         }
-        frame_hooks_before_present(r);
-        SDL_RenderPresent(r);
+        frame_present(r);
         SDL_DelayPrecise(4'000'000);
     }
     if (canceled) return false;
