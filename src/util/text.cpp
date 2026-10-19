@@ -1,5 +1,6 @@
 #include "util/text.h"
 
+#include <algorithm>
 #include <cctype>
 
 #if defined(_WIN32)
@@ -69,6 +70,44 @@ std::string cp932_to_utf8(std::string_view s) {
 std::string to_utf8_auto(std::string_view s) {
     if (is_valid_utf8(s)) return std::string(s);
     return cp932_to_utf8(s);
+}
+
+std::string utf8_to_cp932(std::string_view s) {
+    if (s.empty()) return {};
+#if defined(_WIN32)
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    std::wstring w(wlen, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), wlen);
+    int len = WideCharToMultiByte(932, 0, w.data(), wlen, nullptr, 0, "?", nullptr);
+    std::string out(len, '\0');
+    WideCharToMultiByte(932, 0, w.data(), wlen, out.data(), len, "?", nullptr);
+    return out;
+#else
+    iconv_t cd = iconv_open("CP932", "UTF-8");
+    if (cd == reinterpret_cast<iconv_t>(-1)) return std::string(s);
+    std::string out;
+    out.resize(s.size() * 2 + 16);
+    char* in = const_cast<char*>(s.data());
+    size_t in_left = s.size();
+    char* op = out.data();
+    size_t out_left = out.size();
+    while (in_left > 0) {
+        size_t r = iconv(cd, &in, &in_left, &op, &out_left);
+        if (r == static_cast<size_t>(-1)) {
+            // 変換できない文字は '?' にして、UTF-8 の 1 文字ぶん進める
+            if (out_left == 0) break;
+            *op++ = '?';
+            --out_left;
+            unsigned char c0 = static_cast<unsigned char>(*in);
+            size_t n = c0 < 0x80 ? 1 : c0 < 0xE0 ? 2 : c0 < 0xF0 ? 3 : 4;
+            n = std::min(n, in_left);
+            in += n, in_left -= n;
+        }
+    }
+    iconv_close(cd);
+    out.resize(out.size() - out_left);
+    return out;
+#endif
 }
 
 std::string to_upper_ascii(std::string_view s) {

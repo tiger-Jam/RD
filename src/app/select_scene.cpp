@@ -154,6 +154,25 @@ std::vector<Entry> build_tree(const Library& lib) {
         for (char& ch : s) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
         return s;
     };
+    // 並べるときのキー：LR2 と同じく、パスを Shift_JIS にして英字を大文字にしたもの（バイト順で比べる）
+    std::unordered_map<std::string, std::string> sort_key_memo;
+    auto sort_key = [&](const std::string& p) -> const std::string& {
+        auto [it, fresh] = sort_key_memo.try_emplace(p);
+        if (fresh) {
+            std::string k = utf8_to_cp932(p);
+            // 2 バイト文字の 2 バイト目は大文字にしない
+            for (size_t i = 0; i < k.size(); ++i) {
+                unsigned char ch = static_cast<unsigned char>(k[i]);
+                if ((ch >= 0x81 && ch <= 0x9F) || (ch >= 0xE0 && ch <= 0xFC)) {
+                    ++i;
+                    continue;
+                }
+                if (ch >= 'a' && ch <= 'z') k[i] = static_cast<char>(ch - 32);
+            }
+            it->second = std::move(k);
+        }
+        return it->second;
+    };
     auto norm = [&](const std::string& d) {
         std::string s = fs::path(d).lexically_normal().string();
         while (s.size() > 3 && (s.back() == '/' || s.back() == '\\')) s.pop_back();
@@ -176,7 +195,12 @@ std::vector<Entry> build_tree(const Library& lib) {
             child = parent;
         }
     }
-    auto by_path = [&](const std::string& a, const std::string& b) { return upper(a) < upper(b); };
+    auto by_path = [&](const std::string& a, const std::string& b) {
+        const std::string& ka = sort_key(a);
+        const std::string& kb = sort_key(b);
+        return std::lexicographical_compare(ka.begin(), ka.end(), kb.begin(), kb.end(),
+                                            [](char x, char y) { return static_cast<unsigned char>(x) < static_cast<unsigned char>(y); });
+    };
     std::function<void(Entry&, const std::string&)> fill = [&](Entry& e, const std::string& dir) {
         std::vector<std::string> kids(subdirs[dir].begin(), subdirs[dir].end());
         std::sort(kids.begin(), kids.end(), by_path);
@@ -186,7 +210,7 @@ std::vector<Entry> build_tree(const Library& lib) {
         if (!list.empty()) {
             // 並び：曲フォルダのパス順 → レベル順（INSANE は最後）。同じ譜面（md5）は 1 回だけ
             std::stable_sort(list.begin(), list.end(), [&](const ChartRecord* a, const ChartRecord* b) {
-                if (a->folder != b->folder) return upper(a->folder) < upper(b->folder);
+                if (a->folder != b->folder) return by_path(a->folder, b->folder);
                 int la = a->playlevel + (a->difficulty == 5 ? 100 : 0), lb = b->playlevel + (b->difficulty == 5 ? 100 : 0);
                 if (la != lb) return la < lb;
                 return a->difficulty < b->difficulty;
