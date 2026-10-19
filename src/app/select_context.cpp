@@ -120,7 +120,8 @@ bool SelectContext::option(int op) const {
     case 193: return has_banner;
     case 194: return !(song && !chart->backbmp.empty());
     case 195: return song && !chart->backbmp.empty();
-    case 196: return true;  // リプレイ無し
+    case 196: return !(song && replay_exists);  // リプレイ無し / 有り
+    case 197: return song && replay_exists;
     case 572: return true;  // コースを作っていない
     case 500: case 501: case 502: case 503: case 504: return song && diff_count[op - 500] == 0;
     case 505: case 506: case 507: case 508: case 509: return song && diff_count[op - 505] > 0;
@@ -161,7 +162,7 @@ int SelectContext::number(int id) const {
     switch (id) {
     case 10: case 11: return cfg->hi_speed;
     case 12: return cfg->judge_timing;
-    case 13: return 90;
+    case 13: return cfg->target_percent;
     case 14: return cfg->lane_cover_v;
     case 15: return 0;  // 2P 側は設定を持たないので既定値
     case 21: return tm.tm_year + 1900;
@@ -206,7 +207,12 @@ std::string SelectContext::text(int id) const {
     const bool song = chart && is_song(type);
     auto opt = [&](const char* key, int i) { return names ? names->get(key, i) : std::string(); };
     switch (id) {
-    case 1: return "NO TARGET";
+    case 1: {
+        // ターゲット名（LR2: SetTarget。IR の 6〜8 は無い）
+        static const char* names[] = {"NO TARGET", "MY BEST", "RANK AAA", "RANK AA", "RANK A"};
+        if (cfg->target >= 0 && cfg->target <= 4) return names[cfg->target];
+        return std::to_string(cfg->target_percent) + "%";
+    }
     case 10: return song ? chart->title : "";
     case 11: return song ? chart->subtitle : "";
     case 12: return song ? chart->title + (chart->subtitle.empty() ? "" : " " + chart->subtitle) : "";
@@ -227,8 +233,8 @@ std::string SelectContext::text(int id) const {
     case 68: return opt("ASSIST", 0);
     case 69: return opt("BATTLE", 0);
     case 70: return opt("FLIP", 0);
-    case 71: return opt("SCOREGRAPH", 1);
-    case 72: return opt("GHOST", 0);
+    case 71: return opt("SCOREGRAPH", cfg->score_graph ? 1 : 0);
+    case 72: return opt("GHOST", cfg->ghost);
     case 73: return opt("LANECOVER", cfg->lane_cover ? 1 : 0);
     case 74: return cfg->hs_fix == 5 ? "MAINBPM" : opt("HSFIX", cfg->hs_fix);
     case 75: return opt("BGASIZE", 0);
@@ -236,7 +242,7 @@ std::string SelectContext::text(int id) const {
     case 78: return opt("VSYNC", cfg->vsync ? 1 : 0);
     case 79: return opt("SCREEN", windowed ? 1 : 0);
     case 80: return opt("AUTOADJUST", cfg->auto_adjust);
-    case 81: return opt("REPLAYSAVE", 0);
+    case 81: return opt("REPLAYSAVE", cfg->replay_save);
     case 84: return opt("EFFECT", cfg->effect);
     case 85: return opt("EFFECT", 0);
     default: return {};
@@ -268,10 +274,13 @@ int SelectContext::button(int t) const {
     case 51: return 0;
     case 55: return cfg->hs_fix;
     case 57: case 58: return 1;
-    case 70: return 1;  // スコアグラフ ON
+    case 70: return cfg->score_graph ? 1 : 0;
+    case 71: return cfg->ghost;
     case 72: return cfg->bga;
     case 75: return cfg->auto_adjust;
-    case 76: return 90;
+    case 76: return cfg->target_percent;
+    case 77: return cfg->target;
+    case 83: return cfg->replay_save;
     case 80: return windowed ? 1 : 0;
     case 82: return cfg->vsync ? 1 : 0;
     default: return 0;

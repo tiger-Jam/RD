@@ -82,6 +82,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         std::string a = argv[i];
         auto next = [&]() -> const char* { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--auto") o.play.autoplay = true;
+        else if (a == "--replay") o.play.replay = true;  // 開発用：保存してあるリプレイを再生する
         else if (a == "--gas") o.gas = true;
         else if (a == "--simulate") o.simulate = true;
         else if (a == "--info") o.info = true;

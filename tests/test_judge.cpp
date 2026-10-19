@@ -345,3 +345,25 @@ TEST(hcn_gauge_ticks) {
     CHECK(let_go.gauge().hp(kHard) < held.gauge().hp(kHard));
     CHECK_EQ(held.stats().note_current, 1);  // 増減は判定に数えない
 }
+
+// ゴーストの文字列（LR2 の score.ghost と同じ形）と、判定の列からの再生
+TEST(ghost_string_and_queue) {
+    std::vector<int8_t> j;
+    for (int i = 0; i < 12; ++i) j.push_back(5);
+    j.push_back(4), j.push_back(0), j.push_back(4), j.push_back(4), j.push_back(1), j.push_back(3);
+    for (int i = 0; i < 25; ++i) j.push_back(i % 3 == 0 ? 4 : 5);
+    std::string s = encode_ghost(j);
+    CHECK(decode_ghost(s) == j);
+    // LR2 の文字列の読み方：E12 → "G2"（E1→F… の置き換えの後）、DE → X、XX → q
+    CHECK(decode_ghost("ED3Z") == (std::vector<int8_t>{5, 4, 4, 4}));
+    CHECK(decode_ghost("F2") == std::vector<int8_t>(12, 5));
+    CHECK(decode_ghost("q") == (std::vector<int8_t>{4, 5, 4, 5}));
+    Ghost g;
+    g.set_from_judges(decode_ghost(s));
+    CHECK_EQ(g.total_notes(), static_cast<int>(j.size()) - 1);  // 空POOR はノーツに数えない
+    for (int i = 0; i < 13; ++i) g.deal();
+    CHECK_EQ(g.exscore(), 12 * 2 + 1);
+    g.deal();  // 空POOR を読み飛ばして、次の GREAT まで
+    CHECK_EQ(g.judge(1), 1);
+    CHECK_EQ(g.exscore(), 12 * 2 + 2);
+}

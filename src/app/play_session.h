@@ -32,6 +32,7 @@ struct PlayOptions {
     bool save_score = true;
     bool decide_sound = true;  // 決定の音を鳴らす（決定画面を出したときは、そちらで鳴らしているので鳴らさない）
     CourseRun* course = nullptr;  // コースの 1 ステージとして遊ぶ
+    bool replay = false;  // 保存してあるリプレイを再生する（記録もリトライもしない。オプションは終わったら戻す）
 };
 
 enum class PlayExit { Back, Quit };

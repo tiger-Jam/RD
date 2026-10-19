@@ -50,6 +50,13 @@ struct AppConfig {
     bool assist = false;  // 皿の自動演奏（LR2: assist。AUTO SCRATCH）
     int gauge = 0;                 // GaugeType
     bool gas = false;
+    // ターゲット（LR2: target）。0=既定（2P 側は動かさない） 1=自己ベスト 2=AAA 3=AA 4=A 5=割合（6〜8 の IR は無い）
+    int target = 0;
+    int target_percent = 90;  // 既定のターゲットの割合（LR2: defaulttarget。50〜100）
+    int ghost = 0;            // ゴーストの位置（LR2: ghost）。0=OFF 1=TYPE A 2=TYPE B 3=TYPE C
+    bool score_graph = false; // スコアグラフ（LR2: scoregraph）
+    // リプレイの保存（LR2: replaysave）。0=OFF 1=ALWAYS 2=HISCORE（EX がベスト以上） 3=CLEAR 4=FULLCOMBO
+    int replay_save = 0;
     // fps：0 はモニタのリフレッシュレート、-1 は上限なし。垂直同期は既定で使わない
     // （OpenLR2と同じく、描画を待つ間も入力と判定を回すため）
     int fps = 0;
@@ -88,5 +95,7 @@ std::string config_path();
 std::string song_db_path();
 // 難易度表を手元に保存しておくフォルダ
 std::string table_cache_dir();
+// 譜面のリプレイのファイル（設定フォルダの replay/<sha256>.bjr）
+std::string replay_path(const std::string& sha256);
 
 }  // namespace bmj

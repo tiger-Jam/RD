@@ -19,6 +19,7 @@
 #include "chart/bms_parser.h"
 #include "chart/chart_loader.h"
 #include "game/ghost.h"
+#include "game/replay.h"
 #include "game/graph.h"
 #include "game/hispeed.h"
 #include "game/judge.h"
@@ -112,10 +113,14 @@ uint32_t option_history(int lamp, int gauge_type, const AppConfig& cfg, bool ass
 }
 
 // lamp_only：ランプ・回数・オプション履歴だけを残す（皿の自動演奏・CONSTANT・SCATTER・CONVERGE。LR2: statplay.cpp:895）
+// ghost は判定の列、rseed は譜面の乱数の種（自己ベストを更新したときだけ残る）
 void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int lamp, const AppConfig& cfg, bool assist,
-                  bool lamp_only, bool course_stage, int ln_mode) {
+                  bool lamp_only, bool course_stage, int ln_mode, const std::vector<int8_t>& ghost, uint32_t rseed) {
     const PlayStats& s = j.stats();
     PlayRecord rec;
+    rec.ghost = encode_ghost(ghost);
+    rec.rseed = static_cast<int>(rseed);
+    rec.op_best = j.gauge_type() + std::clamp(cfg.random, 0, 9) * 10;  // LR2: ゲージ + 配置×10
     rec.course_stage = course_stage;
     rec.lamp_only = lamp_only;
     rec.ln_mode = ln_mode;
@@ -167,6 +172,37 @@ double hs_fix_multiplier(const Chart& chart, int hs_fix) {
 }
 
 PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
+    // スコアは譜面ファイルの原本のSHA-256で記録する（仕様書8章）
+    std::string sha256;
+    {
+        std::ifstream f(chart_path, std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        sha256 = sha256_hex(bytes);
+    }
+    AppConfig& cfg = app.cfg;
+    // リプレイの再生：記録したときの乱数の種とオプションで遊ぶ。オプションは終わったら戻す（LR2: SetReplayConfig）
+    Replay replay;
+    const AppConfig saved_cfg = cfg;
+    struct Restore {
+        std::function<void()> f;
+        ~Restore() { f(); }
+    } restore_replay{[&] {
+        if (!opt.replay) return;
+        cfg.random = saved_cfg.random, cfg.gauge = saved_cfg.gauge, cfg.ln_mode = saved_cfg.ln_mode, cfg.hs_fix = saved_cfg.hs_fix;
+        cfg.effect = saved_cfg.effect, cfg.assist = saved_cfg.assist, cfg.gas = saved_cfg.gas, cfg.hi_speed = saved_cfg.hi_speed;
+        cfg.lane_cover = saved_cfg.lane_cover, cfg.lane_cover_v = saved_cfg.lane_cover_v, cfg.judge_timing = saved_cfg.judge_timing;
+    }};
+    if (opt.replay) {
+        if (!load_replay(replay_path(sha256), replay) || replay.sha256 != sha256) {
+            std::fprintf(stderr, "リプレイが無い: %s\n", chart_path.c_str());
+            opt.replay = false;
+            return PlayExit::Back;
+        }
+        cfg.random = replay.random, cfg.gauge = replay.gauge, cfg.ln_mode = replay.ln_mode, cfg.hs_fix = replay.hs_fix;
+        cfg.effect = replay.effect, cfg.assist = replay.assist, cfg.gas = replay.gas, cfg.hi_speed = replay.hi_speed;
+        cfg.lane_cover = replay.lane_cover, cfg.lane_cover_v = replay.lane_cover_v;
+        opt.seed = replay.seed, opt.save_score = false, opt.autoplay = false;
+    }
     BmsParseOptions popt;
     popt.random_seed = opt.seed ? opt.seed : static_cast<uint32_t>(SDL_GetTicksNS() % 0x7fff);
     BmsParseResult parsed = parse_chart_file(chart_path, popt);
@@ -174,7 +210,6 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         std::fprintf(stderr, "読み込めない: %s\n", parsed.error.c_str());
         return PlayExit::Back;
     }
-    AppConfig& cfg = app.cfg;
     // 配置のオプション（LR2: bmsload:3354）。#RANDOM を評価した乱数の続きで並べ替える
     apply_random_option(parsed.chart, cfg.random, parsed.rng);
     // CONVERGE のときは皿の自動演奏を切る（LR2: bmsload:2102）
@@ -216,13 +251,6 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     int fhs = 100;  // フローティングのハイスピ（100 = 1.00）
     int& hs = floating ? fhs : cfg.hi_speed;
     int start_green = cfg.fhs_green;  // 曲の始まりの緑数字（ギアチェンの「緑数字に戻す」で使う）
-    // スコアは譜面ファイルの原本のSHA-256で記録する（仕様書8章）
-    std::string sha256;
-    {
-        std::ifstream f(chart_path, std::ios::binary);
-        std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        sha256 = sha256_hex(bytes);
-    }
     // 記録は LN の種類ごとに分ける（種類を決めていない LN が無い譜面は 0 にまとめる）
     const int score_ln_mode = chart.free_ln_count() > 0 ? cfg.ln_mode : 0;
     ScoreRecord best_score;
@@ -330,9 +358,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     double fps = cfg.fps == 0 ? app.refresh_hz : cfg.fps;
     uint64_t frame_ns = (cfg.vsync || cfg.fps < 0) ? 0 : static_cast<uint64_t>(1e9 / std::max(1.0, fps));
 
-    bool quit = false, retry = true;
+    bool quit = false, retry = true, retried = false;
     PlayExit exit = PlayExit::Back;
-    while (retry && !quit) {
+    for (; retry && !quit; retried = true) {
         retry = false;
         JudgeConfig jcfg;
         jcfg.gauge_type = cfg.gauge;
@@ -357,13 +385,43 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.song_ms = -1;
         ctx.judge_draw = 0;
         ctx.last_miss_ms = -1e9;
-        // LR2の既定：自己ベストはまだ無く、ターゲットは90%のゴースト（Scene04_Play.cpp:1997）
+        // 自己ベストとターゲットのゴースト（LR2: Scene04_Play.cpp:1969）。リトライでは、記録し直した自己ベストを読み直す
+        if (retried) has_best = app.db.get_score(sha256, best_score, score_ln_mode);
+        const int total_notes = judge.stats().total_notes;
         ctx.best = Ghost{};
-        if (has_best && best_score.exscore > 0) ctx.best.set_from_exscore(best_score.exscore, judge.stats().total_notes);
+        if (has_best && !best_score.ghost.empty()) ctx.best.set_from_judges(decode_ghost(best_score.ghost));
+        // 判定の列が無い記録（列を残す前に BMjoy で遊んだもの）は、EX スコアから作る
+        else if (has_best && best_score.exscore > 0) ctx.best.set_from_exscore(best_score.exscore, total_notes);
         ctx.best_clear = has_best ? best_score.clear : 0;
         ctx.best_exscore = has_best ? best_score.exscore : 0;
-        ctx.target.set_default(90, judge.stats().total_notes);
-        ctx.target_type = 0;
+        // ターゲット：0=既定（2P 側は動かさない） 1=自己ベスト（無ければ既定の割合） 2〜4=AAA/AA/A 5=割合
+        switch (cfg.target) {
+        case 1:
+            ctx.target.set_default(cfg.target_percent, total_notes);
+            ctx.target_type = ctx.best.final_exscore() > 0 ? 1 : 2;
+            break;
+        case 2: case 3: case 4:
+            ctx.target.set_default(cfg.target == 2 ? 88 : cfg.target == 3 ? 77 : 66, total_notes);
+            ctx.target_type = 2;
+            break;
+        case 5:
+            ctx.target.set_default(cfg.target_percent, total_notes);
+            ctx.target_type = 2;
+            break;
+        default:
+            ctx.target.set_default(cfg.target_percent, total_notes);
+            ctx.target_type = 0;
+            break;
+        }
+        ctx.ghost_pos = cfg.ghost;
+        ctx.score_graph = cfg.score_graph;
+        ctx.silent = silent;
+        ctx.replay = opt.replay;
+        ctx.replay_rec = !opt.replay && !opt.autoplay && !course && cfg.replay_save > 0;
+        // このプレイの判定の列（自己ベストを更新したらゴーストとして残す）と、リプレイに残す入力
+        std::vector<int8_t> ghost_log;
+        Replay record;
+        size_t replay_pos = 0;
 
         InputMapper input(app.keycfg);
         input.set_min_hold_ms(cfg.input_interval);
@@ -439,10 +497,27 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.old_minbp = has_best ? best_score.bp : -1;
             ctx.old_total_notes = has_best ? ps.total_notes : 0;
             if (!recorded && opt.save_score && !opt.autoplay && started && !(course && lamp_only)) {
-                record_score(app, sha256, judge, ctx.result_clear, cfg, assist, lamp_only, course != nullptr, score_ln_mode);
+                record_score(app, sha256, judge, ctx.result_clear, cfg, assist, lamp_only, course != nullptr, score_ln_mode,
+                             ghost_log, popt.random_seed);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
                 // （コースのステージではフルコンボのときだけ上がる）
                 if (!course || ctx.result_clear >= 5) ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
+            }
+            // リプレイの保存（LR2: replaysave。Main.cpp:1796）。ALWAYS は毎回、HISCORE は EX が自己ベスト以上、
+            // CLEAR はクリア、FULLCOMBO はフルコンボのとき（どれも EX が 0 なら残さない）。コースのステージは残さない
+            if (!recorded && opt.save_score && !opt.autoplay && started && !course && cfg.replay_save > 0) {
+                const int ex = ps.exscore();
+                bool keep = cfg.replay_save == 1 || (ex > 0 && ((cfg.replay_save == 2 && ex >= ctx.old_exscore) ||
+                                                              (cfg.replay_save == 3 && ctx.result_clear >= 2) ||
+                                                              (cfg.replay_save == 4 && ctx.result_clear >= 5)));
+                if (keep) {
+                    record.sha256 = sha256;
+                    record.seed = popt.random_seed;
+                    record.random = cfg.random, record.gauge = cfg.gauge, record.ln_mode = cfg.ln_mode, record.hs_fix = cfg.hs_fix;
+                    record.effect = cfg.effect, record.assist = cfg.assist, record.gas = cfg.gas, record.hi_speed = cfg.hi_speed;
+                    record.lane_cover = cfg.lane_cover, record.lane_cover_v = cfg.lane_cover_v;
+                    if (!save_replay(replay_path(sha256), record)) std::fprintf(stderr, "リプレイを保存できない\n");
+                }
             }
             recorded = true;
             // クリア・失敗の音（LR2: ProcS_Result）
@@ -658,7 +733,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         else if (phase != Phase::Fadeout) enter_result(judge.stats().note_current < judge.stats().total_notes);
                     } else if (e.key.key == SDLK_RETURN && phase == Phase::Result) {
                         result_input();
-                    } else if (e.key.key == SDLK_F5 && phase == Phase::Result && !course) {
+                    } else if (e.key.key == SDLK_F5 && phase == Phase::Result && !course && !opt.replay) {
                         retry = true, done = true;
                     } else if (e.key.key == SDLK_F4) {
                         app.toggle_fullscreen();
@@ -706,7 +781,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         bool white = input.button_held(kKey1) || input.button_held(kKey1 + 2) || input.button_held(kKey1 + 4) ||
                                      input.button_held(kKey1 + 6);
                         bool black = input.button_held(kKey1 + 1) || input.button_held(kKey1 + 3) || input.button_held(kKey1 + 5);
-                        if (white && black && !course) retry = true;
+                        if (white && black && !course && !opt.replay) retry = true;
                         done = true;
                     }
                 }
@@ -822,10 +897,23 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 button_in.clear();
                 input.collect(now_ns, lane_in, button_in);
                 play_buttons(now_ms);
+                if (opt.replay) {
+                    // リプレイ：記録した入力を、曲の時刻が来たものから判定に渡す（手元の鍵盤は判定に使わない）
+                    for (; replay_pos < replay.events.size() && replay.events[replay_pos].time_us <= song_us - 5000; ++replay_pos) {
+                        const ReplayEvent& ev = replay.events[replay_pos];
+                        if (ev.down) judge.press(ev.lane, ev.time_us);
+                        else judge.release(ev.lane, ev.time_us);
+                        double at = scene_ms_of(ev.time_us);
+                        if (ev.down) ctx.timers.set(100 + ev.lane, at), ctx.timers.reset(120 + ev.lane);
+                        else ctx.timers.reset(100 + ev.lane), ctx.timers.set(120 + ev.lane, at);
+                    }
+                    lane_in.clear();
+                }
                 for (const LaneInput& li : lane_in) {
                     int64_t t = mixer.song_time_us_at(li.time_ns);
                     if (li.down) judge.press(li.lane, t);
                     else judge.release(li.lane, t);
+                    if (!opt.autoplay) record.events.push_back({t, static_cast<uint8_t>(li.lane), li.down});
                     // 鍵盤の光（LR2: LR2_gameloop.cpp:120）
                     double at = now_ms - (now_ns - li.time_ns) / 1e6;
                     if (li.down) ctx.timers.set(100 + li.lane, at), ctx.timers.reset(120 + li.lane);
@@ -841,7 +929,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 judge.sounds_to_stop().clear();
                 judge.sounds_to_play().clear();
                 for (const JudgeEvent& je : judge.events()) {
-                    if (cfg.auto_adjust > 0 && !opt.autoplay && je.has_offset && !je.ln_end && je.judge >= kBad && je.judge <= kPGreat) {
+                    if (cfg.auto_adjust > 0 && !opt.autoplay && !opt.replay && je.has_offset && !je.ln_end && je.judge >= kBad && je.judge <= kPGreat) {
                         adjust_sum += je.offset_ms;
                         if (++adjust_count > 9) {
                             if (adjust_sum > 0) cfg.judge_timing = std::min(199, cfg.judge_timing + 1);
@@ -859,6 +947,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         if (je.ln_start && j >= kGood) ctx.timers.set(70 + je.lane, at);
                         if (j >= kGreat) ctx.timers.set(50 + je.lane, at);  // ボム
                         if (j >= kPoor) ctx.on_judged();
+                        if (j >= kEmptyPoor && j <= kPGreat) ghost_log.push_back(static_cast<int8_t>(j));
                         // OpenLR2の拡張：直前の FAST/SLOW とずれ（ms）
                         if (j == kPGreat) ctx.last_fast_slow = 0;
                         else if (j == kEmptyPoor) ctx.last_fast_slow = 1;

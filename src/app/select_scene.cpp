@@ -803,6 +803,9 @@ void run_select(App& app) {
             snap();
         }
     };
+    bool start_replay = false;  // 次の決定をリプレイの再生にする（ボタン 19、6 番の鍵盤の長押し）
+    std::string replay_checked;  // リプレイの有無を見た譜面（遊んだあとは空にして見直す）
+    bool replay_found = false;
     auto decide = [&] {
         const Entry* e = current();
         if (!e) return;
@@ -815,6 +818,9 @@ void run_select(App& app) {
             // 遊べないコース（譜面が欠けている）は、決定しても何も起きない（LR2 と同じ）
             PlayOptions po;
             po.autoplay = autoplay;
+            po.replay = start_replay && e->kind == Entry::Kind::Chart;
+            if (po.replay) po.autoplay = false;
+            start_replay = false;
             if (const char* cap = std::getenv("BMJ_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
             std::string path = e->chart ? e->chart->path : "";
             std::shared_ptr<Course> course = e->course;
@@ -840,6 +846,7 @@ void run_select(App& app) {
                 po.decide_sound = !app.decide_skin;
             }
             PlayExit ex = course ? run_course(app, *course, po) : run_play(app, path, po);
+            replay_checked.clear();  // 遊んでリプレイを残したかもしれない
             // LR2 から取り込んだ仮の譜面を遊んだら、その譜面を読んで本物の情報にする（記録のキーがそろう）
             bool refreshed = false;
             if (e->chart && e->chart->sha256.rfind("md5:", 0) == 0) refreshed = app.db.refresh_chart(path);
@@ -1230,8 +1237,21 @@ void run_select(App& app) {
                     else if (ty >= 91 && ty <= 96) change_difficulty(ty - 91);
                     else if (ty == 44) app.cfg.assist = !app.cfg.assist, app.mixer.play_system(kSysOptionChange);
                     else if (ty == 50) loop(app.cfg.effect, 0, 3);
-                    else if (ty == 72) loop(app.cfg.bga, 0, 2);
-                    else if (ty == 75) loop(app.cfg.auto_adjust, 0, 2);  // 判定タイミングの自動調整（OFF / ON / SILENT）  // BGA（ボタンは OFF / ON / AUTOPLAY の 3 つを回す。LR2 と同じ）
+                    else if (ty == 72) loop(app.cfg.bga, 0, 2);  // BGA（ボタンは OFF / ON / AUTOPLAY の 3 つを回す。LR2 と同じ）
+                    else if (ty == 75) loop(app.cfg.auto_adjust, 0, 2);  // 判定タイミングの自動調整（OFF / ON / SILENT）
+                    else if (ty == 70) {
+                        int v = app.cfg.score_graph ? 1 : 0;
+                        loop(v, 0, 1);
+                        app.cfg.score_graph = v != 0;
+                    } else if (ty == 71) loop(app.cfg.ghost, 0, 3);
+                    else if (ty == 76) loop(app.cfg.target_percent, 50, 100);
+                    else if (ty == 77) loop(app.cfg.target, 0, 5);  // ターゲット（IR の 6〜8 は無いので飛ばす）
+                    else if (ty == 83) loop(app.cfg.replay_save, 0, 4);
+                    else if (ty == 19) {
+                        // リプレイで遊ぶ
+                        const Entry* cur = current();
+                        if (cur && cur->kind == Entry::Kind::Chart && sctx.replay_exists) start_replay = true, decide();
+                    }
                     else if (ty == 55) {
                         loop(app.cfg.hs_fix, 0, 5);
                     } else if (ty == 57) {
@@ -1300,6 +1320,15 @@ void run_select(App& app) {
             if (e.type == SDL_EVENT_KEY_DOWN && SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F3] &&
                 (e.key.key == SDLK_UP || e.key.key == SDLK_DOWN || e.key.key == SDLK_LEFT || e.key.key == SDLK_RIGHT)) {
                 if (!e.key.repeat) edit_tag(e.key.key);
+                continue;
+            }
+            // START のパネルを開いている間は、← → でターゲットを替え、Enter・← → で選曲は動かさない（LR2: SetBmsFilter）
+            if (e.type == SDL_EVENT_KEY_DOWN && panel == 1 &&
+                (e.key.key == SDLK_LEFT || e.key.key == SDLK_RIGHT || e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER)) {
+                if (e.key.key != SDLK_RETURN && e.key.key != SDLK_KP_ENTER) {
+                    app.cfg.target = (app.cfg.target + (e.key.key == SDLK_RIGHT ? 1 : 5)) % 6;  // IR の 6〜8 は無い
+                    app.mixer.play_system(kSysOptionChange);
+                }
                 continue;
             }
             if (e.type == SDL_EVENT_KEY_DOWN) {
@@ -1384,15 +1413,36 @@ void run_select(App& app) {
             if (b.button == kKey1 || b.button == kKey1 + 2 || b.button == kKey1 + 4 || b.button == kKey1 + 6) decide();
             else if (b.button == kKey1 + 1) back();
             else if (b.button == kKey1 + 5) {
+                // 6 番：オートで開始。リプレイがあれば押している間を数え、2 秒でリプレイ、その前に離せばオート（LR2: タイマー 172）
                 const Entry* e = current();
                 if (e && e->kind == Entry::Kind::Chart) {
-                    bool was = autoplay;
-                    autoplay = true;
-                    decide();
-                    autoplay = was;
+                    if (sctx.replay_exists) {
+                        sctx.timers.set(172, t_ms);
+                    } else {
+                        bool was = autoplay;
+                        autoplay = true;
+                        decide();
+                        autoplay = was;
+                    }
                 }
             } else if (b.button == kSelect) {
                 change_difficulty();
+            }
+        }
+        if (sctx.timers.on(172)) {
+            const Entry* e = current();
+            if (!e || e->kind != Entry::Kind::Chart || !sctx.replay_exists) {
+                sctx.timers.reset(172);
+            } else if (!input.button_held(kKey1 + 5)) {
+                sctx.timers.reset(172);
+                bool was = autoplay;
+                autoplay = true;
+                decide();
+                autoplay = was;
+            } else if (sctx.timers.lapse(172, t_ms) > 2000) {
+                sctx.timers.reset(172);
+                start_replay = true;
+                decide();
             }
         }
         // 皿・↑↓で上下（仕様 3.5）。押した瞬間は前の移動が終わっていれば 300ms、押し続けたら終わる 20ms 前から 70ms ずつ
@@ -1571,6 +1621,17 @@ void run_select(App& app) {
             sctx.mode_name = kModeNames[mode_filter];
             sctx.sort_name = kSortNames[sort_mode];
             sctx.autoplay = autoplay;
+            {
+                // カーソルの譜面にリプレイがあるか（譜面が変わったときだけファイルを見る）
+                const ChartRecord* c = sctx.type == 0 ? sctx.chart : nullptr;
+                std::string sha = c ? c->sha256 : std::string();
+                if (sha.empty() || sha != replay_checked) {
+                    std::error_code ec;
+                    replay_found = !sha.empty() && fs::exists(replay_path(sha), ec);
+                    replay_checked = sha;
+                }
+                sctx.replay_exists = replay_found;
+            }
             sctx.windowed = !(SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN);
             sctx.list_count = n;
             int64_t total = static_cast<int64_t>(std::max(1, n)) * 1000;

@@ -39,13 +39,13 @@ CREATE TABLE IF NOT EXISTS lr2_score(
     md5 TEXT PRIMARY KEY, clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     playcount INTEGER, clearcount INTEGER,
     pg INTEGER DEFAULT 0, gr INTEGER DEFAULT 0, gd INTEGER DEFAULT 0, bd INTEGER DEFAULT 0, pr INTEGER DEFAULT 0,
-    op_history INTEGER DEFAULT 0);
+    op_history INTEGER DEFAULT 0, rseed INTEGER DEFAULT -1, op_best INTEGER DEFAULT 0, ghost TEXT);
 CREATE TABLE IF NOT EXISTS score(
     sha256 TEXT, ln_mode INTEGER, judge_profile INTEGER,
     clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     playcount INTEGER, clearcount INTEGER, last_played INTEGER,
     pg INTEGER DEFAULT 0, gr INTEGER DEFAULT 0, gd INTEGER DEFAULT 0, bd INTEGER DEFAULT 0, pr INTEGER DEFAULT 0,
-    op_history INTEGER DEFAULT 0,
+    op_history INTEGER DEFAULT 0, rseed INTEGER DEFAULT -1, op_best INTEGER DEFAULT 0, ghost TEXT,
     PRIMARY KEY(sha256, ln_mode, judge_profile));
 CREATE TABLE IF NOT EXISTS player(
     id INTEGER PRIMARY KEY, playcount INTEGER, clear INTEGER, fail INTEGER,
@@ -258,6 +258,19 @@ bool SongDb::open(const std::string& path) {
             sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, nullptr);
         }
     }
+    // 古いデータベースに、自己ベストのときの乱数の種・オプション・ゴーストの欄を足す
+    for (const char* table : {"score", "lr2_score"}) {
+        bool has = false;
+        Stmt info(db_, (std::string("PRAGMA table_info(") + table + ")").c_str());
+        while (info.step())
+            if (info.col_text(1) == "ghost") has = true;
+        if (!has) {
+            std::string t = table;
+            std::string sql = "ALTER TABLE " + t + " ADD COLUMN rseed INTEGER DEFAULT -1;ALTER TABLE " + t +
+                              " ADD COLUMN op_best INTEGER DEFAULT 0;ALTER TABLE " + t + " ADD COLUMN ghost TEXT;";
+            sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, nullptr);
+        }
+    }
     // 古いデータベースに、種類を決めていない LN の数の欄を足す（足したら全部読み直させる）
     {
         bool has_ln_free = false;
@@ -456,9 +469,15 @@ namespace {
 
 // BMjoyの記録とLR2から取り込んだ記録を合わせる（ランプ・EX・コンボは高いほう、BPは低いほう、回数は足す。
 // 判定の内訳は EX の高いほうのもの、オプションの履歴は両方）
-void merge_score(ScoreRecord& r, int clear, int ex, int bp, int combo, int play, int clr, const Stmt& st, int jcol) {
-    if (ex > r.exscore || (r.exscore == 0 && ex == 0))
+// with_ghost なら、jcol + 8 の欄のゴーストも読む
+void merge_score(ScoreRecord& r, int clear, int ex, int bp, int combo, int play, int clr, const Stmt& st, int jcol,
+                 bool with_ghost = false) {
+    if (ex > r.exscore || (r.exscore == 0 && ex == 0)) {
         for (int i = 0; i < 5; ++i) r.judge[i] = static_cast<int>(st.col_i64(jcol + i));
+        r.rseed = static_cast<int>(st.col_i64(jcol + 6));
+        r.op_best = static_cast<int>(st.col_i64(jcol + 7));
+        if (with_ghost) r.ghost = st.col_text(jcol + 8);
+    }
     r.op_history |= static_cast<uint32_t>(st.col_i64(jcol + 5));
     r.clear = std::max(r.clear, clear);
     r.exscore = std::max(r.exscore, ex);
@@ -470,21 +489,23 @@ void merge_score(ScoreRecord& r, int clear, int ex, int bp, int combo, int play,
 
 // 譜面ごとの記録。種類を決めていない LN のある譜面は ln_mode の記録、それ以外は 0 の記録を読む。
 // 曲データベースに無いキー（コース）の記録と、LR2 から取り込んだ記録（LN で遊んだもの）も合わせる
-std::string merged_scores_sql(int ln_mode) {
+// with_ghost なら、最後にゴーストの欄も付ける（一覧では使わないので、1 譜面を読むときだけ）
+std::string merged_scores_sql(int ln_mode, bool with_ghost = false) {
     std::string m = std::to_string(ln_mode);
+    const std::string gs = with_ghost ? ", s.ghost" : "", gl = with_ghost ? ", l.ghost" : "";
     return R"SQL(
 SELECT c.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
-       s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history
+       s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history, s.rseed, s.op_best)SQL" + gs + R"SQL(
   FROM score s JOIN (SELECT sha256, MAX(ln_free) AS ln_free FROM chart GROUP BY sha256) c ON c.sha256 = s.sha256
  WHERE s.judge_profile = 0 AND s.ln_mode = (CASE WHEN c.ln_free > 0 THEN )SQL" + m + R"SQL( ELSE 0 END)
 UNION ALL
 SELECT s.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
-       s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history
+       s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history, s.rseed, s.op_best)SQL" + gs + R"SQL(
   FROM score s
  WHERE s.judge_profile = 0 AND s.ln_mode = 0 AND s.sha256 NOT IN (SELECT sha256 FROM chart)
 UNION ALL
 SELECT c.sha256, l.clear, l.exscore, l.bp, l.max_combo, l.playcount, l.clearcount, 0, 1,
-       l.pg, l.gr, l.gd, l.bd, l.pr, l.op_history
+       l.pg, l.gr, l.gd, l.bd, l.pr, l.op_history, l.rseed, l.op_best)SQL" + gl + R"SQL(
   FROM lr2_score l JOIN (SELECT sha256, md5, MAX(ln_free) AS ln_free FROM chart GROUP BY sha256, md5) c ON c.md5 = l.md5
  WHERE c.ln_free = 0 OR )SQL" + m + " = 0\n";
 }
@@ -517,7 +538,7 @@ std::vector<ScoreRecord> SongDb::all_scores(int ln_mode) const {
 
 bool SongDb::get_score(const std::string& sha256, ScoreRecord& out, int ln_mode) const {
     if (!db_) return false;
-    std::string sql = "SELECT * FROM (" + merged_scores_sql(ln_mode) + ") WHERE sha256 = ?";
+    std::string sql = "SELECT * FROM (" + merged_scores_sql(ln_mode, true) + ") WHERE sha256 = ?";
     Stmt st(db_, sql.c_str());
     st.text(1, sha256);
     bool found = false;
@@ -527,7 +548,7 @@ bool SongDb::get_score(const std::string& sha256, ScoreRecord& out, int ln_mode)
     while (st.step()) {
         found = true;
         merge_score(out, static_cast<int>(st.col_i64(1)), static_cast<int>(st.col_i64(2)), static_cast<int>(st.col_i64(3)),
-                    static_cast<int>(st.col_i64(4)), static_cast<int>(st.col_i64(5)), static_cast<int>(st.col_i64(6)), st, 9);
+                    static_cast<int>(st.col_i64(4)), static_cast<int>(st.col_i64(5)), static_cast<int>(st.col_i64(6)), st, 9, true);
         out.last_played = std::max(out.last_played, st.col_i64(7));
     }
     return found;
@@ -545,10 +566,11 @@ int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* erro
     {
         // LR2の score 表（LR2_songmanage.cpp:2696）。EXスコアは PGREAT×2 + GREAT
         // 判定の内訳とオプションの履歴もあれば取り込む（無い版もあるので、無ければ 0）
-        Stmt full(src, "SELECT hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount, good, bad, poor, op_history "
-                       "FROM score WHERE length(hash) = 32");
+        // 自己ベストのときの乱数の種・オプション・ゴーストも取り込む
+        Stmt full(src, "SELECT hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount, good, bad, poor, op_history, "
+                       "rseed, op_best, ghost FROM score WHERE length(hash) = 32");
         Stmt basic(src, full.s ? "SELECT 1" : "SELECT hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount, "
-                                              "0, 0, 0, 0 FROM score WHERE length(hash) = 32");
+                                              "0, 0, 0, 0, -1, 0, '' FROM score WHERE length(hash) = 32");
         Stmt& rd = full.s ? full : basic;
         if (!rd.s) {
             if (error) *error = "LR2のスコアデータベースではない: " + lr2_score_db;
@@ -557,14 +579,15 @@ int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* erro
         }
         sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
         Stmt wr(db_, "INSERT OR REPLACE INTO lr2_score(md5, clear, exscore, bp, max_combo, playcount, clearcount, "
-                     "pg, gr, gd, bd, pr, op_history) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                     "pg, gr, gd, bd, pr, op_history, rseed, op_best, ghost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
         while (rd.step()) {
             std::string md5 = rd.col_text(0);
             for (char& c : md5) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             int ex = static_cast<int>(rd.col_i64(2) * 2 + rd.col_i64(3));
             wr.text(1, md5).i64(2, rd.col_i64(1)).i64(3, ex).i64(4, rd.col_i64(4)).i64(5, rd.col_i64(5))
                 .i64(6, rd.col_i64(6)).i64(7, rd.col_i64(7)).i64(8, rd.col_i64(2)).i64(9, rd.col_i64(3)).i64(10, rd.col_i64(8))
-                .i64(11, rd.col_i64(9)).i64(12, rd.col_i64(10)).i64(13, rd.col_i64(11));
+                .i64(11, rd.col_i64(9)).i64(12, rd.col_i64(10)).i64(13, rd.col_i64(11)).i64(14, rd.col_i64(12))
+                .i64(15, rd.col_i64(13)).text(16, rd.col_text(14));
             wr.run();
             ++count;
         }
@@ -597,8 +620,8 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
     ScoreRecord r;
     bool had = false;
     {
-        Stmt st(db_, "SELECT clear, exscore, bp, max_combo, playcount, clearcount, pg, gr, gd, bd, pr, op_history FROM score "
-                     "WHERE sha256 = ? AND ln_mode = ? AND judge_profile = 0");
+        Stmt st(db_, "SELECT clear, exscore, bp, max_combo, playcount, clearcount, pg, gr, gd, bd, pr, op_history, "
+                     "rseed, op_best, ghost FROM score WHERE sha256 = ? AND ln_mode = ? AND judge_profile = 0");
         st.text(1, sha256).i64(2, play.ln_mode);
         if (st.step()) {
             had = true;
@@ -610,13 +633,21 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
             r.clearcount = static_cast<int>(st.col_i64(5));
             for (int i = 0; i < 5; ++i) r.judge[i] = static_cast<int>(st.col_i64(6 + i));
             r.op_history = static_cast<uint32_t>(st.col_i64(11));
+            r.rseed = static_cast<int>(st.col_i64(12));
+            r.op_best = static_cast<int>(st.col_i64(13));
+            r.ghost = st.col_text(14);
         }
     }
     r.op_history |= play.op_history;
     if (!play.course_stage || clear >= 5) r.clear = std::max(r.clear, clear);
     if (!play.lamp_only) {
-        // 判定の内訳は、EX スコアを更新したとき（初めてのときも）だけ入れ替える
-        if (!had || exscore > r.exscore) r.judge = play.judge;
+        // 判定の内訳・乱数の種・オプション・ゴーストは、EX スコアを更新したとき（初めてのときも）だけ入れ替える（LR2: statplay.cpp:959）
+        if (!had || exscore > r.exscore) {
+            r.judge = play.judge;
+            r.rseed = play.rseed;
+            r.op_best = play.op_best;
+            if (!play.course_stage) r.ghost = play.ghost;
+        }
         r.exscore = std::max(r.exscore, exscore);
         r.bp = (r.bp < 0 || !had) ? bp : std::min(r.bp, bp);
         r.max_combo = std::max(r.max_combo, max_combo);
@@ -627,10 +658,12 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
     }
     r.last_played = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     Stmt st(db_, "INSERT OR REPLACE INTO score(sha256, ln_mode, judge_profile, clear, exscore, bp, max_combo, "
-                 "playcount, clearcount, last_played, pg, gr, gd, bd, pr, op_history) VALUES(?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                 "playcount, clearcount, last_played, pg, gr, gd, bd, pr, op_history, rseed, op_best, ghost) "
+                 "VALUES(?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     st.text(1, sha256).i64(2, play.ln_mode).i64(3, r.clear).i64(4, r.exscore).i64(5, r.bp).i64(6, r.max_combo)
         .i64(7, r.playcount).i64(8, r.clearcount).i64(9, r.last_played).i64(10, r.judge[0]).i64(11, r.judge[1])
-        .i64(12, r.judge[2]).i64(13, r.judge[3]).i64(14, r.judge[4]).i64(15, r.op_history);
+        .i64(12, r.judge[2]).i64(13, r.judge[3]).i64(14, r.judge[4]).i64(15, r.op_history).i64(16, r.rseed)
+        .i64(17, r.op_best).text(18, r.ghost);
     st.run();
     if (play.course_stage) return;
     // プレイヤーの累計

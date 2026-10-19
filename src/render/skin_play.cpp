@@ -49,10 +49,11 @@ bool PlayContext::option_raw(int option) const {
     case 31: return !ret;
     case 32: return autoplay ? !ret : ret;
     case 33: return autoplay ? ret : !ret;
-    case 34: return ret;              // ゴースト無し
-    case 35: case 36: case 37: return !ret;
-    case 38: return !ret;             // スコアグラフあり
-    case 39: return ret;
+    // ゴーストの位置（SILENT のときは出さない）
+    case 34: return ghost_pos == 0 || silent ? ret : !ret;
+    case 35: case 36: case 37: return ghost_pos == option - 34 && !silent ? ret : !ret;
+    case 38: return score_graph ? !ret : ret;  // スコアグラフ OFF / ON
+    case 39: return score_graph ? ret : !ret;
     case 40: return bga_shown ? !ret : ret;  // BGA OFF / ON
     case 41: return bga_shown ? ret : !ret;
     case 42: case 44: return normal_gauge ? ret : !ret;
@@ -69,11 +70,17 @@ bool PlayContext::option_raw(int option) const {
     case 54: return assist ? !ret : ret;  // 皿の自動演奏 OFF / ON
     case 55: return assist ? ret : !ret;
     case 308: return st && st->exscore() == 0 ? ret : !ret;  // このプレイの EX スコアが 0
-    case 318: return ret;  // 2P 側（ターゲット無し）は 0
+    case 318: {  // 2P 側の EX が 0（ターゲット無しを含む）
+        const Ghost* g = p2_ghost();
+        return !g || g->exscore() == 0 || !st || st->total_notes == 0 ? ret : !ret;
+    }
     case 350: return result_flip ? !ret : ret;  // リザルトのフリップ無効 / 有効
     case 351: return result_flip ? ret : !ret;
     case 622: return ret;  // ゴーストバトルではない
-    case 82: return ret;              // リプレイ無し
+    // リプレイ：82=記録も再生もしない 83=記録している 84=再生している
+    case 82: return !replay && !replay_rec ? ret : !ret;
+    case 83: return replay_rec ? ret : !ret;
+    case 84: return replay ? ret : !ret;
     case 90: return result_clear >= 2 ? ret : !ret;  // クリア
     case 91: return result_clear < 2 ? ret : !ret;   // 失敗
     case 176: case 177: {
@@ -126,7 +133,6 @@ bool PlayContext::option_raw(int option) const {
     case 270: return cover_adjusting && lane_cover_on ? ret : !ret;
     case 10: case 11: case 12: case 13: case 271: case 623:
         return !ret;
-    case 83: case 84: return !ret;
     case 160: return ret;             // 7KEYS
     case 161: case 162: case 163: case 164: return !ret;
     case 200: case 201: case 202: case 203: case 204: case 205: case 206: case 207: {
@@ -137,6 +143,25 @@ bool PlayContext::option_raw(int option) const {
         if (option == 200) return r >= 8 ? ret : !ret;
         if (option == 207) return r < 2 ? ret : !ret;
         return (r < want + 1 && r > want - 1) ? ret : !ret;
+    }
+    case 210: case 211: case 212: case 213: case 214: case 215: case 216: case 217: {
+        // 2P 側（ゴースト）の判定済みノーツ数に対するランク
+        const Ghost* g = p2_ghost();
+        if (!g || g->now_note() == 0) return !ret;
+        int r = rank_of(g->exscore(), g->now_note());
+        if (option == 210) return r >= 8 ? ret : !ret;
+        if (option == 217) return r < 2 ? ret : !ret;
+        return r == 8 - (option - 210) ? ret : !ret;
+    }
+    case 310: case 311: case 312: case 313: case 314: case 315: case 316: case 317: {
+        // リザルトの 2P 側（ゴースト）のランク（総ノーツ数に対して）
+        const Ghost* g = p2_ghost();
+        int n = st ? st->total_notes : 0;
+        if (!g || n == 0) return !ret;
+        int r = rank_of(g->exscore(), n);
+        if (option == 310) return r >= 8 ? ret : !ret;
+        if (option == 317) return g->exscore() > 0 && r <= 1 ? ret : !ret;
+        return r == 8 - (option - 310) ? ret : !ret;
     }
     case 220: case 221: case 222: case 223: case 224: case 225: case 226: case 227: {
         // 総ノーツ数に対するランク（以上）
@@ -180,7 +205,7 @@ int PlayContext::number_raw(int id) const {
     const PlayStats& st = *stats();
     int n = st.total_notes;
     // 2P側（通常のプレイではターゲットのゴースト）
-    const Ghost* p2g = target_type == 1 ? &best : target_type == 2 ? &target : nullptr;
+    const Ghost* p2g = p2_ghost();
     int p2_ex = p2g ? p2g->exscore() : 0;
     auto p2_judge = [&](int j) { return p2g ? p2g->judge(j) : 0; };
     auto score_of = [&](int gd, int gr, int pg) {
@@ -339,7 +364,7 @@ std::string PlayContext::text(int id) const {
     if (!chart) return {};
     const ChartMeta& m = chart->meta;
     switch (id) {
-    case 1: return "NO TARGET";  // ターゲット名（ターゲット機能は無い）
+    case 1: return target.name().empty() ? "NO TARGET" : target.name();  // ターゲット名（LR2: 演奏の始めに入れる）
     case 10: return m.title;
     case 11: return m.subtitle;
     case 12: return m.subtitle.empty() ? m.title : m.title + " " + m.subtitle;

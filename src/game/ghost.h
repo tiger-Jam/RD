@@ -1,54 +1,45 @@
-// ゴースト（自己ベストやターゲットの、その時点でのEXスコア）。OpenLR2の PLAYSCORE（LR2/LR2_ghost.cpp）の移植。
-// 今はスコアの保存が無いので、自己ベストは常に空で、ターゲットは既定のゴースト（割合指定）だけ
+// ゴースト（自己ベストやターゲットの、その時点での判定の数とEXスコア）。LR2 の PLAYSCORE（LR2/LR2_ghost.cpp）と同じ動き。
+// 記録した判定の列があれば 1 ノーツずつ再生し、無ければ最後の判定の数から割り振る
 #pragma once
 
 #include <array>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace bmj {
+
+// 判定の列を LR2 のゴーストの文字列にする（LR2: score.ghost）。値は 0=空POOR 1=POOR … 5=PGREAT
+std::string encode_ghost(const std::vector<int8_t>& judges);
+// LR2 のゴーストの文字列を判定の列に戻す。読めない文字は飛ばす
+std::vector<int8_t> decode_ghost(const std::string& data);
 
 class Ghost {
 public:
     // LR2: SetDefaultGhost。88/77/66 は AAA/AA/A、50〜100 はその割合、それ以外は「ターゲット無し」
-    void set_default(int target, int notes) {
-        *this = Ghost{};
-        total_notes_ = notes;
-        int pg;
-        if (target == 88) pg = static_cast<int>(notes * 7.0 / 9.0);
-        else if (target == 77) pg = static_cast<int>(notes * 5.0 / 9.0);
-        else if (target == 66) pg = static_cast<int>(notes * 3.0 / 9.0);
-        else if (target >= 50 && target <= 100) pg = static_cast<int>(((target + target) - 100.0) * notes) / 100;
-        else return;
-        expect_[5] = pg;
-        expect_[4] = notes - pg;
-    }
-    // LR2: SetGhost。記録されたEXスコアから、PGREATとGREATだけでできたゴーストを作る
-    void set_from_exscore(int exscore, int notes) {
-        *this = Ghost{};
-        total_notes_ = notes;
-        if (notes <= 0) return;
-        double v = (static_cast<double>(exscore) / notes - 1.0) * notes;
-        int pg = static_cast<int>(v);
-        if (pg < v) pg++;  // LR2: RoundUp
-        expect_[5] = pg;
-        expect_[4] = notes - pg;
-    }
-    // LR2: DealJudgeFromQueue（記録されたゴーストが無いとき）。自分のノーツが1つ判定されるたびに呼ぶ
-    void deal() {
-        if (total_notes_ < 1) return;
-        if (now_note_ > 0)
-            for (int i = 0; i < 6; ++i) judge_[i] = ((now_note_ + 1) * expect_[i]) / total_notes_;
-        rate_ = judge_[4] + judge_[5] * 2;
-        now_note_++;
-    }
+    void set_default(int target, int notes);
+    // LR2: SetGhost。EXスコアから、PGREATとGREATだけでできたゴーストを作る
+    void set_from_exscore(int exscore, int notes, std::string name = {});
+    // LR2: DecodeGhostData。記録した判定の列から作る（総ノーツは列の中のノーツの数）
+    void set_from_judges(std::vector<int8_t> judges, std::string name = {});
+    // LR2: DealJudgeFromQueue。自分のノーツが1つ判定されるたびに呼ぶ。
+    // 列があれば、空POOR を読み飛ばしながら次のノーツの判定を 1 つ進める
+    void deal();
+    bool has_queue() const { return !queue_.empty(); }
     int exscore() const { return rate_; }  // LR2の PLAYSCORE::rate（その時点のEXスコア）
     int final_exscore() const { return expect_[4] + expect_[5] * 2; }  // LR2の PLAYSCORE::exscore
     int judge(int j) const { return judge_[j]; }
+    int expect(int j) const { return expect_[j]; }
     int now_note() const { return now_note_; }
     int total_notes() const { return total_notes_; }
+    const std::string& name() const { return name_; }
 
 private:
     int total_notes_ = 0, now_note_ = 0, rate_ = 0;
     std::array<int, 6> expect_{}, judge_{};
+    std::vector<int8_t> queue_;
+    size_t read_ = 0;
+    std::string name_;
 };
 
 }  // namespace bmj

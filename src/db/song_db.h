@@ -34,6 +34,10 @@ struct ScoreRecord {
     int64_t last_played = 0;
     std::array<int, 5> judge{};  // ベストの EX スコアを出したときの PGREAT, GREAT, GOOD, BAD, POOR の数
     uint32_t op_history = 0;     // クリアしたときのオプションの履歴（LR2: op_history のビット。スキンの op 118〜149）
+    // ベストの EX スコアを出したときの乱数の種（無ければ -1）・オプション（LR2: op_best = ゲージ + 配置×10）・
+    // ゴースト（LR2 のゴーストの文字列。get_score のときだけ読む）
+    int rseed = -1, op_best = 0;
+    std::string ghost;
 };
 
 // 1 回のプレイの結果（記録する値）
@@ -45,7 +49,9 @@ struct PlayRecord {
     bool course_stage = false;
     // ランプ・回数・オプション履歴だけを残す（EX・判定数・最大コンボ・BP は変えない。皿の自動演奏や SCATTER など）
     bool lamp_only = false;
-    int ln_mode = 0;  // 記録を分ける LN の種類（種類を決めていない LN が無い譜面は 0）
+    int ln_mode = 0;
+    int rseed = -1, op_best = 0;
+    std::string ghost;  // 判定の列（LR2 のゴーストの文字列）  // 記録を分ける LN の種類（種類を決めていない LN が無い譜面は 0）
 };
 
 // プレイヤーの累計（LR2: player 表。スキンの数値 30〜37）

@@ -43,6 +43,7 @@ struct SelectContext {
     const SkinCatalog* catalog = nullptr;  // スキンセレクト（文字列 50/51/100〜114、ボタン 170〜188、スライダー7）
     bool autoplay = false;
     bool windowed = true;
+    bool replay_exists = false;  // カーソルの譜面のリプレイがある（op 196 / 197）
     int list_count = 0, list_pos = 0;  // 曲リストの数と、スクロール位置（1曲=1000。スライダー1）
     // 同じフォルダの難易度ごとの譜面（添字 0..4 = BEGINNER..INSANE）。レベル（無ければ -1）、数、ランプ
     std::array<int, 5> diff_level{-1, -1, -1, -1, -1}, diff_count{}, diff_lamp{};

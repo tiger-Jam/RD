@@ -46,6 +46,11 @@ struct PlayContext {
     // 表示用に補間した値（LR2: score_print / HP_print）。負なら補間せず実値を使う（リザルトなど）
     double score_print = -1, hp_print = -1;
     int hs_fix = 0;              // ハイスピード固定（ボタン55）
+    int ghost_pos = 0;           // ゴーストの位置（op 34〜37。0=OFF）
+    bool score_graph = false;    // スコアグラフ（op 38 / 39）
+    bool silent = false;         // 判定タイミングの自動調整の SILENT（ゴーストを出さない）
+    bool replay = false;         // リプレイを再生している（op 84）
+    bool replay_rec = false;     // リプレイに残すために入力を記録している（op 83）
     // 緑数字（1/600 秒）と見えている時間（ms）、LIFT の量（%）。番号は beatoraja と同じ（数値 312・313・314）
     int green_number = 0, visible_ms = 0, lift = 0;
     std::array<int, 5> diff_level{-1, -1, -1, -1, -1};  // 同じフォルダの難易度ごとのレベル（数値45〜49）
@@ -66,6 +71,8 @@ struct PlayContext {
     int bp_now() const;    // このプレイのBP（途中でやめたときは残りのノーツも含む）
     int last_offset_ms = 0;
     int last_fast_slow = 0;  // OpenLR2の拡張：0=PGREAT, 1=FAST, 2=SLOW
+    // 2P 側に出すゴースト（ターゲットの種類で決まる。無ければ nullptr）
+    const Ghost* p2_ghost() const { return target_type == 1 ? &best : target_type == 2 ? &target : nullptr; }
     // 自分のノーツが1つ判定されたとき（空POORは除く）にゴーストを進める（LR2: JudgeToScore）
     void on_judged() {
         if (autoplay) return;

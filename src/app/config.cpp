@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -44,6 +45,11 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "hs_mode") hs_mode = iv;
         else if (key == "bga") bga = iv;
         else if (key == "auto_adjust") auto_adjust = iv;
+        else if (key == "target") target = std::clamp(iv, 0, 5);
+        else if (key == "target_percent") target_percent = std::clamp(iv, 50, 100);
+        else if (key == "ghost") ghost = std::clamp(iv, 0, 3);
+        else if (key == "score_graph") score_graph = iv != 0;
+        else if (key == "replay_save") replay_save = std::clamp(iv, 0, 4);
         else if (key == "ln_mode") ln_mode = iv;
         else if (key == "fhs_green") fhs_green = iv;
         else if (key == "fhs_base") fhs_base = iv;
@@ -112,6 +118,11 @@ bool AppConfig::save(const std::string& path) const {
     f << "shutter_margin = " << shutter_margin << "\n";
     f << "ln_mode = " << ln_mode << "  # LN の種類 0=LN 1=CN 2=HCN（譜面で決めていない LN だけ）\n";
     f << "auto_adjust = " << auto_adjust << "  # 判定タイミングの自動調整 0=OFF 1=ON 2=SILENT\n";
+    f << "target = " << target << "  # ターゲット 0=既定 1=自己ベスト 2=AAA 3=AA 4=A 5=割合\n";
+    f << "target_percent = " << target_percent << "  # 既定のターゲットの割合（50〜100）\n";
+    f << "ghost = " << ghost << "  # ゴーストの位置 0=OFF 1=TYPE A 2=TYPE B 3=TYPE C\n";
+    f << "score_graph = " << (score_graph ? 1 : 0) << "  # スコアグラフ 0=OFF 1=ON\n";
+    f << "replay_save = " << replay_save << "  # リプレイの保存 0=OFF 1=ALWAYS 2=HISCORE 3=CLEAR 4=FULLCOMBO\n";
     f << "bga = " << bga << "  # BGA 0=OFF 1=ON 2=オートプレイのときだけ 3=NO MISS\n";
     f << "hs_mode = " << hs_mode << "  # ハイスピ 0=クラシック 1=フローティング\n";
     f << "fhs_green = " << fhs_green << "  # フローティングの緑数字（1/600 秒）\n";
@@ -155,6 +166,13 @@ bool AppConfig::save(const std::string& path) const {
 std::string config_path() {
     char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
     std::string p = dir ? std::string(dir) + "config.txt" : "config.txt";
+    SDL_free(dir);
+    return p;
+}
+
+std::string replay_path(const std::string& sha256) {
+    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
+    std::string p = (dir ? std::string(dir) : std::string()) + "replay/" + sha256 + ".bjr";
     SDL_free(dir);
     return p;
 }
