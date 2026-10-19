@@ -383,6 +383,7 @@ int main(int, char**) {
         bool running = false, done = false;
         Lr2ImportResult res;
         std::vector<std::string> song_dirs, tables;
+        std::map<std::string, std::vector<int>> skin_custom;
         ~ImportJob() {
             if (th.joinable()) th.join();
         }
@@ -597,11 +598,12 @@ int main(int, char**) {
                         else r = import_from_lr2(dir, c, db, [&job](const std::string& s) {
                             std::lock_guard<std::mutex> lock(job.mu);
                             job.status = s;
-                        });
+                        }, base.lr2_root);
                         std::lock_guard<std::mutex> lock(job.mu);
                         job.res = r;
                         job.song_dirs = c.song_dirs;
                         job.tables = c.tables;
+                        job.skin_custom = c.skin_custom;
                         job.done = true;
                     });
                 });
@@ -691,9 +693,10 @@ int main(int, char**) {
                 if (job.res.ok) {
                     cfg.song_dirs = job.song_dirs;
                     cfg.tables = job.tables;
+                    cfg.skin_custom = job.skin_custom;
                     message = "LR2 から引き継ぎました（曲フォルダ " + std::to_string(job.res.song_dirs) + "、譜面 " +
                               std::to_string(job.res.charts) + "、スコア " + std::to_string(job.res.scores) + "、難易度表 " +
-                              std::to_string(job.res.tables) + "）";
+                              std::to_string(job.res.tables) + "、スキン " + std::to_string(job.res.skins) + "）";
                 } else {
                     message = job.res.error;
                 }

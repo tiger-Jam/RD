@@ -671,8 +671,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     } else if (e.key.key == SDLK_F5 && phase == Phase::Result && !course) {
                         retry = true, done = true;
                     } else if (e.key.key == SDLK_F4) {
-                        bool fs = SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN;
-                        SDL_SetWindowFullscreen(app.window, !fs);
+                        app.toggle_fullscreen();
                     } else if ((e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) && (e.key.mod & SDL_KMOD_SHIFT)) {
                         // 判定タイミング（BMjoy の拡張。LR2 はオプション画面でしか変えられない）
                         int d = e.key.key == SDLK_RIGHT ? 1 : -1;

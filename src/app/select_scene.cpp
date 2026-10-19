@@ -1202,8 +1202,7 @@ void run_select(App& app) {
                         app.cfg.judge_timing = std::clamp(app.cfg.judge_timing + dir, -199, 199);
                         app.mixer.play_system(kSysOptionChange);
                     } else if (ty == 80) {
-                        bool fsc = SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN;
-                        SDL_SetWindowFullscreen(app.window, !fsc);
+                        app.toggle_fullscreen();
                     }
                     break;
                 }
@@ -1297,11 +1296,9 @@ void run_select(App& app) {
                     app.cfg.lane_cover = !app.cfg.lane_cover;
                     app.mixer.play_system(kSysOptionChange);
                     break;
-                case SDLK_F4: {
-                    bool fsc = SDL_GetWindowFlags(app.window) & SDL_WINDOW_FULLSCREEN;
-                    SDL_SetWindowFullscreen(app.window, !fsc);
+                case SDLK_F4:
+                    app.toggle_fullscreen();
                     break;
-                }
                 default: break;
                 }
             }

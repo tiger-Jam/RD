@@ -130,6 +130,12 @@ void App::window_size(int skin_w, int skin_h, int& w, int& h) const {
     h = h * scale / 100;
 }
 
+void App::toggle_fullscreen() {
+    cfg.fullscreen = !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN);
+    SDL_SetWindowFullscreen(window, cfg.fullscreen);
+    save_config();
+}
+
 void App::set_view(int w, int h, bool resize_window) {
     if (resize_window && (w != view_w || h != view_h)) {
         // ウィンドウの大きさもスキンに合わせる（SDは2倍）

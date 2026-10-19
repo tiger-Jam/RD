@@ -43,6 +43,9 @@ public:
     static std::string* config_slot(AppConfig& cfg, int type);
     static const std::string* config_slot(const AppConfig& cfg, int type);
 
+    // 集めたスキン（種類ごと）
+    const std::map<int, std::vector<SkinEntry>>& entries() const { return by_type_; }
+
 private:
     // 設定に書かれたカスタマイズの選択を、項目の並びに当てはめる
     std::vector<int> selections(const SkinEntry& e, const AppConfig& cfg) const;

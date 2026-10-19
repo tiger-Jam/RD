@@ -17,13 +17,19 @@ struct Lr2ImportResult {
     int charts = 0;          // 取り込んだ 7 鍵の譜面の数（仮の記録）
     int scores = 0;          // 取り込んだスコアの数
     int tables = 0;          // 新しく登録した難易度表の数
+    int skins = 0;           // カスタマイズを引き継いだスキンの数
 };
 
 // LR2 の設定（LR2files/Config/config.xmh、無ければ config.xml）の曲フォルダを cfg.song_dirs にし、
 // LR2 の曲データベースにある難易度表（難易度表の管理ツールが書いたもの）の URL を cfg.tables に足し、
 // 曲の情報（LR2files/Database/song.db）とスコア（LR2files/Database/Score/<プレイヤー ID>.db）を db に取り込む。
-// LR2 のファイルは読むだけで書き換えない
+// skin_root（BMjoy がスキンを読むフォルダ。空なら lr2_dir）にあるスキンのうち、LR2 でカスタマイズしたもの
+// （LR2files/SkinCustomize）は、その選択を cfg.skin_custom に写す。LR2 のファイルは読むだけで書き換えない
 Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, SongDb& db,
-                                const std::function<void(const std::string&)>& status = {});
+                                const std::function<void(const std::string&)>& status = {},
+                                const std::string& skin_root = {});
+
+// スキンのカスタマイズだけを引き継ぐ。引き継いだスキンの数を返す
+int import_lr2_skin_custom(const std::string& lr2_dir, const std::string& skin_root, AppConfig& cfg);
 
 }  // namespace bmj

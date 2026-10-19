@@ -44,6 +44,8 @@ struct App {
     void set_view(int w, int h, bool resize_window = true);
     void window_size(int skin_w, int skin_h, int& w, int& h) const;
     void save_config() const { cfg.save(cfg_path); }
+    // フルスクリーンとウインドウを切り替え、次の起動もその状態で始める
+    void toggle_fullscreen();
 };
 
 }  // namespace bmj

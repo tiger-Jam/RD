@@ -108,14 +108,16 @@ if(WIN32)
 endif()
 
 # 起動前の設定アプリ（LR2 の LR2.exe に相当）。「起動」で BMjoybody を黒い画面つきで立ち上げる
-add_executable(BMjoy WIN32 src/launcher/launcher.cpp src/app/config.cpp src/app/lr2_import.cpp src/render/text_cache.cpp)
+add_executable(BMjoy WIN32 src/launcher/launcher.cpp src/app/config.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp
+    src/render/text_cache.cpp)
 target_link_libraries(BMjoy PRIVATE bmj_core SDL3::SDL3)
 if(WIN32)
     target_sources(BMjoy PRIVATE src/app/bmjoy.manifest)
 endif()
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
-    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp src/input/input.cpp src/input/keyconfig.cpp)
+    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp src/input/input.cpp src/input/keyconfig.cpp
+    src/app/config.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 if(WIN32)

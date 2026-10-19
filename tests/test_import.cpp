@@ -1,8 +1,12 @@
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 
+#include "app/lr2_import.h"
 #include "chart/bmson_parser.h"
 #include "chart/osu_parser.h"
 #include "test.h"
+#include "util/hash.h"
 
 using namespace bmj;
 
@@ -144,4 +148,30 @@ TEST(bmson_old_and_reject) {
     std::string pms = R"({"version": "1.0.0", "info": {"title": "P", "init_bpm": 120, "mode_hint": "popn-9k"},
       "sound_channels": [{"name": "a.wav", "notes": [{"x": 1, "y": 0, "l": 0, "c": false}]}]})";
     CHECK(!parse_bmson_text(pms).ok);
+}
+
+// LR2 のスキンのカスタマイズ（LR2files/SkinCustomize/<スキンのパスの MD5>.xml）を引き継ぐ
+TEST(lr2_skin_customize) {
+    namespace fs = std::filesystem;
+    fs::path root = fs::temp_directory_path() / "bmj_test_skincustom";
+    fs::remove_all(root);
+    fs::create_directories(root / "LR2files" / "Theme" / "T" / "parts");
+    fs::create_directories(root / "LR2files" / "SkinCustomize");
+    for (const char* n : {"a.png", "b.png", "readme.txt"}) std::ofstream(root / "LR2files" / "Theme" / "T" / "parts" / n) << "x";
+    std::ofstream(root / "LR2files" / "Theme" / "T" / "play.lr2skin")
+        << "#INFORMATION,0,T,me\n#CUSTOMOPTION,Judge,900,ON,OFF,AUTO\n#CUSTOMFILE,Parts,LR2files\\Theme\\T\\parts\\*.png,a\n"
+           "#CUSTOMOPTION,Lane,910,A,B\n#ENDOFHEADER\n";
+    std::ofstream(root / "LR2files" / "SkinCustomize" / (md5_hex(std::string("LR2files\\Theme\\T\\play.lr2skin")) + ".xml"))
+        << "<?xml version=\"1.0\" encoding=\"shift_jis\"?>\n<skincustomize>\n<skinconfig>\n<config_0>902</config_0>\n"
+           "<config_1>0</config_1>\n<config_2>999</config_2>\n</skinconfig>\n<customfile>\n<filename_0>ERROR</filename_0>\n"
+           "<filename_1>b</filename_1>\n</customfile>\n</skincustomize>\n";
+    AppConfig cfg;
+    CHECK(import_lr2_skin_custom(root.string(), root.string(), cfg) == 1);
+    CHECK(cfg.skin_custom.size() == 1);
+    const std::vector<int>& sel = cfg.skin_custom.begin()->second;
+    CHECK(sel.size() == 3);
+    CHECK(sel[0] == 2);  // 902 - 900
+    CHECK(sel[1] == 1);  // a, b, RANDOM の b
+    CHECK(sel[2] == 0);  // 範囲外の値は既定のまま
+    fs::remove_all(root);
 }

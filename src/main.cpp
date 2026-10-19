@@ -408,14 +408,15 @@ int main(int argc, char** argv) {
         if (!app.init(argv[0])) return 1;
         if (!opt.import_lr2_dir.empty()) {
             auto t0 = std::chrono::steady_clock::now();
-            Lr2ImportResult r = import_from_lr2(opt.import_lr2_dir, c, app.db, [](const std::string& s) { std::printf("%s\n", s.c_str()); });
+            Lr2ImportResult r = import_from_lr2(opt.import_lr2_dir, c, app.db, [](const std::string& s) { std::printf("%s\n", s.c_str()); },
+                                              app.lr2_root);
             double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             if (!r.ok) {
                 std::printf("LR2 から引き継げない: %s\n", r.error.c_str());
                 return 1;
             }
-            std::printf("LR2 から引き継いだ：プレイヤー %s、曲フォルダ %d、7 鍵の譜面 %d、スコア %d、難易度表 %d（%.1f 秒）\n",
-                        r.player.c_str(), r.song_dirs, r.charts, r.scores, r.tables, sec);
+            std::printf("LR2 から引き継いだ：プレイヤー %s、曲フォルダ %d、7 鍵の譜面 %d、スコア %d、難易度表 %d、スキン %d（%.1f 秒）\n",
+                        r.player.c_str(), r.song_dirs, r.charts, r.scores, r.tables, r.skins, sec);
             for (const std::string& d : c.song_dirs) std::printf("  曲フォルダ: %s\n", d.c_str());
             app.save_config();
             return 0;
