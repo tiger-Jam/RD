@@ -1,6 +1,9 @@
 #include "skin/lr2_skin.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -8,8 +11,10 @@
 #include <fstream>
 #include <random>
 #include <system_error>
+#include <thread>
 
 #include "stb_image.h"
+#include "util/dev.h"
 #include "util/dxa.h"
 #include "util/text.h"
 
@@ -188,6 +193,38 @@ bool load_image_file(const std::string& path, SkinImage& img, const uint8_t tran
     return decode_image(bytes, img, trans, use_trans);
 }
 
+// 画像を読むのはあとでまとめて（並べて）行う。読み込みの途中では、大きさだけを頭から読んでおく（SRC の -1 に使う）
+struct DecodeJob {
+    int font = -1, index = 0;  // font < 0 なら sk.images[index]、そうでなければ sk.image_fonts[font].images[index]
+    std::string path;
+    std::vector<uint8_t> bytes;  // 頭だけ読んだときは空（ほどくときに読む）
+    uint8_t trans[3] = {0, 0, 0};
+    bool use_trans = false;
+    std::string warning;  // ほどけなかったときの警告
+};
+
+// 大きさだけを知る。ふつうのファイルは頭だけを読む（全部はほどくときに読む）。.dxa の中のものは全部読んで bytes に残す
+bool peek_image(const std::string& path, SkinImage& img, std::vector<uint8_t>& bytes) {
+    int w = 0, h = 0, comp = 0;
+    bool ok = false;
+    std::error_code ec;
+    if (fs::is_regular_file(fs::path(path), ec)) {
+        std::ifstream f(fs::path(path), std::ios::binary);
+        std::vector<uint8_t> head(64 * 1024);
+        f.read(reinterpret_cast<char*>(head.data()), static_cast<std::streamsize>(head.size()));
+        head.resize(static_cast<size_t>(f.gcount()));
+        ok = !head.empty() && stbi_info_from_memory(head.data(), static_cast<int>(head.size()), &w, &h, &comp);
+    }
+    if (!ok) {
+        // 頭に大きさが無い画像（大きな付加情報のある JPEG など）と .dxa の中のものは、全部読んで確かめる
+        if (!read_file_or_dxa(path, bytes)) return false;
+        if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h, &comp)) return false;
+    }
+    img.path = path;
+    img.w = w, img.h = h;
+    return true;
+}
+
 bool is_movie(const std::string& p) {
     std::string l = lower(p);
     auto ends = [&](const char* e) { return l.size() >= 3 && l.compare(l.size() - 3, 3, e) == 0; };
@@ -268,6 +305,20 @@ struct Loader {
     // #CUSTOMFILE の検索パターンと、選ばれたファイル名
     std::vector<std::pair<std::string, std::string>> custom_files;
     int image_count = 0;
+    std::vector<DecodeJob> jobs;
+
+    // 画像を読む予約。need_size なら大きさはすぐ決める（SRC の -1 に使う #IMAGE）。読めなければ false。
+    // 画像フォントの絵は大きさを使わないので、ファイルにも触らずに予約だけする（.dxa の中だと 1 枚ずつ取り出すのが遅い）
+    bool queue_image(const std::string& path, SkinImage& img, int font, int index, const uint8_t tr[3], bool use_trans,
+                     std::string warning, bool need_size = true) {
+        DecodeJob j;
+        if (need_size && !peek_image(path, img, j.bytes)) return false;
+        if (!need_size) img.path = path;
+        j.font = font, j.index = index, j.path = path, j.use_trans = use_trans, j.warning = std::move(warning);
+        std::memcpy(j.trans, tr, 3);
+        jobs.push_back(std::move(j));
+        return true;
+    }
 
     std::string apply_custom_file(std::string path) {
         for (auto& [pattern, chosen] : custom_files) {
@@ -345,7 +396,8 @@ struct Loader {
                 image_count++;
                 return;
             }
-            SkinImage& img = sk.images[image_count++];
+            const int index = image_count++;
+            SkinImage& img = sk.images[index];
             img = SkinImage{};
             std::string resolved = resolve_lr2_path(root, apply_custom_file(p));
             if (is_movie(p)) {
@@ -354,7 +406,7 @@ struct Loader {
                 else img.movie = resolved;
                 return;
             }
-            if (resolved.empty() || !load_image_file(resolved, img, trans, true))
+            if (resolved.empty() || !queue_image(resolved, img, -1, index, trans, true, "画像が読めない: " + p))
                 sk.warnings.push_back("画像が読めない: " + p);
         } else if (cmd == "#TRANSCOLOR" || cmd == "#TRANSCLOLR" || cmd == "#TRANSCLOLOR") {
             trans[0] = static_cast<uint8_t>(c.val(1));
@@ -646,11 +698,11 @@ struct Loader {
         int max_img = image_names.empty() ? -1 : image_names.rbegin()->first;
         f.images.assign(static_cast<size_t>(max_img + 1), SkinImage{});
         uint8_t no_trans[3] = {0, 0, 0};
+        const int font = static_cast<int>(&f - sk.image_fonts.data());
         for (auto& [idx, name] : image_names) {
             if (idx < 0) continue;
             std::string p = (fs::path(dir) / name).string();
-            if (!load_image_file(p, f.images[idx], no_trans, false))
-                sk.warnings.push_back("画像フォントの画像が読めない: " + p);
+            queue_image(p, f.images[idx], font, idx, no_trans, false, "画像フォントの画像が読めない: " + p, false);
         }
         f.loaded = true;
     }
@@ -790,9 +842,35 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
         }
     }
     Loader ld{lr2_root, out, header, {0, 255, 0}, 0, {}, 0};
+    auto tp0 = std::chrono::steady_clock::now();
     if (ld.read(skin_path, 0) == 0) {
         error = "スキンを読めない: " + skin_path;
         return false;
+    }
+    auto tp1 = std::chrono::steady_clock::now();
+    // 予約した画像を、CPU の数だけ並べてほどく（大きなスキンでは、1 枚ずつだと選曲画面に入るのが遅い）
+    {
+        std::vector<char> ok(ld.jobs.size(), 0);
+        std::atomic<size_t> next{0};
+        auto work = [&] {
+            for (size_t i; (i = next.fetch_add(1)) < ld.jobs.size();) {
+                DecodeJob& j = ld.jobs[i];
+                SkinImage& img = j.font < 0 ? out.images[j.index] : out.image_fonts[j.font].images[j.index];
+                ok[i] = (!j.bytes.empty() || read_file_or_dxa(j.path, j.bytes)) && decode_image(j.bytes, img, j.trans, j.use_trans);
+                std::vector<uint8_t>().swap(j.bytes);
+            }
+        };
+        const unsigned n = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+        std::vector<std::thread> pool;
+        for (unsigned t = 1; t < n; ++t) pool.emplace_back(work);
+        work();
+        for (std::thread& t : pool) t.join();
+        for (size_t i = 0; i < ld.jobs.size(); ++i)
+            if (!ok[i]) out.warnings.push_back(ld.jobs[i].warning);
+        if (dev_env("BMJ_TIMING"))
+            std::printf("    スキン：読む %lld ms、画像 %zu 枚をほどく %lld ms\n",
+                        (long long)std::chrono::duration_cast<std::chrono::milliseconds>(tp1 - tp0).count(), ld.jobs.size(),
+                        (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - tp1).count());
     }
     // スライダーの繰り返しの戻り先が最初の表示より前（WMIX の曲リストのスライダー：1000〜1100ms で表れ、loop 0）のとき、
     // OpenLR2 の計算では点滅し続けるが、実際の LR2 では表れたまま。最後の表示のまま止める

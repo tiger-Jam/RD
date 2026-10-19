@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <future>
 #include <functional>
+#include <unordered_set>
 #include <list>
 #include <set>
 #include <fstream>
@@ -69,7 +70,10 @@ struct Entry {
     std::shared_ptr<Course> course;  // コースのとき
     bool course_folder = false;      // コースを集めたフォルダ（バーの種類 6）
     bool fs_folder = false;          // 曲フォルダの階層（中の譜面に LR2 の難易度の絞り込みをかける）
-    const CustomFolderDef* custom_random = nullptr;  // 開くたびに 1 曲を選び直すカスタムフォルダ（#MAXTRACKS 1）
+    // カスタムフォルダ。中身は開くとき（とフォルダのランプを出すとき）に集める（LR2 と同じ。全部を先に集めると、数が多いと遅い）。
+    // #MAXTRACKS 1 のフォルダは、開くたびに 1 曲を選び直す
+    const CustomFolderDef* custom = nullptr;
+    bool custom_loaded = false;
     std::string dir;                 // 曲フォルダの階層のとき、そのフォルダのパス（F8 の読み直し）
     std::vector<Entry> children;
     int owned = 0, total = 0;  // フォルダの中で持っている譜面の数
@@ -86,7 +90,36 @@ struct Library {
     std::shared_ptr<CustomFolderQuery> custom_query;
     // MOD が作ったフォルダ（仕様書14章「フォルダの作成」）
     std::vector<ModFolder> mod_folders;
+    // md5 → 譜面（カスタムフォルダの中身を集めるときに、初めて要ったら作る）
+    std::unordered_map<std::string, const ChartRecord*> md5_index;
 };
+
+Entry chart_entry_of(const ChartRecord* c, const std::string& badge) {
+    Entry e;
+    e.kind = Entry::Kind::Chart;
+    e.chart = c;
+    e.label = c->title + (c->subtitle.empty() ? "" : " " + c->subtitle);
+    e.sub = c->artist;
+    e.badge = badge;
+    return e;
+}
+
+// カスタムフォルダの中身を集める（e は一覧の中のフォルダ。中身を差し替える）
+void load_custom_entry(Library& lib, const Entry& e) {
+    Entry& m = const_cast<Entry&>(e);
+    m.children.clear();
+    m.owned = m.total = 0;
+    m.custom_loaded = true;
+    if (!e.custom || !lib.custom_query) return;
+    if (lib.md5_index.empty())
+        for (const ChartRecord& c : lib.charts) lib.md5_index.emplace(c.md5, &c);
+    for (const std::string& md5 : lib.custom_query->run(*e.custom)) {
+        auto it = lib.md5_index.find(md5);
+        if (it == lib.md5_index.end()) continue;
+        m.children.push_back(chart_entry_of(it->second, std::to_string(it->second->playlevel)));
+        m.owned++, m.total++;
+    }
+}
 
 // カスタムフォルダを読み、中身を集める表を作り直す（曲・記録・お気に入りが変わったとき）
 // MOD のフォルダも、ここで作り直す
@@ -170,15 +203,16 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     };
     std::unordered_map<std::string, const ChartRecord*> by_md5, by_sha256;
     for (const ChartRecord& c : lib.charts) by_md5.emplace(c.md5, &c), by_sha256.emplace(c.sha256, &c);
-    auto chart_entry = [&](const ChartRecord* c, const std::string& badge) {
-        Entry e;
-        e.kind = Entry::Kind::Chart;
-        e.chart = c;
-        e.label = c->title + (c->subtitle.empty() ? "" : " " + c->subtitle);
-        e.sub = c->artist;
-        e.badge = badge;
-        return e;
+    // 開発用：BMJ_TIMING があれば、一覧づくりの内訳を出す
+    uint64_t lap_ns = SDL_GetTicksNS();
+    auto lap = [&](const char* what) {
+        if (!dev_env("BMJ_TIMING")) return;
+        uint64_t now = SDL_GetTicksNS();
+        std::printf("    一覧：%s %.0f ms\n", what, (now - lap_ns) / 1e6);
+        lap_ns = now;
     };
+    lap("索引");
+    auto chart_entry = [&](const ChartRecord* c, const std::string& badge) { return chart_entry_of(c, badge); };
     std::vector<Entry> root;
     for (const DifficultyTable& t : lib.tables) {
         Entry tf;
@@ -232,6 +266,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
         }
     root.push_back(std::move(expert));
     root.push_back(std::move(grade));
+    lap("難易度表とコース");
     // 曲フォルダ（LR2 と同じ。docs/lr2_songlist_spec.md 2〜4 章）：登録した曲フォルダごとに 1 つ、実際の階層のとおり。
     // フォルダを開いたとき、直下に曲フォルダ（譜面の入ったフォルダ）が 1 つでもあれば、その全部の譜面（差分）を 1 譜面 1 バーで並べ、
     // 曲フォルダ自体のバーは出さない。無ければ直下のフォルダを並べる
@@ -267,10 +302,16 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     std::unordered_map<std::string, std::set<std::string>> subdirs;               // フォルダ → 譜面のある下のフォルダ
     std::set<std::string> roots;
     for (const std::string& r : lib.roots) roots.insert(upper(norm(r)));
+    // 同じフォルダの譜面は並んでいることが多いので、直前のフォルダと同じなら整え直さない。
+    // 親をたどるのは、フォルダごとに 1 回だけ
+    std::string prev_raw, prev_norm;
+    std::unordered_set<std::string> linked;
     for (const ChartRecord& c : lib.charts) {
         if (fav_of(c.md5) == 2) continue;
-        std::string f = norm(c.folder);
+        if (c.folder != prev_raw) prev_raw = c.folder, prev_norm = norm(c.folder);
+        const std::string& f = prev_norm;
         charts_in[f].push_back(&c);
+        if (!linked.insert(f).second) continue;
         // 登録した曲フォルダまで上がって、親子をつなぐ（どの曲フォルダの下でもなければ出さない）
         std::string child = f;
         for (int guard = 0; guard < 64; ++guard) {
@@ -281,6 +322,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
             child = parent;
         }
     }
+    lap("曲フォルダの親子");
     auto by_path = [&](const std::string& a, const std::string& b) {
         const std::string& ka = sort_key(a);
         const std::string& kb = sort_key(b);
@@ -333,18 +375,12 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
         fill(f, d);
         song_roots.push_back(std::move(f));
     }
+    lap("曲フォルダの並べ替え");
     // カスタムフォルダ（LR2: 登録した曲フォルダの次）。#COMMAND の結果を並べる（難易度の絞り込みはかけない）
     auto custom_entry = [&](const CustomFolderDef& d) {
         Entry f;
         f.label = d.title;
-        if (d.max_tracks == 1) f.custom_random = &d;
-        if (lib.custom_query)
-            for (const std::string& md5 : lib.custom_query->run(d)) {
-                auto it = by_md5.find(md5);
-                if (it == by_md5.end()) continue;
-                f.children.push_back(chart_entry(it->second, std::to_string(it->second->playlevel)));
-                f.owned++, f.total++;
-            }
+        f.custom = &d;  // 中身は開くときに集める（load_custom_entry）
         return f;
     };
     for (const CustomFolderNode& n : lib.custom_nodes) {
@@ -378,6 +414,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
         }
         return f;
     };
+    lap("カスタムフォルダ");
     for (const ModFolder& mf : lib.mod_folders) song_roots.push_back(mod_entry(mf));
     // 並び：難易度表 → 登録した曲フォルダ → カスタムフォルダ → MOD のフォルダ → NEW SONG → COURSE / 段位認定（LR2 のルートと同じく、コースのフォルダは後ろ）
     std::vector<Entry> courses(std::make_move_iterator(root.end() - 2), std::make_move_iterator(root.end()));
@@ -1004,6 +1041,7 @@ void run_select(App& app) {
             const std::vector<Entry>& list = *stack.back().list;
             auto it = std::find_if(list.begin(), list.end(), [&](const Entry& e) { return e.label == path[i]; });
             if (it == list.end()) break;
+            if (it->custom && !it->custom_loaded) load_custom_entry(*lib, *it);
             stack.push_back(make_level(&it->children, cursors[i + 1], path[i], it->fs_folder, it->dir));
             place(stack.back(), i + 1);
         }
@@ -1050,7 +1088,24 @@ void run_select(App& app) {
             bool record_folders = !lib->custom_nodes.empty();
             for (const ModManifest* m : app.active_mods())
                 if (!m->script.empty() && (m->touches & static_cast<uint32_t>(ModTouch::Control))) record_folders = true;
-            if (record_folders) load_custom(*lib, app, favs);
+            if (record_folders && played.empty()) {
+                load_custom(*lib, app, favs);
+            } else if (record_folders) {
+                // カスタムフォルダの表は、遊んだ譜面の行だけ書き換える。MOD のフォルダは作り直す
+                if (lib->custom_query)
+                    for (const std::string& sha : played) {
+                        auto sc = lib->scores.find(sha);
+                        if (sc == lib->scores.end()) continue;
+                        for (const ChartRecord& c : lib->charts)
+                            if (c.sha256 == sha) {
+                                lib->custom_query->update_score(c, sc->second);
+                                break;
+                            }
+                    }
+                std::vector<std::string> errors;
+                lib->mod_folders = build_mod_folders(app.active_mods(), lib->charts, lib->scores, mod_data_dir(""), &errors);
+                for (const std::string& er : errors) std::printf("MOD のフォルダを作れない：%s\n", er.c_str());
+            }
             const uint64_t t2 = SDL_GetTicksNS();
             if (record_folders) rebuild();
             else if (sort_mode >= 6) resort_pending = true;
@@ -1063,22 +1118,10 @@ void run_select(App& app) {
         const Entry* e = current();
         if (!e) return;
         if (e->kind == Entry::Kind::Folder) {
-            if (e->custom_random && lib->custom_query) {
-                // 1 曲を無作為に選ぶフォルダは、開くたびに選び直す（LR2: songmanage:2091）
-                Entry& m = const_cast<Entry&>(*e);
-                m.children.clear();
-                for (const std::string& md5 : lib->custom_query->run(*e->custom_random))
-                    for (const ChartRecord& c : lib->charts)
-                        if (c.md5 == md5) {
-                            Entry x;
-                            x.kind = Entry::Kind::Chart;
-                            x.chart = &c;
-                            x.label = c.title + (c.subtitle.empty() ? "" : " " + c.subtitle);
-                            x.sub = c.artist;
-                            x.badge = std::to_string(c.playlevel);
-                            m.children.push_back(std::move(x));
-                            break;
-                        }
+            if (e->custom && (!e->custom_loaded || e->custom->max_tracks == 1)) {
+                // 開くたびに 1 曲を選び直すフォルダは、毎回集め直す（LR2: songmanage:2091）
+                load_custom_entry(*lib, *e);
+                folder_lamps.erase(e);
             }
             if (e->children.empty()) return;  // 空のフォルダには入らない（LR2 と同じ）
             stack.push_back(make_level(&e->children, 0, e->label, e->fs_folder, e->dir));
@@ -2075,6 +2118,7 @@ void run_select(App& app) {
                         if (fresh) {
                             int lamp = 7;
                             std::function<void(const Entry&)> walk = [&](const Entry& x) {
+                                if (x.custom && !x.custom_loaded) load_custom_entry(*lib, x);
                                 if (x.kind == Entry::Kind::Chart && x.chart && mode_shows(mode_filter, x.chart->keys)) {
                                     auto sc = lib->scores.find(x.chart->sha256);
                                     lamp = std::min(lamp, sc != lib->scores.end() ? sc->second.clear : 0);
@@ -2323,7 +2367,12 @@ void run_select(App& app) {
                 else if (k == 'o') sort_mode = (sort_mode + 1) % kSortCount, reapply_view();
                 else if (k == 'a') autoplay = !autoplay;
                 else if (k == '_') SDL_Delay(10);  // 待つだけ
-                else if (k == 'r') reload_after_play(false);  // 遊んで戻ったときの読み直し
+                else if (k == 'r') reload_after_play(false);  // 遊んで戻ったときの読み直し（全部の記録）
+                else if (k == 'R') {
+                    // 今の譜面を遊んで戻ったときと同じ読み直し
+                    const Entry* cur = current();
+                    if (cur && cur->kind == Entry::Kind::Chart) reload_after_play(false, {cur->chart->sha256});
+                }
                 else if (k == '6') {
                     // F6（スクリーンショット）を押したことにする
                     SDL_Event ev{};

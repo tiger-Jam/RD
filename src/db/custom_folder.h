@@ -9,6 +9,9 @@
 
 #include "db/song_db.h"
 
+struct sqlite3;
+struct sqlite3_stmt;
+
 namespace bmj {
 
 struct CustomFolderDef {
@@ -37,9 +40,12 @@ public:
     // 当てはまる譜面の md5（SQL の並び。ORDER BY が無ければ表の並び）。IGNORE の譜面は入れない。
     // SQL が読めなければ空を返し、error に理由を入れる
     std::vector<std::string> run(const CustomFolderDef& def, std::string* error = nullptr) const;
+    // 1 譜面の記録だけを書き換える（遊んだあと。表を全部作り直すより速い）
+    void update_score(const ChartRecord& c, const ScoreRecord& r);
 
 private:
-    struct sqlite3* db_ = nullptr;
+    static void bind_score(sqlite3_stmt* st, const ChartRecord& c, const ScoreRecord& r);
+    sqlite3* db_ = nullptr;
 };
 
 }  // namespace bmj

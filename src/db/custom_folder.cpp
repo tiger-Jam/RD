@@ -116,6 +116,13 @@ CustomFolderQuery::~CustomFolderQuery() {
     if (db_) sqlite3_close(db_);
 }
 
+namespace {
+const char* kInsertScore =
+    "INSERT OR REPLACE INTO score(hash, clear, perfect, great, good, bad, poor, totalnotes, maxcombo, minbp, playcount, "
+    "clearcount, failcount, rank, rate, clear_db, op_history, clear_sd, clear_ex, op_best, rseed, complete) "
+    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?,1)";
+}  // namespace
+
 bool CustomFolderQuery::build(const std::vector<ChartRecord>& charts, const std::unordered_map<std::string, ScoreRecord>& scores,
                               const std::unordered_map<std::string, int>& favorites) {
     if (db_) sqlite3_close(db_), db_ = nullptr;
@@ -139,11 +146,7 @@ bool CustomFolderQuery::build(const std::vector<ChartRecord>& charts, const std:
                        "backbmp, parent, level, difficulty, maxbpm, minbpm, mode, judge, longnote, bga, random, date, favorite, txt, "
                        "karinotes, adddate, exlevel) VALUES(?,?,?,?,?,?,'',?,0,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,0,?,?,0)",
                        -1, &song, nullptr);
-    sqlite3_prepare_v2(db_,
-                       "INSERT OR REPLACE INTO score(hash, clear, perfect, great, good, bad, poor, totalnotes, maxcombo, minbp, playcount, "
-                       "clearcount, failcount, rank, rate, clear_db, op_history, clear_sd, clear_ex, op_best, rseed, complete) "
-                       "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,0,0,?,?,1)",
-                       -1, &score, nullptr);
+    sqlite3_prepare_v2(db_, kInsertScore, -1, &score, nullptr);
     auto text = [](sqlite3_stmt* s, int i, const std::string& v) { sqlite3_bind_text(s, i, v.c_str(), static_cast<int>(v.size()), SQLITE_TRANSIENT); };
     std::set<std::string> seen;
     for (const ChartRecord& c : charts) {
@@ -167,9 +170,19 @@ bool CustomFolderQuery::build(const std::vector<ChartRecord>& charts, const std:
         sqlite3_reset(song);
         auto sc = scores.find(c.sha256);
         if (sc == scores.end()) continue;
-        const ScoreRecord& r = sc->second;
+        bind_score(score, c, sc->second);
+        sqlite3_step(score);
+        sqlite3_reset(score);
+    }
+    sqlite3_finalize(song);
+    sqlite3_finalize(score);
+    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+    return true;
+}
+
+void CustomFolderQuery::bind_score(sqlite3_stmt* score, const ChartRecord& c, const ScoreRecord& r) {
         const int notes = std::max(1, c.notes);
-        text(score, 1, c.md5);
+        sqlite3_bind_text(score, 1, c.md5.c_str(), static_cast<int>(c.md5.size()), SQLITE_TRANSIENT);
         sqlite3_bind_int(score, 2, std::min(r.clear, 5));  // LR2 のランプは FULL COMBO（5）まで
         for (int i = 0; i < 5; ++i) sqlite3_bind_int(score, 3 + i, r.judge[i]);
         sqlite3_bind_int(score, 8, c.notes);
@@ -183,13 +196,16 @@ bool CustomFolderQuery::build(const std::vector<ChartRecord>& charts, const std:
         sqlite3_bind_int64(score, 16, r.op_history);
         sqlite3_bind_int(score, 17, r.op_best);
         sqlite3_bind_int(score, 18, r.rseed);
-        sqlite3_step(score);
-        sqlite3_reset(score);
+}
+
+void CustomFolderQuery::update_score(const ChartRecord& c, const ScoreRecord& r) {
+    if (!db_) return;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, kInsertScore, -1, &st, nullptr) == SQLITE_OK) {
+        bind_score(st, c, r);
+        sqlite3_step(st);
     }
-    sqlite3_finalize(song);
-    sqlite3_finalize(score);
-    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
-    return true;
+    sqlite3_finalize(st);
 }
 
 std::vector<std::string> CustomFolderQuery::run(const CustomFolderDef& def, std::string* error) const {
