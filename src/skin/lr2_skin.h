@@ -98,6 +98,7 @@ struct SkinCustomItem {
 struct SkinHeader {
     int type = -1;
     std::string title, maker;
+    std::string thumbnail;  // #INFORMATION の 4 番目の欄（スキンセレクトのサムネイル）
     int width = 640, height = 480;
     bool has_resolution = false;
     std::vector<SkinCustomItem> customs;

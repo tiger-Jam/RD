@@ -56,8 +56,16 @@ public:
     void play_now(uint16_t sound) { push_command(static_cast<int32_t>(sound)); }
     void stop_now(uint16_t sound) { push_command(-static_cast<int32_t>(sound) - 1); }
 
-    // システム音（決定音・選曲BGMなど）。曲を止めていても鳴る。set_system_sounds は鳴らし始める前に1回だけ呼ぶ
-    void set_system_sounds(std::vector<Sample> sounds) { sys_samples_ = std::move(sounds); }
+    // システム音（決定音・選曲BGMなど）。曲を止めていても鳴る。
+    // 鳴らし始めたあとに替えるときは、鳴っているシステム音を全部止め、コールバックが止めたのを待ってから差し替える
+    void set_system_sounds(std::vector<Sample> sounds) {
+        if (!sys_samples_.empty()) {
+            for (int id = 0; id < static_cast<int>(sys_samples_.size()); ++id) stop_system(id);
+            wait_callback();
+            wait_callback();
+        }
+        sys_samples_ = std::move(sounds);
+    }
     void play_system(int id, bool loop = false) { push_command(kSysBase + id + (loop ? kSysLoop : 0)); }
     void stop_system(int id) { push_command(kSysBase + id + kSysStop); }
     // くり返し鳴らしているシステム音（選曲 BGM）の音量を、ms かけて target にする（LR2: SetFadePreview）

@@ -903,6 +903,11 @@ void run_select(App& app) {
                         // スキンを替える／カスタマイズ項目を替える。選曲スキンなら、その場で読み直す
                         bool changed = ty == 190 ? catalog.step_skin(app.cfg, dir) : catalog.step_custom(app.cfg, ty - 220, dir);
                         if (changed) {
+                            // サウンドセットはその場で読み直し、選曲の BGM も新しい音で鳴らし直す
+                            if (catalog.selected_type() == 10 && ty == 190) {
+                                app.load_sound_set();
+                                app.mixer.play_system(kSysSelect, true);
+                            }
                             app.mixer.play_system(kSysOptionChange);
                             app.save_config();
                             if (catalog.selected_type() == 5) {

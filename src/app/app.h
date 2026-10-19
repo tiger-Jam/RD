@@ -34,6 +34,7 @@ struct App {
     ~App();
     bool init(const char* argv0);
     // プレイスキンを読む。options はスキン読み込み時の #IF の判定に使う値
+    void load_sound_set();
     void load_play_skin(const std::array<bool, 1000>& options);
     void load_result_skin(const std::array<bool, 1000>& options);
     void load_courseresult_skin(const std::array<bool, 1000>& options);

@@ -5,8 +5,114 @@
 
 #include "app/select_context.h"
 #include "audio/system_sound.h"
+#include "render/skin_play.h"
 
 namespace bmj {
+
+namespace {
+
+// 選んでいるスキンのプレビュー（LR2: MakeSkinPreview / DrawSkinPreview）。スキンを読み込んで動かし、
+// 画像 105 の大きさの絵に縮めて描く。サウンドセットは #INFORMATION の 4 番目の欄の画像（無ければ黒）
+class SkinPreview {
+public:
+    SkinPreview(App& app, int w, int h) : app_(app), renderer_(app.renderer) {
+        tex_ = SDL_CreateTexture(app.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, w, h);
+    }
+    ~SkinPreview() {
+        if (tex_) SDL_DestroyTexture(tex_);
+        if (thumb_) SDL_DestroyTexture(thumb_);
+    }
+    SDL_Texture* texture() const { return tex_; }
+
+    // 選んでいるスキンが変わったら読み直す
+    void select(const SkinEntry* e, int type) {
+        // カスタマイズを変えたときも読み直す
+        std::string want = e ? e->path : "";
+        if (e)
+            if (auto it = app_.cfg.skin_custom.find(e->path); it != app_.cfg.skin_custom.end())
+                for (int v : it->second) want += "," + std::to_string(v);
+        if (want == path_ && type == type_) return;
+        path_ = want, type_ = type;
+        skin_.reset();
+        if (thumb_) SDL_DestroyTexture(thumb_), thumb_ = nullptr;
+        start_ns_ = SDL_GetTicksNS();
+        timers_ = SkinTimers();
+        timers_.set(0, 0);
+        if (!e) return;
+        if (type == 10) {
+            // サウンドセット：サムネイルの画像
+            if (!e->header.thumbnail.empty()) {
+                std::string p = resolve_lr2_path(app_.lr2_root, e->header.thumbnail, false);
+                SkinImage img;
+                static const uint8_t black[3] = {0, 0, 0};
+                if (!p.empty() && load_skin_image(p, img, black, false)) thumb_ = renderer_.create_texture(img);
+            }
+            return;
+        }
+        SkinHeader h = e->header;
+        if (auto it = app_.cfg.skin_custom.find(e->path); it != app_.cfg.skin_custom.end())
+            for (size_t i = 0; i < it->second.size() && i < h.customs.size(); ++i)
+                if (it->second[i] >= 0 && it->second[i] < static_cast<int>(h.customs[i].labels.size())) h.customs[i].selected = it->second[i];
+        auto sk = std::make_unique<Lr2Skin>();
+        std::string err;
+        if (!load_lr2_skin(app_.lr2_root, e->path, h, ctx_.load_options(), *sk, err)) return;
+        if (!h.has_resolution) sk->width = 640, sk->height = 480;
+        renderer_.upload(*sk);
+        skin_ = std::move(sk);
+        ctx_.skin = skin_.get();
+    }
+
+    // 1 フレーム分を描く（タイマー 1・40・41 は、LR2 と同じく時間が来たら立てる）
+    void draw() {
+        if (!tex_) return;
+        SDL_Renderer* r = app_.renderer;
+        SDL_SetRenderTarget(r, tex_);
+        float tw = 0, th = 0;
+        SDL_GetTextureSize(tex_, &tw, &th);
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_RenderClear(r);
+        if (thumb_) {
+            SDL_FRect d{0, 0, tw, th};
+            SDL_RenderTexture(r, thumb_, nullptr, &d);
+        } else if (skin_) {
+            SDL_SetRenderLogicalPresentation(r, skin_->width, skin_->height, SDL_LOGICAL_PRESENTATION_STRETCH);
+            double t = (SDL_GetTicksNS() - start_ns_) / 1e6;
+            if (!timers_.on(1) && t > skin_->startinput) timers_.set(1, t);
+            if (!timers_.on(40) && t > skin_->loadstart + skin_->loadend) timers_.set(40, t);
+            if (timers_.on(40) && !timers_.on(41) && timers_.lapse(40, t) > skin_->playstart) timers_.set(41, t);
+            ctx_.timers = timers_;
+            ctx_.now_ms = t;
+            PlaySkinState st;
+            st.now_ms = t;
+            st.timers = &timers_;
+            st.option = [&](int o) { return ctx_.option(o); };
+            st.number = [&](int id) { return ctx_.number(id); };
+            st.bargraph = [&](int ty, double& v, double& m) { return ctx_.bargraph(ty, v, m); };
+            st.slider = [&](int ty, int& v, int& lo, int& hi) { return ctx_.slider(ty, v, lo, hi); };
+            st.text = [&](int id) { return ctx_.text(id); };
+            st.button = [&](int ty) { return ctx_.button(ty); };
+            if (type_ <= 4) renderer_.draw_play(*skin_, st);
+            else if (type_ == 7 || type_ == 15) renderer_.draw_result(*skin_, st);
+            else renderer_.draw_select(*skin_, st);
+            SDL_SetRenderLogicalPresentation(r, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+        }
+        SDL_SetRenderTarget(r, nullptr);
+    }
+
+private:
+    App& app_;
+    SkinRenderer renderer_;
+    SDL_Texture* tex_ = nullptr;
+    SDL_Texture* thumb_ = nullptr;
+    std::unique_ptr<Lr2Skin> skin_;
+    PlayContext ctx_;
+    SkinTimers timers_;
+    std::string path_;
+    int type_ = -1;
+    uint64_t start_ns_ = 0;
+};
+
+}  // namespace
 
 bool run_skin_select(App& app, SkinCatalog& catalog) {
     SelectContext ctx;
@@ -27,6 +133,12 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
     renderer.upload(skin);
     ctx.skin = &skin;
     app.set_view(skin.width, skin.height);
+    // プレビューの絵は、画像 105 の切り出しの大きさで作る
+    int pw = 640, ph = 480;
+    for (const SkinObject& o : skin.image_objs)
+        if (o.src.gr == 105 && o.src.w > 0 && o.src.h > 0) pw = o.src.w, ph = o.src.h;
+    SkinPreview preview(app, pw, ph);
+    renderer.set_image_override(105, preview.texture());
 
     SkinTimers timers;
     timers.set(0, 0);
@@ -73,6 +185,11 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
                     } else if (ty == 190 || (ty >= 220 && ty <= 229)) {
                         bool changed = ty == 190 ? catalog.step_skin(app.cfg, dir) : catalog.step_custom(app.cfg, ty - 220, dir);
                         if (changed) {
+                            // サウンドセットはその場で読み直す（選曲の BGM も新しい音で鳴らし直す）
+                            if (catalog.selected_type() == 10 && ty == 190) {
+                                app.load_sound_set();
+                                app.mixer.play_system(kSysSelect, true);
+                            }
                             app.mixer.play_system(kSysOptionChange);
                             if (catalog.selected_type() == 5) select_changed = true;
                         }
@@ -104,6 +221,8 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         }
         if (timers.on(2) && timers.lapse(2, t) >= skin.fadeout) done = true;
 
+        preview.select(catalog.current(app.cfg), catalog.selected_type());
+        preview.draw();
         PlaySkinState st;
         st.now_ms = t;
         st.timers = &timers;

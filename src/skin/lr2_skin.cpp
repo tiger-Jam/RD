@@ -656,6 +656,7 @@ bool read_skin_header(const std::string& lr2_root, const std::string& skin_path,
             out.type = c.val(1);
             out.title = c.s(2);
             out.maker = c.s(3);
+            out.thumbnail = c.s(4);
             // OpenLR2の拡張：6番目と7番目の欄に幅と高さ（LR2_skinmanage.cpp:246）
             int w = c.val(6), h = c.val(7);
             if (w && h) {
