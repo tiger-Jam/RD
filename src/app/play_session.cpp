@@ -410,6 +410,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         std::vector<int8_t> ghost_log;
         Replay record;
         size_t replay_pos = 0;
+        bool audio_fading = false;  // リザルトを抜ける音のフェードを始めた
 
         InputMapper input(app.keycfg);
         input.set_min_hold_ms(cfg.input_interval);
@@ -768,6 +769,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     if (t > chart_op3 && !rtimers.on(150)) rtimers.set(150, t);
                     if (t > chart_op4 && !rtimers.on(151)) rtimers.set(151, t);
                 }
+                // リザルトを抜けるフェードアウトの間に、音も #FADEOUT の時間で絞る（LR2: Scene05_Result.cpp:286）
+                if (rskin && rtimers.on(2) && !audio_fading) mixer.fade_all(0.0f, rskin->fadeout), audio_fading = true;
                 if (!rskin || (rtimers.on(2) && rtimers.lapse(2, t) >= rskin->fadeout)) {
                     if (rskin && rtimers.on(2)) {
                         bool white = input.button_held(kKey1) || input.button_held(kKey1 + 2) || input.button_held(kKey1 + 4) ||
@@ -1197,6 +1200,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         }
         mixer.stop();
         for (int id : {kSysDecide, kSysClear, kSysFail, kSysStop}) mixer.stop_system(id);
+        mixer.wait_callback();
+        mixer.fade_all(1.0f, 0);
         if (skin) app.set_view(skin->width, skin->height, false);
         if (course) {
             // 次のステージへ持ち越す。途中でやめたときは全ゲージが 0（LR2: Play.cpp:1659）
@@ -1299,6 +1304,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     SkinTimers rtimers;
     rtimers.set(0, 0);
     const uint64_t start_ns = SDL_GetTicksNS();
+    bool audio_fading = false;
     int chart_op3 = rskin->gaugechart[0].src.op[2], chart_op4 = rskin->gaugechart[0].src.op[3];
     // 決定で グラフ → ランク → 更新 → フェードアウト と進む（リザルトと同じ）
     auto result_input = [&] {
@@ -1335,6 +1341,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
         double t = (SDL_GetTicksNS() - start_ns) / 1e6;
         if (t > chart_op3 && !rtimers.on(150)) rtimers.set(150, t);
         if (t > chart_op4 && !rtimers.on(151)) rtimers.set(151, t);
+        if (rtimers.on(2) && !audio_fading) mixer.fade_all(0.0f, rskin->fadeout), audio_fading = true;
         if (rtimers.on(2) && rtimers.lapse(2, t) >= rskin->fadeout) done = true;
         ctx.now_ms = t;
         PlaySkinState st;
@@ -1363,6 +1370,8 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
         SDL_RenderPresent(app.renderer);
     }
     for (int id : {kSysCourseClear, kSysCourseFail}) mixer.stop_system(id);
+    mixer.wait_callback();
+    mixer.fade_all(1.0f, 0);
     return exit;
 }
 

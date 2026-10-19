@@ -108,7 +108,24 @@ bool App::init(const char* argv0) {
 void App::load_sound_set() {
     std::string ss = cfg.sound_set.empty() ? resolve_lr2_path(lr2_root, "LR2files/Sound/lr2.lr2ss", false) : cfg.sound_set;
     if (lr2_root.empty() || ss.empty()) return;
-    std::vector<Sample> sounds = load_system_sounds(lr2_root, ss, mixer.sample_rate());
+    // サウンドセットのカスタマイズ（#CUSTOMFILE で選んだ BGM のフォルダなど）。RANDOM なら候補から 1 つ選ぶ
+    std::vector<std::string> chosen;
+    SkinHeader header;
+    if (read_skin_header(lr2_root, ss, header)) {
+        apply_skin_custom(cfg, ss, header);
+        for (const SkinCustomItem& it : header.customs) {
+            if (!it.is_file) continue;
+            std::string name = it.selected >= 0 && it.selected < static_cast<int>(it.labels.size()) ? it.labels[it.selected] : "";
+            if (name == "RANDOM") {
+                std::vector<std::string> cands;
+                for (const std::string& l : it.labels)
+                    if (l != "RANDOM") cands.push_back(l);
+                name = cands.empty() ? std::string() : cands[SDL_GetTicksNS() % cands.size()];
+            }
+            chosen.push_back(name);
+        }
+    }
+    std::vector<Sample> sounds = load_system_sounds(lr2_root, ss, mixer.sample_rate(), chosen);
     // KEY 側のシステム音（パネル・フォルダ・オプション・難易度・スクリーンショット・地雷・皿）。それ以外は BGM 側（LR2 と同じ）
     uint32_t key_side = 0;
     for (int id : {kSysFolderOpen, kSysFolderClose, kSysPanelOpen, kSysPanelClose, kSysOptionChange, kSysDifficulty, kSysScreenshot,

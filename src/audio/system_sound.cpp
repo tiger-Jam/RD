@@ -40,13 +40,14 @@ std::string resolve_sound(const std::string& root, const std::string& p) {
 
 }  // namespace
 
-std::vector<Sample> load_system_sounds(const std::string& lr2_root, const std::string& lr2ss_path, uint32_t rate) {
+std::vector<Sample> load_system_sounds(const std::string& lr2_root, const std::string& lr2ss_path, uint32_t rate,
+                                       const std::vector<std::string>& chosen) {
     std::vector<Sample> out(kSysSoundCount);
     std::ifstream f(lr2ss_path, std::ios::binary);
     if (!f) return out;
     std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     std::istringstream in(to_utf8_auto(bytes));
-    std::vector<std::pair<std::string, std::string>> custom;  // 検索パターン → 既定の名前
+    std::vector<std::pair<std::string, std::string>> custom;  // 検索パターン → 選んだ名前（無ければ既定の名前）
     std::vector<bool> done(kSysSoundCount, false);
     std::string line;
     while (std::getline(in, line)) {
@@ -62,7 +63,9 @@ std::vector<Sample> load_system_sounds(const std::string& lr2_root, const std::s
         cols.push_back(cur);
         std::string cmd = to_upper_ascii(trim(cols[0]));
         if (cmd == "CUSTOMFILE" && cols.size() >= 4) {
-            custom.push_back({std::string(trim(cols[2])), std::string(trim(cols[3]))});
+            size_t k = custom.size();
+            std::string name = k < chosen.size() && !chosen[k].empty() ? chosen[k] : std::string(trim(cols[3]));
+            custom.push_back({std::string(trim(cols[2])), name});
             continue;
         }
         if (cols.size() < 2) continue;

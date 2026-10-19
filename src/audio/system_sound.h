@@ -16,6 +16,8 @@ enum SystemSound : int {
 };
 
 // サウンドセットを読み、出力のサンプルレートに変換した音を返す（読めなかったものは空）
-std::vector<Sample> load_system_sounds(const std::string& lr2_root, const std::string& lr2ss_path, uint32_t rate);
+// chosen は #CUSTOMFILE ごとに選んだ名前（書いた順。空なら既定の名前）
+std::vector<Sample> load_system_sounds(const std::string& lr2_root, const std::string& lr2ss_path, uint32_t rate,
+                                       const std::vector<std::string>& chosen = {});
 
 }  // namespace bmj
