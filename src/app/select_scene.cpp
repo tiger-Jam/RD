@@ -1108,12 +1108,42 @@ void run_select(App& app) {
         snap();
         app.mixer.play_system(kSysFolderOpen);
     };
-    auto finish_edit = [&](bool search) {
+    int edit_text = 30;  // 入力している欄（30 = 検索、20〜28 = タグエディター）
+    // 入力を終える。commit なら、検索欄は検索し、タグの欄はカーソルの譜面に書く（LR2: skinobject:2800）
+    auto finish_edit = [&](bool commit) {
         editing = false;
         SDL_StopTextInput(app.window);
         sctx.timers.set(4, scene_ms());
-        if (search) run_search(edit_buf);
+        if (commit && edit_text == 30) run_search(edit_buf);
+        const Entry* cur = current();
+        if (commit && edit_text != 30 && cur && cur->kind == Entry::Kind::Chart && cur->chart) {
+            ChartRecord& c = const_cast<ChartRecord&>(*cur->chart);  // lib->charts の要素
+            bool ok = true;
+            int v = std::atoi(edit_buf.c_str());
+            switch (edit_text) {
+            case 20: c.title = edit_buf; break;
+            case 21: c.subtitle = edit_buf; break;
+            case 23: c.genre = edit_buf; break;
+            case 24: c.artist = edit_buf; break;
+            case 25: c.subartist = edit_buf; break;
+            case 27: ok = v >= 0 && v < 100; if (ok) c.playlevel = v; break;
+            case 28:
+                ok = v >= 0 && v <= 5;
+                if (ok) {
+                    c.difficulty = v;
+                    if (difficulty_filter != 0) difficulty_filter = v;  // 絞り込みも追従する（LR2 と同じ）
+                }
+                break;
+            default: ok = false; break;
+            }
+            if (ok) {
+                app.db.set_chart_text(c.path, c.title, c.subtitle, c.genre, c.artist, c.subartist);
+                app.db.set_chart_tag(c.path, c.difficulty, c.playlevel);
+                rebuild();
+            }
+        }
         edit_buf.clear();
+        edit_text = 30;
     };
     while (!quit) {
         SDL_Event e;
@@ -1379,10 +1409,13 @@ void run_select(App& app) {
                     }
                     break;
                 }
-                // 検索欄（文字列 30 で edit=1 のもの）をクリックしたら入力を始める
+                // 検索欄（文字列 30）とタグエディターの欄（20〜28）のうち edit=1 のものをクリックしたら入力を始める
                 if (!clicked)
                     for (const SkinText& tx : sk->texts) {
-                        if (tx.src.st != 30 || tx.src.op[0] != 1 || tx.dst.empty()) continue;
+                        const int id = tx.src.st;
+                        bool tag = id == 20 || id == 21 || (id >= 23 && id <= 25) || id == 27 || id == 28;
+                        if ((id != 30 && !tag) || tx.src.op[0] != 1 || tx.dst.empty()) continue;
+                        if (tag && (!current() || current()->kind != Entry::Kind::Chart)) continue;
                         int tp = tx.src.op[1];
                         if (tp != 0 && tp != panel) continue;
                         SkinDraw d = eval_dst(tx.dst, sctx.timers.lapse(tx.dst.timer, t));
@@ -1390,7 +1423,9 @@ void run_select(App& app) {
                         float x0 = tx.src.align == 1 ? d.x - d.w / 2 : tx.src.align == 2 ? d.x - d.w : d.x;
                         if (mx >= x0 && mx < x0 + d.w && my >= d.y && my < d.y + d.h) {
                             editing = true;
-                            edit_buf.clear();
+                            edit_text = id;
+                            // タグの欄は今の値から書き換える
+                            edit_buf = tag ? sctx.text(id) : std::string();
                             SDL_StartTextInput(app.window);
                             clicked = true;
                             break;
@@ -1736,8 +1771,10 @@ void run_select(App& app) {
                 }
                 sctx.has_text = it->second;
             }
-            if (editing) search_failed = false;
-            sctx.folder_name = editing ? edit_buf + "|" : search_failed ? "SEARCH FAILED" : stack.size() > 1 ? lv.name : "検索語句を入力";
+            if (editing && edit_text == 30) search_failed = false;
+            sctx.folder_name = editing && edit_text == 30 ? edit_buf + "|" : search_failed ? "SEARCH FAILED" : stack.size() > 1 ? lv.name : "検索語句を入力";
+            sctx.edit_text = editing && edit_text != 30 ? edit_text : -1;
+            sctx.edit_value = edit_buf;
             sctx.panel = panel;
             sctx.difficulty_filter = difficulty_filter;
             sctx.mode_filter = mode_filter;

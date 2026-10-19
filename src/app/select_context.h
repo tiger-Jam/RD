@@ -33,6 +33,8 @@ struct SelectContext {
     const ScoreRecord* score = nullptr;  // 記録があるとき（コースのときはコースの記録）
     const Course* course = nullptr;      // コース（種類 8）のとき
     std::string folder_name;            // いまいるフォルダの名前（文字列30）
+    int edit_text = -1;                 // タグの欄（文字列 20〜29）を入力しているなら、その番号
+    std::string edit_value;             // 入力している途中の文字
     int panel = -1;
     int difficulty_filter = 0, mode_filter = 0, sort_mode = 0;
     std::string mode_name = "ALL", sort_name = "OFF";  // beatoraja と同じ並びの名前（文字列 60 / 61）

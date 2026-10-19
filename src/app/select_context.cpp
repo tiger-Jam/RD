@@ -225,6 +225,20 @@ std::string SelectContext::text(int id) const {
     case 15: return song ? chart->subartist : "";
     case 17: return song ? std::to_string(chart->playlevel) : "";
     case 18: return song ? std::to_string(chart->difficulty) : "";
+    // タグエディター（パネル 4）の欄。入力している欄は入力中の文字。タグと EX レベルは BMjoy に無い
+    case 20: case 21: case 23: case 24: case 25: case 27: case 28: {
+        if (edit_text == id) return edit_value + "|";
+        if (!song) return "";
+        switch (id) {
+        case 20: return chart->title;
+        case 21: return chart->subtitle;
+        case 23: return chart->genre;
+        case 24: return chart->artist;
+        case 25: return chart->subartist;
+        case 27: return std::to_string(chart->playlevel);
+        default: return std::to_string(chart->difficulty);
+        }
+    }
     case 30: return folder_name;
     case 60: return mode_name;
     case 61: return sort_name;

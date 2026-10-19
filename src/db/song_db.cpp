@@ -204,6 +204,13 @@ void SongDb::set_chart_tag(const std::string& path, int difficulty, int playleve
     st.i64(1, difficulty).i64(2, playlevel).text(3, path).run();
 }
 
+void SongDb::set_chart_text(const std::string& path, const std::string& title, const std::string& subtitle,
+                            const std::string& genre, const std::string& artist, const std::string& subartist) {
+    if (!db_) return;
+    Stmt st(db_, "UPDATE chart SET title = ?, subtitle = ?, genre = ?, artist = ?, subartist = ? WHERE path = ?");
+    st.text(1, title).text(2, subtitle).text(3, genre).text(4, artist).text(5, subartist).text(6, path).run();
+}
+
 bool SongDb::open(const std::string& path) {
     close();
     if (sqlite3_open(path.c_str(), &db_) != SQLITE_OK) return false;
