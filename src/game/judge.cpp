@@ -173,6 +173,7 @@ void JudgeEngine::advance(int64_t t_us) {
                     // CN・HCN：始点と終点をそれぞれ PGREAT
                     if (n.time_us > t_us) break;
                     judge_to_score(kPGreat, lane, n.time_us, 0, true);
+                    events_.back().ln_start = true;
                     active_[idx] = 1;
                     if (ln_type(n) == 3) hcn_[lane] = Hcn{true, idx, n.time_us, 0, false};
                     continue;
@@ -412,6 +413,7 @@ void JudgeEngine::proc_charge(int lane, int keypress, int timing, int64_t t_us) 
         judge = demote(judge);
         if (judge >= 0 && remaining) {
             judge_to_score(judge, lane, t_us, offset, true);
+            events_.back().ln_start = true;
             l.note_val = note.sound;
             if (l.note_val > 0) play_.push_back(l.note_val);
             active_[idx] = 1;

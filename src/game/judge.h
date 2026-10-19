@@ -27,6 +27,7 @@ struct JudgeEvent {
     int offset_ms = 0; // 入力時刻 − ノーツ時刻（POORのときは0）
     bool fast = false;
     bool has_offset = false;
+    bool ln_start = false;  // CN・HCN の始点（押さえている間の演出を始める）
 };
 
 struct PlayStats {

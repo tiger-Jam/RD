@@ -852,6 +852,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         // LNの始点（LR2: ProcLongnote。PG/GR/GDでタイマー70）
                         if (j >= kGood) ctx.timers.set(70 + je.lane, at);
                     } else {
+                        // CN・HCN の始点は、ここで数えるのと同時に、押さえている間の演出（タイマー70）も始める
+                        if (je.ln_start && j >= kGood) ctx.timers.set(70 + je.lane, at);
                         if (j >= kGreat) ctx.timers.set(50 + je.lane, at);  // ボム
                         if (j >= kPoor) ctx.on_judged();
                         // OpenLR2の拡張：直前の FAST/SLOW とずれ（ms）
