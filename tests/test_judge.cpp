@@ -270,3 +270,78 @@ TEST(judge_no_good_no_great) {
     CHECK_EQ(judge_at(2030, false, true), int(kBad));    // GREAT・GOOD 無し
     CHECK_EQ(judge_at(2010, false, true), int(kPGreat));
 }
+
+// BPM 120：レーン 1 に LN（2000ms〜3000ms）
+static const char* kLn = "#BPM 120\n#RANK 2\n#TOTAL 200\n#WAV01 a.wav\n#00151:0101\n";
+
+TEST(ln_mode_counts) {
+    Chart c = chart_of(kLn);
+    CHECK_EQ(c.judgeable_notes(0), 1);
+    CHECK_EQ(c.judgeable_notes(1), 2);
+    CHECK_EQ(c.free_ln_count(), 1);
+    // #LNMODE で決めた LN は、プレイヤーの設定に関係なくその種類
+    Chart d = chart_of(std::string("#LNMODE 2\n") + kLn);
+    CHECK_EQ(d.judgeable_notes(0), 2);
+    CHECK_EQ(d.free_ln_count(), 0);
+}
+
+TEST(cn_judging) {
+    Chart c = chart_of(kLn);
+    JudgeConfig cfg;
+    cfg.ln_mode = 1;  // CN
+    {
+        // 始点 PG、終点ちょうどで離して PG → EX 4
+        JudgeEngine j(c, cfg);
+        j.press(1, ms(2000));
+        CHECK_EQ(j.stats().note_current, 1);
+        j.release(1, ms(3000));
+        CHECK_EQ(j.stats().note_current, 2);
+        CHECK_EQ(j.stats().exscore(), 4);
+        CHECK_EQ(j.clear(), 6);
+    }
+    {
+        // 早く離す（終点の 500ms 前。BAD の早い側 165ms より前）→ POOR
+        JudgeEngine j(c, cfg);
+        j.press(1, ms(2000));
+        j.release(1, ms(2500));
+        CHECK_EQ(j.stats().judge_count[kPoor], 1);
+        CHECK_EQ(j.stats().combo, 0);
+    }
+    {
+        // 押しっぱなし：終点の BAD 幅（200ms）を過ぎたら POOR
+        JudgeEngine j(c, cfg);
+        j.press(1, ms(2000));
+        j.advance(ms(3300));
+        CHECK_EQ(j.stats().judge_count[kPoor], 1);
+        CHECK_EQ(j.stats().note_current, 2);
+    }
+    {
+        // 始点の見逃し：POOR 2 つ
+        JudgeEngine j(c, cfg);
+        j.advance(ms(2300));
+        CHECK_EQ(j.stats().judge_count[kPoor], 2);
+    }
+    {
+        // 終点の幅（NORMAL は 75%：PG 90ms）。終点の 80ms 前に離せば PG
+        JudgeEngine j(c, cfg);
+        j.press(1, ms(2000));
+        j.release(1, ms(2920));
+        CHECK_EQ(j.stats().judge_count[kPGreat], 2);
+    }
+}
+
+TEST(hcn_gauge_ticks) {
+    Chart c = chart_of(kLn);
+    JudgeConfig cfg;
+    cfg.ln_mode = 2;  // HCN
+    cfg.gauge_type = kHard;
+    JudgeEngine held(c, cfg), let_go(c, cfg);
+    held.press(1, ms(2000));
+    let_go.press(1, ms(2000));
+    let_go.release(1, ms(2050));  // すぐ離す（終点は POOR）
+    held.advance(ms(2990));
+    let_go.advance(ms(2990));
+    // 押していればゲージは増え（HARD は上限 100 のまま）、離していれば 200ms ごとに減る
+    CHECK(let_go.gauge().hp(kHard) < held.gauge().hp(kHard));
+    CHECK_EQ(held.stats().note_current, 1);  // 増減は判定に数えない
+}

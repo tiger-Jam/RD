@@ -88,6 +88,9 @@ BmsParseResult parse_bmson_text(std::string_view text) {
     chart.judge_rank = 2;
     chart.judge_scale = jr > 0 ? jr / 100.0 : 1.0;
     double total_rel = num(info, "total", 100);
+    // LN の種類（beatoraja の拡張）：info.ln_type と、ノーツごとの t（1 = LN 2 = CN 3 = HCN）
+    int ln_type = static_cast<int>(num(info, "ln_type"));
+    if (ln_type < 1 || ln_type > 3) ln_type = 0;
     if (total_rel <= 0) total_rel = 100;
 
     // 速さの変化を pulse の順に並べる。同じ位置では SCROLL → BPM → STOP（STOP は足し合わせる）
@@ -166,12 +169,14 @@ BmsParseResult parse_bmson_text(std::string_view text) {
             int x;
             double y, l;
             bool c;
+            int t;
         };
         std::vector<N> ns;
         each(yyjson_obj_get(ch, "notes"), [&](yyjson_val* n) {
             yyjson_val* xv = yyjson_obj_get(n, "x");
             int x = yyjson_is_num(xv) ? static_cast<int>(yyjson_get_num(xv)) : 0;
-            ns.push_back({x, num(n, "y"), num(n, "l"), boolean(n, "c")});
+            int t = static_cast<int>(num(n, "t"));
+            ns.push_back({x, num(n, "y"), num(n, "l"), boolean(n, "c"), t >= 1 && t <= 3 ? t : ln_type});
         });
         std::stable_sort(ns.begin(), ns.end(), [](const N& a, const N& b) { return a.y < b.y; });
         // 同じ位置のノーツは同じ切れ端。c が混ざっていたら頭に戻す
@@ -208,7 +213,7 @@ BmsParseResult parse_bmson_text(std::string_view text) {
             note.lane = static_cast<uint8_t>(lane);
             note.time_us = t;
             note.sound = id;
-            if (n.l > 0) note.kind = NoteKind::Long, note.end_us = to_us(time_of(n.y + n.l));
+            if (n.l > 0) note.kind = NoteKind::Long, note.end_us = to_us(time_of(n.y + n.l)), note.ln_type = static_cast<uint8_t>(n.t);
             if (lane == 0) has_scratch = true;
             note_at[key] = chart.notes.size();
             chart.notes.push_back(note);

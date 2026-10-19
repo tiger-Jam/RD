@@ -30,6 +30,12 @@ Course make_table_course(const TableCourse& tc, const std::unordered_map<std::st
             break;
         }
     }
+    for (const std::string& k : tc.constraints) {
+        if (k == "ln" || k == "cn" || k == "hcn") {
+            c.ln_mode = k == "ln" ? 0 : k == "cn" ? 1 : 2;
+            break;
+        }
+    }
     c.no_speed = std::find(tc.constraints.begin(), tc.constraints.end(), "no_speed") != tc.constraints.end();
     for (const TableChart& t : tc.charts) {
         CourseStage s;

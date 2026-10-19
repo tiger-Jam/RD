@@ -20,8 +20,8 @@ public:
     // コースの 2 ステージ目からは、前のステージの終わりの値から始める
     void set_hp(const std::array<double, kGaugeCount>& hp) { hp_ = hp; }
     const std::array<double, kGaugeCount>& hp_all() const { return hp_; }
-    // 判定1つ分を全ゲージに反映する
-    void apply_judge(int judge);
+    // 判定1つ分を全ゲージに反映する。mul は増減の倍率（HCN の押している間の増減は 0.5）
+    void apply_judge(int judge, double mul = 1.0);
     // 地雷のダメージ（%）を全ゲージに反映する
     void apply_mine(int damage);
 

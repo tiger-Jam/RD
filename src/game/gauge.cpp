@@ -57,10 +57,10 @@ void GaugeSet::init(int total, int notes, int course) {
     }
 }
 
-void GaugeSet::apply_judge(int judge) {
+void GaugeSet::apply_judge(int judge, double mul) {
     for (int g = 0; g < kGaugeCount; ++g) {
         int hp = (static_cast<int>(hp_[g]) / 2) * 2;
-        double damage = table_[g][judge];
+        double damage = table_[g][judge] * mul;
         // 残り30%以下ではダメージを0.6倍にする（単曲ではGROOVE/EASY以外。コースでは全部）
         if (hp <= 30 && (!(g == kGroove || g == kEasy) || course_) && judge <= kBad) damage *= 0.6;
         hp_[g] += damage;

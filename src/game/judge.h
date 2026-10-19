@@ -53,6 +53,8 @@ struct JudgeConfig {
     bool carry = false;
     std::array<double, kGaugeCount> carry_hp{};
     int carry_combo = 0, carry_max_combo = 0;
+    // LN の種類（仕様書6章）。譜面で種類を決めていない LN に使う：0 = LN 1 = CN 2 = HCN
+    int ln_mode = 0;
     // 難易度表のコースの制約：GOOD を無くす（no_good）、GREAT と GOOD を無くす（no_great）。無くした判定は BAD になる
     bool no_good = false, no_great = false;
 };
@@ -110,8 +112,15 @@ private:
     void proc(int lane, int keypress, int timing_ms, int64_t t_us);
     void proc_single(int lane, int keypress, int timing_ms, int64_t t_us);
     void proc_long(int lane, int keypress, int timing_ms, int64_t t_us);
+    void proc_charge(int lane, int keypress, int timing_ms, int64_t t_us);
+    // LN の種類（1 = LN 2 = CN 3 = HCN）
+    int ln_type(const Note& n) const { return n.ln_type ? n.ln_type : cfg_.ln_mode + 1; }
+    bool is_charge(const Note& n) const { return n.kind == NoteKind::Long && ln_type(n) >= 2; }
+    // CN・HCN の終点の判定（終点 − 離した時刻、ms。正なら早い）。-1 は幅の外
+    int tail_judge(int lane, int dm) const;
+    void hcn_tick(int64_t t_us);
     void judge_to_score(int judge, int lane, int64_t t_us, int offset_ms, bool has_offset);
-    void apply_judge(int judge);
+    void apply_judge(int judge, double mul = 1.0);
     void apply_mine(int damage);
 
     const Chart& chart_;
@@ -122,6 +131,18 @@ private:
     PlayStats stats_;
     std::array<Lane, kLaneCount> lanes_;
     std::array<bool, kLaneCount> held_{};
+    // CN・HCN の終点の幅（ms）。鍵盤と皿で別（beatoraja の表を判定ランクで伸縮）
+    struct TailWindows {
+        int pg, gr, gd, bd_late, bd_early;
+    } tail_key_{}, tail_scr_{};
+    // HCN：レーンごとの、通過中の HCN と増減のカウンタ（200ms ごとに増減）
+    struct Hcn {
+        bool on = false;
+        size_t idx = 0;
+        int64_t last_us = 0, counter_us = 0;
+        bool tail_good = false;  // 終点が PG〜GD で決まった（押していなくても増やす側）
+    };
+    std::array<Hcn, kLaneCount> hcn_{};
     std::vector<bool> done_;
     std::vector<int> active_;  // LN始点の判定（LR2: note.active）
     std::vector<bool> head_fast_;

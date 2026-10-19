@@ -88,6 +88,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     std::map<int, double> measure_len;
     std::vector<Obj> objs;
     int lnobj = -1;
+    int lnmode = 0;  // #LNMODE（beatoraja の拡張。1 = LN 2 = CN 3 = HCN。0 は決めていない）
     int total = 0;
     int rank = 2;  // LR2: rank = 2（bmsload:2167）
     double bpm_fix = 0.0, now_bpm = 0.0;
@@ -158,6 +159,9 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
             double v = std::atof(up.c_str() + 5);
             if (bpm_fix <= 0.0) bpm_fix = v;
             now_bpm = v;  // 最後の #BPM が開始BPMになる（LR2: bmsload:2424）
+        } else if (starts_with(up, "#LNMODE ")) {
+            int v = std::atoi(up.c_str() + 8);
+            if (v >= 0 && v <= 3) lnmode = v;
         } else if (starts_with(up, "#LNOBJ ") && org.size() >= 9) {
             lnobj = base_id(org[7], org[8], base62);
         } else if (starts_with(up, "#TOTAL ")) {
@@ -406,6 +410,8 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     }
     std::stable_sort(lane_notes.begin(), lane_notes.end(),
                      [](const Note& a, const Note& b) { return a.time_us < b.time_us; });
+    for (Note& n : lane_notes)
+        if (n.kind == NoteKind::Long) n.ln_type = static_cast<uint8_t>(lnmode);
     chart.notes = std::move(lane_notes);
     chart.layout = has_scratch ? KeyLayout::K7S : KeyLayout::K7;
 

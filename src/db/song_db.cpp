@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS chart(
     title TEXT, subtitle TEXT, artist TEXT, subartist TEXT, genre TEXT,
     playlevel INTEGER, difficulty INTEGER, notes INTEGER, ln INTEGER, rank INTEGER, total INTEGER,
     bpm_min REAL, bpm_max REAL, bpm_main REAL, length_ms INTEGER, scratch INTEGER,
-    mtime INTEGER, size INTEGER, banner TEXT, stagefile TEXT, backbmp TEXT);
+    mtime INTEGER, size INTEGER, banner TEXT, stagefile TEXT, backbmp TEXT, ln_free INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS chart_md5 ON chart(md5);
 CREATE INDEX IF NOT EXISTS chart_sha256 ON chart(sha256);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
@@ -119,12 +119,13 @@ ChartRecord read_chart_row(const Stmt& st) {
     r.banner = st.col_text(22);
     r.stagefile = st.col_text(23);
     r.backbmp = st.col_text(24);
+    r.ln_free = static_cast<int>(st.col_i64(25));
     return r;
 }
 
 const char* kChartColumns =
     "path, folder, sha256, md5, title, subtitle, artist, subartist, genre, playlevel, difficulty, notes, ln, rank, "
-    "total, bpm_min, bpm_max, bpm_main, length_ms, scratch, mtime, size, banner, stagefile, backbmp";
+    "total, bpm_min, bpm_max, bpm_main, length_ms, scratch, mtime, size, banner, stagefile, backbmp, ln_free";
 
 }  // namespace
 
@@ -148,7 +149,8 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     r.genre = c.meta.genre;
     r.playlevel = c.meta.playlevel;
     r.difficulty = c.meta.difficulty;
-    r.notes = c.judgeable_notes();
+    r.notes = c.judgeable_notes(0);
+    r.ln_free = c.free_ln_count();
     r.ln = static_cast<int>(std::count_if(c.notes.begin(), c.notes.end(), [](const Note& n) { return n.kind == NoteKind::Long; }));
     r.rank = c.judge_rank;
     r.total = static_cast<int>(c.total);
@@ -204,10 +206,20 @@ bool SongDb::open(const std::string& path) {
             sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, nullptr);
         }
     }
+    // 古いデータベースに、種類を決めていない LN の数の欄を足す（足したら全部読み直させる）
+    {
+        bool has_ln_free = false;
+        Stmt info(db_, "PRAGMA table_info(chart)");
+        while (info.step())
+            if (info.col_text(1) == "ln_free") has_ln_free = true;
+        if (!has_ln_free && has_banner)
+            sqlite3_exec(db_, "ALTER TABLE chart ADD COLUMN ln_free INTEGER DEFAULT 0; UPDATE chart SET mtime = 0;", nullptr, nullptr, nullptr);
+    }
     if (!has_banner) {
         sqlite3_exec(db_,
                      "ALTER TABLE chart ADD COLUMN banner TEXT; ALTER TABLE chart ADD COLUMN stagefile TEXT; "
-                     "ALTER TABLE chart ADD COLUMN backbmp TEXT; UPDATE chart SET mtime = 0;",
+                     "ALTER TABLE chart ADD COLUMN backbmp TEXT; ALTER TABLE chart ADD COLUMN ln_free INTEGER DEFAULT 0; "
+                     "UPDATE chart SET mtime = 0;",
                      nullptr, nullptr, nullptr);
     }
     return true;
@@ -319,7 +331,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
     sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
     {
         std::string sql = std::string("INSERT OR REPLACE INTO chart(") + kChartColumns +
-                          ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                          ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         Stmt ins(db_, sql.c_str());
         Stmt del(db_, "DELETE FROM chart WHERE path = ?");
         Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
@@ -339,7 +351,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
                 .text(7, r.artist).text(8, r.subartist).text(9, r.genre).i64(10, r.playlevel).i64(11, r.difficulty)
                 .i64(12, r.notes).i64(13, r.ln).i64(14, r.rank).i64(15, r.total).dbl(16, r.bpm_min).dbl(17, r.bpm_max)
                 .dbl(18, r.bpm_main).i64(19, r.length_ms).i64(20, r.scratch).i64(21, r.mtime).i64(22, r.size)
-                .text(23, r.banner).text(24, r.stagefile).text(25, r.backbmp);
+                .text(23, r.banner).text(24, r.stagefile).text(25, r.backbmp).i64(26, r.ln_free);
             ins.run();
         }
         for (const std::string& p : to_remove) del.text(1, p).run(), unskip.text(1, p).run();
@@ -384,24 +396,35 @@ void merge_score(ScoreRecord& r, int clear, int ex, int bp, int combo, int play,
     r.clearcount += clr;
 }
 
-const char* kMergedScores = R"SQL(
+// 譜面ごとの記録。種類を決めていない LN のある譜面は ln_mode の記録、それ以外は 0 の記録を読む。
+// 曲データベースに無いキー（コース）の記録と、LR2 から取り込んだ記録（LN で遊んだもの）も合わせる
+std::string merged_scores_sql(int ln_mode) {
+    std::string m = std::to_string(ln_mode);
+    return R"SQL(
 SELECT c.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
        s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history
-  FROM score s JOIN (SELECT DISTINCT sha256 FROM chart) c ON c.sha256 = s.sha256
- WHERE s.ln_mode = 0 AND s.judge_profile = 0
+  FROM score s JOIN (SELECT sha256, MAX(ln_free) AS ln_free FROM chart GROUP BY sha256) c ON c.sha256 = s.sha256
+ WHERE s.judge_profile = 0 AND s.ln_mode = (CASE WHEN c.ln_free > 0 THEN )SQL" + m + R"SQL( ELSE 0 END)
+UNION ALL
+SELECT s.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
+       s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history
+  FROM score s
+ WHERE s.judge_profile = 0 AND s.ln_mode = 0 AND s.sha256 NOT IN (SELECT sha256 FROM chart)
 UNION ALL
 SELECT c.sha256, l.clear, l.exscore, l.bp, l.max_combo, l.playcount, l.clearcount, 0, 1,
        l.pg, l.gr, l.gd, l.bd, l.pr, l.op_history
-  FROM lr2_score l JOIN (SELECT DISTINCT sha256, md5 FROM chart) c ON c.md5 = l.md5
-)SQL";
+  FROM lr2_score l JOIN (SELECT sha256, md5, MAX(ln_free) AS ln_free FROM chart GROUP BY sha256, md5) c ON c.md5 = l.md5
+ WHERE c.ln_free = 0 OR )SQL" + m + " = 0\n";
+}
 
 }  // namespace
 
-std::vector<ScoreRecord> SongDb::all_scores() const {
+std::vector<ScoreRecord> SongDb::all_scores(int ln_mode) const {
     std::vector<ScoreRecord> out;
     if (!db_) return out;
     std::unordered_map<std::string, size_t> idx;
-    Stmt st(db_, kMergedScores);
+    std::string sql = merged_scores_sql(ln_mode);
+    Stmt st(db_, sql.c_str());
     while (st.step()) {
         std::string sha = st.col_text(0);
         auto it = idx.find(sha);
@@ -420,9 +443,9 @@ std::vector<ScoreRecord> SongDb::all_scores() const {
     return out;
 }
 
-bool SongDb::get_score(const std::string& sha256, ScoreRecord& out) const {
+bool SongDb::get_score(const std::string& sha256, ScoreRecord& out, int ln_mode) const {
     if (!db_) return false;
-    std::string sql = std::string("SELECT * FROM (") + kMergedScores + ") WHERE sha256 = ?";
+    std::string sql = "SELECT * FROM (" + merged_scores_sql(ln_mode) + ") WHERE sha256 = ?";
     Stmt st(db_, sql.c_str());
     st.text(1, sha256);
     bool found = false;
@@ -503,8 +526,8 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
     bool had = false;
     {
         Stmt st(db_, "SELECT clear, exscore, bp, max_combo, playcount, clearcount, pg, gr, gd, bd, pr, op_history FROM score "
-                     "WHERE sha256 = ? AND ln_mode = 0 AND judge_profile = 0");
-        st.text(1, sha256);
+                     "WHERE sha256 = ? AND ln_mode = ? AND judge_profile = 0");
+        st.text(1, sha256).i64(2, play.ln_mode);
         if (st.step()) {
             had = true;
             r.clear = static_cast<int>(st.col_i64(0));
@@ -530,10 +553,10 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
     }
     r.last_played = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     Stmt st(db_, "INSERT OR REPLACE INTO score(sha256, ln_mode, judge_profile, clear, exscore, bp, max_combo, "
-                 "playcount, clearcount, last_played, pg, gr, gd, bd, pr, op_history) VALUES(?,0,0,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-    st.text(1, sha256).i64(2, r.clear).i64(3, r.exscore).i64(4, r.bp).i64(5, r.max_combo).i64(6, r.playcount)
-        .i64(7, r.clearcount).i64(8, r.last_played).i64(9, r.judge[0]).i64(10, r.judge[1]).i64(11, r.judge[2])
-        .i64(12, r.judge[3]).i64(13, r.judge[4]).i64(14, r.op_history);
+                 "playcount, clearcount, last_played, pg, gr, gd, bd, pr, op_history) VALUES(?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    st.text(1, sha256).i64(2, play.ln_mode).i64(3, r.clear).i64(4, r.exscore).i64(5, r.bp).i64(6, r.max_combo)
+        .i64(7, r.playcount).i64(8, r.clearcount).i64(9, r.last_played).i64(10, r.judge[0]).i64(11, r.judge[1])
+        .i64(12, r.judge[2]).i64(13, r.judge[3]).i64(14, r.judge[4]).i64(15, r.op_history);
     st.run();
     if (play.course_stage) return;
     // プレイヤーの累計

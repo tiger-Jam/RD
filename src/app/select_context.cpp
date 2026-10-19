@@ -95,7 +95,7 @@ bool SelectContext::option(int op) const {
     case 100: case 101: case 102: case 103: case 104: case 105: return (song || course) && lamp == op - 100;
     case 110: case 111: case 112: case 113: case 114: case 115: case 116: case 117: {
         if (!song || !score || score->clear <= 0) return false;
-        return select_rank(score->exscore, chart->notes) == 8 - (op - 110);
+        return select_rank(score->exscore, notes_of(*chart)) == 8 - (op - 110);
     }
     case 150: return song && (chart->difficulty <= 0 || chart->difficulty > 5);
     case 151: case 152: case 153: case 154: case 155: return song && chart->difficulty == op - 150;
@@ -150,7 +150,7 @@ int SelectContext::number(int id) const {
     if (int v; course_number(course, id, v)) return v;
     const bool song = chart && is_song(type);
     const ScoreRecord* s = song ? score : nullptr;
-    int notes = song ? chart->notes : 0;
+    int notes = song ? notes_of(*chart) : 0;
     std::time_t now = std::time(nullptr);
     std::tm tm{};
 #ifdef _WIN32
@@ -291,7 +291,7 @@ bool SelectContext::bargraph(int t, double& val, double& max) const {
     switch (t) {
     case 3: val = song ? chart->playlevel : 0, max = cfg->levelbar_7; return true;
     case 5: case 6: case 7: case 8: case 9: val = song ? diff_level[t - 5] : 0, max = cfg->levelbar_7; return true;
-    case 47: val = song && score ? score->exscore : 0, max = song ? chart->notes * 2 : 0; return true;
+    case 47: val = song && score ? score->exscore : 0, max = song ? notes_of(*chart) * 2 : 0; return true;
     default: return false;
     }
 }

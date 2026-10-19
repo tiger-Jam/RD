@@ -43,6 +43,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "shutter_margin") shutter_margin = iv;
         else if (key == "hs_mode") hs_mode = iv;
         else if (key == "bga") bga = iv;
+        else if (key == "ln_mode") ln_mode = iv;
         else if (key == "fhs_green") fhs_green = iv;
         else if (key == "fhs_base") fhs_base = iv;
         else if (key == "gear_mode") gear_mode = iv;
@@ -108,6 +109,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "lane_cover = " << lane_cover << "  # 0=使わない 1=使う（SUDDEN+ のカバー）\n";
     f << "lane_cover_v = " << lane_cover_v << "  # カバーの量 0〜100\n";
     f << "shutter_margin = " << shutter_margin << "\n";
+    f << "ln_mode = " << ln_mode << "  # LN の種類 0=LN 1=CN 2=HCN（譜面で決めていない LN だけ）\n";
     f << "bga = " << bga << "  # BGA 0=OFF 1=ON 2=オートプレイのときだけ 3=NO MISS\n";
     f << "hs_mode = " << hs_mode << "  # ハイスピ 0=クラシック 1=フローティング\n";
     f << "fhs_green = " << fhs_green << "  # フローティングの緑数字（1/600 秒）\n";

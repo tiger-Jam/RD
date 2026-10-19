@@ -416,7 +416,7 @@ int main(int, char**) {
         g.label(6, 3, "Language");
 
         // タブ（クラシック：選んでいるタブは少し大きく、ページとつながる）
-        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY", "SPEED"};
+        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY", "PLAY"};
         const SDL_FRect page{10, 56, 590, 368};
         g.fill(page, kFace);
         g.raised(page);
@@ -634,10 +634,13 @@ int main(int, char**) {
             g.label(X + 38, Y + 156, "ギアチェン", fl);
             g.combo(&cfg.gear_mode, X + 182, Y + 148, 200, 22, {"カバー追従", "緑数字に戻す"}, std::clamp(cfg.gear_mode, 0, 1),
                     [&](int i) { cfg.gear_mode = i; }, fl);
-            g.group(X + 10, Y + 226, 558, 70, "LIFT");
-            g.check(X + 38, Y + 258, "LIFT を使う", cfg.lift);
-            g.label(X + 182, Y + 258, "量", cfg.lift);
-            g.edit_int(cfg.lift_v, X + 210, Y + 250, 58, 20, cfg.lift, 0, 100);
+            g.group(X + 10, Y + 226, 558, 60, "LIFT");
+            g.check(X + 38, Y + 256, "LIFT を使う", cfg.lift);
+            g.label(X + 182, Y + 256, "量", cfg.lift);
+            g.edit_int(cfg.lift_v, X + 210, Y + 248, 58, 20, cfg.lift, 0, 100);
+            g.label(X + 28, Y + 312, "LN の種類");
+            g.combo(&cfg.ln_mode, X + 182, Y + 304, 200, 22, {"LN", "CN", "HCN"}, std::clamp(cfg.ln_mode, 0, 2),
+                    [&](int i) { cfg.ln_mode = i; });
         }
         g.combo_popup();
 

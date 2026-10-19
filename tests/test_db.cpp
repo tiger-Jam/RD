@@ -132,3 +132,39 @@ TEST(song_db_import_lr2) {
     sdb.close();
     fs::remove_all(dir);
 }
+
+TEST(song_db_ln_mode_and_course_scores) {
+    fs::path dir = fs::temp_directory_path() / "bmj_test_lnmode";
+    fs::remove_all(dir);
+    write(dir / "ln" / "ln.bms", "#TITLE LN\n#BPM 120\n#00151:0101\n#00112:01\n");
+    write(dir / "fixed" / "cn.bms", "#TITLE CN\n#LNMODE 2\n#BPM 120\n#00151:0101\n");
+    SongDb db;
+    CHECK(db.open((dir / "songs.db").string()));
+    db.scan({dir.string()}, 2);
+    auto charts = db.all_charts();
+    CHECK_EQ(charts.size(), size_t(2));
+    const ChartRecord* ln = nullptr;
+    const ChartRecord* cn = nullptr;
+    for (const ChartRecord& c : charts) (c.title == "LN" ? ln : cn) = &c;
+    if (!ln || !cn) return;
+    CHECK(ln->ln_free == 1 && ln->notes == 2);
+    CHECK(cn->ln_free == 0 && cn->notes == 2);  // #LNMODE 2 の LN は 1 本 = 2
+    // 種類を決めていない LN のある譜面は、LN の種類ごとに別の記録
+    PlayRecord a;
+    a.clear = 3, a.exscore = 4, a.ln_mode = 1;
+    db.save_score(ln->sha256, a);
+    ScoreRecord r;
+    CHECK(db.get_score(ln->sha256, r, 1) && r.exscore == 4);
+    CHECK(!db.get_score(ln->sha256, r, 0));
+    bool found = false;
+    for (const ScoreRecord& s : db.all_scores(1)) found = found || s.sha256 == ln->sha256;
+    CHECK(found);
+    // コースの記録（曲データベースに無いキー）も読める
+    PlayRecord c;
+    c.clear = 4, c.exscore = 100;
+    db.save_score("course-hash", c);
+    CHECK(db.get_score("course-hash", r) && r.clear == 4);
+    found = false;
+    for (const ScoreRecord& s : db.all_scores(0)) found = found || s.sha256 == "course-hash";
+    CHECK(found);
+}

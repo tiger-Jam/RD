@@ -82,6 +82,23 @@ void Chart::finish_import() {
     end_us = end;
 }
 
+int Chart::judgeable_notes(int ln_mode) const {
+    int n = 0;
+    for (const Note& note : notes) {
+        if (note.kind == NoteKind::Normal) ++n;
+        if (note.kind != NoteKind::Long) continue;
+        int type = note.ln_type ? note.ln_type : ln_mode + 1;
+        n += type >= 2 ? 2 : 1;
+    }
+    return n;
+}
+
+int Chart::free_ln_count() const {
+    int n = 0;
+    for (const Note& note : notes) n += note.kind == NoteKind::Long && note.ln_type == 0;
+    return n;
+}
+
 int Chart::judgeable_notes() const {
     int n = 0;
     for (const Note& note : notes)

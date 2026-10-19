@@ -21,6 +21,8 @@ struct Note {
     uint16_t sound = 0;     // キー音ID（0=無し）
     uint16_t end_sound = 0; // LN終端のキー音ID（#LNOBJのとき）
     int damage = 0;         // 地雷のダメージ（譜面の値そのまま）
+    // LN の種類（仕様書6章「LNモード」）：0 = 譜面では決めていない（プレイヤーの設定で決まる） 1 = LN 2 = CN 3 = HCN
+    uint8_t ln_type = 0;
 };
 
 struct BgmEvent {
@@ -94,6 +96,10 @@ struct Chart {
     double bpm_at(int64_t time_us) const;
     // 判定対象のノーツ数（LNモードLN：LN1本＝1）
     int judgeable_notes() const;
+    // LN の種類を決めたときの判定対象のノーツ数。ln_mode はプレイヤーの設定（0 = LN 1 = CN 2 = HCN）。CN・HCN の LN は 1 本 = 2
+    int judgeable_notes(int ln_mode) const;
+    // 種類を譜面で決めていない LN の数（これがあると、記録を LN の種類ごとに分ける）
+    int free_ln_count() const;
     // BMS 以外のインポーター用の仕上げ。scroll に time_us・bpm・scroll・stop を入れて時刻順に並べてから呼ぶ。
     // 区間の速さと位置を決め、ノーツと小節線の位置を付け、主 BPM・TOTAL（未定義なら LR2 の既定式）・曲の終わりを決める
     void finish_import();

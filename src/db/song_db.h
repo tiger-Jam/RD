@@ -17,7 +17,8 @@ struct ChartRecord {
     std::string sha256, md5;
     std::string title, subtitle, artist, subartist, genre;
     int playlevel = 0, difficulty = 0;
-    int notes = 0, ln = 0, rank = 2, total = 0;
+    int notes = 0, ln = 0, rank = 2, total = 0;  // notes は種類を決めていない LN を 1 本 = 1 で数えた数
+    int ln_free = 0;  // 譜面で種類を決めていない LN の数（CN・HCN で遊ぶと 1 本ぶん多く数える。記録も LN の種類ごとに分ける）
     double bpm_min = 0, bpm_max = 0, bpm_main = 0;
     int length_ms = 0;
     bool scratch = true;
@@ -42,6 +43,7 @@ struct PlayRecord {
     uint32_t op_history = 0;
     // コースの途中のステージ（LR2 と同じく、プレイ回数・クリア回数・プレイヤーの累計は増やさず、ランプはフルコンボのときだけ上げる）
     bool course_stage = false;
+    int ln_mode = 0;  // 記録を分ける LN の種類（種類を決めていない LN が無い譜面は 0）
 };
 
 // プレイヤーの累計（LR2: player 表。スキンの数値 30〜37）
@@ -68,13 +70,14 @@ public:
     std::vector<ChartRecord> all_charts() const;
     // 曲の一覧を消す（スコアは残す）。次の読み直しで全部登録し直す（LR2: 曲データベースの再作成）
     bool clear_charts();
-    std::vector<ScoreRecord> all_scores() const;
+    // ln_mode：LN の種類（種類を決めていない LN のある譜面だけ、その種類の記録を読む）
+    std::vector<ScoreRecord> all_scores(int ln_mode = 0) const;
     bool find_by_md5(const std::string& md5, ChartRecord& out) const;
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）
     void save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo);
     void save_score(const std::string& sha256, const PlayRecord& r);
     PlayerStats player_stats() const;
-    bool get_score(const std::string& sha256, ScoreRecord& out) const;
+    bool get_score(const std::string& sha256, ScoreRecord& out, int ln_mode = 0) const;
     // LR2のスコアデータベース（LR2files/Database/Score/<名前>.db）を取り込む。取り込んだ件数を返す（失敗なら -1）。
     // 手元に無い譜面のスコアも MD5 のまま残し、表示するときに BMjoy の記録と合わせて良いほうを使う
     int import_lr2_scores(const std::string& lr2_score_db, std::string* error = nullptr);

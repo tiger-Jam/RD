@@ -185,6 +185,7 @@ BmsParseResult parse_osu_text(std::string_view text, const OsuParseOptions& opts
             if (f.size() < 6) continue;
             std::vector<std::string> p = split(f[5], ':');
             n.kind = NoteKind::Long;
+            n.ln_type = 2;  // osu のホールドは終点も判定する（CN。仕様書5章）
             n.end_us = std::max(n.time_us, us(std::atof(p[0].c_str())));
             if (p.size() >= 6) sample = p[5];
             // 長さ 0 のホールドは通常ノーツにする

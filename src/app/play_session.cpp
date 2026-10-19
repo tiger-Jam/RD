@@ -102,10 +102,11 @@ bool is_movie_file(const std::string& p) {
 
 // リザルトに入ったときに1回だけ記録する。途中でやめたときもLR2と同じくFAILEDとして記録する
 void record_score(App& app, const std::string& sha256, const JudgeEngine& j, bool quit_early, int lamp, const AppConfig& cfg,
-                  bool assist, bool course_stage) {
+                  bool assist, bool course_stage, int ln_mode) {
     const PlayStats& s = j.stats();
     PlayRecord rec;
     rec.course_stage = course_stage;
+    rec.ln_mode = ln_mode;
     rec.clear = lamp, rec.exscore = s.exscore(), rec.max_combo = s.max_combo;
     rec.judge = {s.judge_count[kPGreat], s.judge_count[kGreat], s.judge_count[kGood], s.judge_count[kBad], s.judge_count[kPoor]};
     // クリアしたときのオプションの履歴（LR2: statplay.cpp ConvertOptionHistory）。
@@ -221,8 +222,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         sha256 = sha256_hex(bytes);
     }
+    // 記録は LN の種類ごとに分ける（種類を決めていない LN が無い譜面は 0 にまとめる）
+    const int score_ln_mode = chart.free_ln_count() > 0 ? cfg.ln_mode : 0;
     ScoreRecord best_score;
-    bool has_best = app.db.get_score(sha256, best_score);
+    bool has_best = app.db.get_score(sha256, best_score, score_ln_mode);
     Mixer& mixer = app.mixer;
 
     // 決定の音（LR2では決定画面で鳴る。BMjoyには決定画面が無いので、読み込みの間に鳴らす）
@@ -334,6 +337,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         jcfg.gas = cfg.gas;
         jcfg.autoplay = opt.autoplay;
         jcfg.assist_scratch = assist;
+        jcfg.ln_mode = cfg.ln_mode;
         if (course) {
             // 2 ステージ目からは、前のステージのゲージ・ゲージの種類・コンボを引き継ぐ
             jcfg.course = course->course->type;
@@ -439,7 +443,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.old_minbp = has_best ? best_score.bp : -1;
             ctx.old_total_notes = has_best ? ps.total_notes : 0;
             if (!recorded && opt.save_score && !opt.autoplay && started) {
-                record_score(app, sha256, judge, quit_early, ctx.result_clear, cfg, assist, course != nullptr);
+                record_score(app, sha256, judge, quit_early, ctx.result_clear, cfg, assist, course != nullptr, score_ln_mode);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
                 // （コースのステージではフルコンボのときだけ上がる）
                 if (!course || ctx.result_clear >= 5) ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
@@ -1274,8 +1278,11 @@ PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
             cfg.hs_mode = saved.hs_mode, cfg.hi_speed = saved.hi_speed, cfg.hs_fix = saved.hs_fix, cfg.lane_cover = saved.lane_cover;
             cfg.lift = saved.lift, cfg.base_speed = saved.base_speed;
         }
-        if (course.type == 2 || course.no_speed) app.save_config();
+        if (course.ln_mode >= 0) cfg.ln_mode = saved.ln_mode;
+        if (course.type == 2 || course.no_speed || course.ln_mode >= 0) app.save_config();
     }};
+    // LN の種類の制約は、コースの間だけプレイヤーの設定を書き換える
+    if (course.ln_mode >= 0) cfg.ln_mode = course.ln_mode;
     if (course.no_speed) {
         cfg.hs_mode = 0, cfg.hi_speed = 100, cfg.hs_fix = 0, cfg.lane_cover = 0;
         cfg.lift = false, cfg.base_speed = 100;

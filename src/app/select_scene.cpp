@@ -257,7 +257,7 @@ void run_select(App& app) {
         if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
         lib->tables.push_back(std::move(t));
     }
-    for (const ScoreRecord& s : app.db.all_scores()) lib->scores[s.sha256] = s;
+    for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
     std::vector<Entry> root = build_tree(*lib);
 
     std::mutex mu;
@@ -270,7 +270,7 @@ void run_select(App& app) {
         if (busy) return;
         if (worker.joinable()) worker.join();
         busy = true;
-        worker = std::thread([&, scan_songs, dirs = app.cfg.song_dirs, urls = app.cfg.tables] {
+        worker = std::thread([&, scan_songs, dirs = app.cfg.song_dirs, urls = app.cfg.tables, ln_mode = app.cfg.ln_mode] {
             // 曲データベースは別の接続で書く（書き込みはこのスレッドだけ）
             SongDb wdb;
             ScanStats st;
@@ -278,7 +278,7 @@ void run_select(App& app) {
                 st = wdb.scan(dirs, static_cast<int>(std::max(2u, std::thread::hardware_concurrency())));
             auto next = std::make_shared<Library>();
             next->charts = wdb.all_charts();
-            for (const ScoreRecord& s : wdb.all_scores()) next->scores[s.sha256] = s;
+            for (const ScoreRecord& s : wdb.all_scores(ln_mode)) next->scores[s.sha256] = s;
             for (const std::string& u : urls) next->tables.push_back(update_table(table_cache_dir(), u));
             char buf[160];
             std::snprintf(buf, sizeof(buf), "%d 譜面（追加 %d／変更 %d／削除 %d）%.1f 秒", st.found, st.added, st.updated,
@@ -606,7 +606,7 @@ void run_select(App& app) {
             set_select_view();
             input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
             // スコアとプレイヤーの累計を読み直す
-            for (const ScoreRecord& s : app.db.all_scores()) lib->scores[s.sha256] = s;
+            for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
             sctx.player = app.db.player_stats();
             if (ex == PlayExit::Quit) quit = true;
         } else if (e->kind == Entry::Kind::Missing) {

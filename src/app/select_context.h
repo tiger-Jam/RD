@@ -47,6 +47,9 @@ struct SelectContext {
     // 同じフォルダの難易度ごとの譜面（添字 0..4 = BEGINNER..INSANE）。レベル（無ければ -1）、数、ランプ
     std::array<int, 5> diff_level{-1, -1, -1, -1, -1}, diff_count{}, diff_lamp{};
 
+    // 今の LN の種類で数えた総ノーツ数（CN・HCN なら、種類を決めていない LN を 1 本ぶん多く数える）
+    int notes_of(const ChartRecord& c) const { return c.notes + (cfg && cfg->ln_mode > 0 ? c.ln_free : 0); }
+
     bool option(int op) const;
     int number(int id) const;
     std::string text(int id) const;

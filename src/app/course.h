@@ -23,6 +23,7 @@ struct Course {
     int grade_random = 0;
     // 難易度表の制約：ハイスピード固定（no_speed。ノースピ）、GOOD 無し（no_good）、GREAT・GOOD 無し（no_great）
     bool no_speed = false, no_good = false, no_great = false;
+    int ln_mode = -1;  // LN の種類の制約（ln / cn / hcn → 0 / 1 / 2）。-1 は無し
     std::vector<CourseStage> stages;
     std::string hash;  // スコアのキー
 
