@@ -5,20 +5,19 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "video/video_backend.h"
+
 namespace bmj {
 
 class VideoDecoder {
 public:
-    struct Frame {
-        double t_ms = 0;  // 動画の頭からの時刻
-        int w = 0, h = 0;
-        std::vector<uint8_t> rgba;
-    };
+    using Frame = VideoFrame;
 
     // FFmpeg を読み込めたか（初めて呼んだときに読み込む）
     static bool available();
@@ -40,10 +39,8 @@ public:
 
 private:
     void run();
-    void close();
 
-    struct Ctx;
-    Ctx* ctx_ = nullptr;
+    std::unique_ptr<VideoBackend> impl_;
     int w_ = 0, h_ = 0;
     std::thread thread_;
     std::mutex mu_;

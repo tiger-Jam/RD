@@ -78,6 +78,8 @@ add_executable(BMjoybody WIN32
     src/app/skin_catalog.cpp
     src/app/skin_select_scene.cpp
     src/video/video_decoder.cpp
+    src/video/ffmpeg9.cpp
+    src/video/ffmpeg8.cpp
     src/audio/sound_bank.cpp
     src/audio/mixer.cpp
     src/audio/system_sound.cpp
@@ -90,10 +92,10 @@ add_executable(BMjoybody WIN32
     src/skin/skin_renderer.cpp
     src/render/text_cache.cpp
 )
-# 動画の BGA：FFmpeg のヘッダーだけを使い、ライブラリは実行時に読み込む（同梱しない）
-# 手元の FFmpeg に合わせるときは BMJ_FFMPEG_INCLUDE にそのヘッダーの場所を渡す（読み込むライブラリの版はヘッダーで決まる）
-set(BMJ_FFMPEG_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/ffmpeg/include" CACHE PATH "FFmpeg のヘッダーの場所")
-set_source_files_properties(src/video/video_decoder.cpp PROPERTIES INCLUDE_DIRECTORIES "${BMJ_FFMPEG_INCLUDE}")
+# 動画の BGA：FFmpeg のヘッダーだけを使い、ライブラリは実行時に読み込む（同梱しない）。
+# 構造体が版ごとに違うので、8 系と 9 系のヘッダーでそれぞれビルドし、見つかった版を使う
+set_source_files_properties(src/video/ffmpeg9.cpp PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/ffmpeg/9)
+set_source_files_properties(src/video/ffmpeg8.cpp PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/ffmpeg/8)
 target_link_libraries(BMjoybody PRIVATE bmj_core SDL3::SDL3)
 if(WIN32)
     # 日本語のファイル名を扱えるように、プロセスのコードページを UTF-8 にする（OpenLR2 と同じ）

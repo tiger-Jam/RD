@@ -7,8 +7,8 @@
 | stb_vorbis.c, stb_image.h, stb_truetype.h | stb `f58f558` | Public Domain / MIT |
 | sqlite/ | SQLite 3.46.1（amalgamation） | Public Domain |
 | yyjson/ | yyjson 0.10.0 | MIT |
-| ffmpeg/include/ | FFmpeg 9.0.1 のヘッダーだけ（libavcodec・libavformat・libavutil・libswscale） | LGPL 2.1 以降 |
+| ffmpeg/9/, ffmpeg/8/ | FFmpeg 9.0.1 と 8 系のヘッダーだけ（libavcodec・libavformat・libavutil・libswscale） | LGPL 2.1 以降 |
 
 実装は `third_party_impl.c` でまとめて生成する。
 
-FFmpeg は同梱しない。動画の BGA は、利用者が FFmpeg の共有ライブラリ（ヘッダーと同じ版）を置いたときだけ、実行時に読み込んで使う（`src/video/`）。
+FFmpeg は同梱しない。動画の BGA は、利用者が FFmpeg の共有ライブラリ（8 系か 9 系）を置いたときだけ、実行時に読み込んで使う（`src/video/`）。
