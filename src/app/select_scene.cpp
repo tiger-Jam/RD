@@ -7,7 +7,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <future>
+#include <functional>
 #include <list>
+#include <set>
 #include <fstream>
 #include <sstream>
 #include <map>
@@ -52,12 +54,14 @@ struct Entry {
     TableChart missing;
     std::shared_ptr<Course> course;  // コースのとき
     bool course_folder = false;      // コースを集めたフォルダ（バーの種類 6）
+    bool fs_folder = false;          // 曲フォルダの階層（中の譜面に LR2 の難易度の絞り込みをかける）
     std::vector<Entry> children;
     int owned = 0, total = 0;  // フォルダの中で持っている譜面の数
 };
 
 // 曲の一覧（裏で読み直して、できたら差し替える）
 struct Library {
+    std::vector<std::string> roots;  // 登録した曲フォルダ
     std::vector<ChartRecord> charts;
     std::vector<DifficultyTable> tables;
     std::unordered_map<std::string, ScoreRecord> scores;  // sha256 → スコア
@@ -143,29 +147,108 @@ std::vector<Entry> build_tree(const Library& lib) {
         }
     root.push_back(std::move(expert));
     root.push_back(std::move(grade));
-    // 曲フォルダ：実際のフォルダごとにまとめる
-    Entry songs;
-    songs.label = "曲フォルダ";
-    std::map<std::string, std::vector<const ChartRecord*>> by_folder;
-    for (const ChartRecord& c : lib.charts) by_folder[c.folder].push_back(&c);
-    for (auto& [folder, list] : by_folder) {
-        Entry f;
-        f.label = fs::path(folder).filename().string();
-        std::sort(list.begin(), list.end(), [](const ChartRecord* a, const ChartRecord* b) {
-            return a->notes < b->notes;
-        });
-        f.sub = list.empty() ? "" : list.front()->title;
-        for (const ChartRecord* c : list) {
-            f.children.push_back(chart_entry(c, std::to_string(c->playlevel)));
-            f.owned++;
-            f.total++;
+    // 曲フォルダ（LR2 と同じ。docs/lr2_songlist_spec.md 2〜4 章）：登録した曲フォルダごとに 1 つ、実際の階層のとおり。
+    // フォルダを開いたとき、直下に曲フォルダ（譜面の入ったフォルダ）が 1 つでもあれば、その全部の譜面（差分）を 1 譜面 1 バーで並べ、
+    // 曲フォルダ自体のバーは出さない。無ければ直下のフォルダを並べる
+    auto upper = [](std::string s) {
+        for (char& ch : s) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+        return s;
+    };
+    auto norm = [&](const std::string& d) {
+        std::string s = fs::path(d).lexically_normal().string();
+        while (s.size() > 3 && (s.back() == '/' || s.back() == '\\')) s.pop_back();
+        return s;
+    };
+    std::unordered_map<std::string, std::vector<const ChartRecord*>> charts_in;  // フォルダ → 直下の譜面
+    std::unordered_map<std::string, std::set<std::string>> subdirs;               // フォルダ → 譜面のある下のフォルダ
+    std::set<std::string> roots;
+    for (const std::string& r : lib.roots) roots.insert(upper(norm(r)));
+    for (const ChartRecord& c : lib.charts) {
+        std::string f = norm(c.folder);
+        charts_in[f].push_back(&c);
+        // 登録した曲フォルダまで上がって、親子をつなぐ（どの曲フォルダの下でもなければ出さない）
+        std::string child = f;
+        for (int guard = 0; guard < 64; ++guard) {
+            if (roots.count(upper(child))) break;
+            std::string parent = norm(fs::path(child).parent_path().string());
+            if (parent == child || parent.empty()) break;
+            subdirs[parent].insert(child);
+            child = parent;
         }
-        songs.owned += f.owned;
-        songs.total += f.total;
-        songs.children.push_back(std::move(f));
     }
-    root.push_back(std::move(songs));
+    auto by_path = [&](const std::string& a, const std::string& b) { return upper(a) < upper(b); };
+    std::function<void(Entry&, const std::string&)> fill = [&](Entry& e, const std::string& dir) {
+        std::vector<std::string> kids(subdirs[dir].begin(), subdirs[dir].end());
+        std::sort(kids.begin(), kids.end(), by_path);
+        std::vector<const ChartRecord*> list;
+        for (const std::string& k : kids)
+            if (auto it = charts_in.find(k); it != charts_in.end()) list.insert(list.end(), it->second.begin(), it->second.end());
+        if (!list.empty()) {
+            // 並び：曲フォルダのパス順 → レベル順（INSANE は最後）。同じ譜面（md5）は 1 回だけ
+            std::stable_sort(list.begin(), list.end(), [&](const ChartRecord* a, const ChartRecord* b) {
+                if (a->folder != b->folder) return upper(a->folder) < upper(b->folder);
+                int la = a->playlevel + (a->difficulty == 5 ? 100 : 0), lb = b->playlevel + (b->difficulty == 5 ? 100 : 0);
+                if (la != lb) return la < lb;
+                return a->difficulty < b->difficulty;
+            });
+            std::set<std::string> seen;
+            for (const ChartRecord* c : list) {
+                if (!seen.insert(c->md5).second) continue;
+                e.children.push_back(chart_entry(c, std::to_string(c->playlevel)));
+                e.owned++, e.total++;
+            }
+            return;
+        }
+        for (const std::string& k : kids) {
+            Entry f;
+            f.fs_folder = true;
+            f.label = fs::path(k).filename().string();
+            fill(f, k);
+            if (f.children.empty()) continue;
+            e.owned += f.owned, e.total += f.total;
+            e.children.push_back(std::move(f));
+        }
+    };
+    std::vector<std::string> root_dirs(lib.roots.begin(), lib.roots.end());
+    std::sort(root_dirs.begin(), root_dirs.end(), by_path);
+    std::vector<Entry> song_roots;
+    for (const std::string& r : root_dirs) {
+        Entry f;
+        f.fs_folder = true;
+        std::string d = norm(r);
+        f.label = fs::path(d).filename().string();
+        if (f.label.empty()) f.label = d;
+        fill(f, d);
+        song_roots.push_back(std::move(f));
+    }
+    // 並び：難易度表 → 登録した曲フォルダ → COURSE / 段位認定（LR2 のルートと同じく、コースのフォルダは後ろ）
+    std::vector<Entry> courses(std::make_move_iterator(root.end() - 2), std::make_move_iterator(root.end()));
+    root.erase(root.end() - 2, root.end());
+    for (Entry& f : song_roots) root.push_back(std::move(f));
+    for (Entry& f : courses) root.push_back(std::move(f));
     return root;
+}
+
+// #DIFFICULTY の無い譜面の難易度を補う（LR2: songmanage:468）。同じフォルダの中で、ノーツ数の少ない順に 2, 3, 4, 4, …
+void fill_difficulties(std::vector<ChartRecord>& charts) {
+    std::unordered_map<std::string, std::vector<ChartRecord*>> undefined;
+    for (ChartRecord& c : charts)
+        if (c.difficulty <= 0 || c.difficulty > 5) undefined[c.folder].push_back(&c);
+    for (auto& [folder, list] : undefined) {
+        std::stable_sort(list.begin(), list.end(), [](const ChartRecord* a, const ChartRecord* b) { return a->notes < b->notes; });
+        int d = 2;
+        for (ChartRecord* c : list) {
+            c->difficulty = d;
+            if (d < 4) ++d;
+        }
+    }
+}
+
+// 曲の一覧を読む（登録した曲フォルダ・譜面と、難易度の補い）
+void load_charts(Library& lib, const SongDb& db, const AppConfig& cfg) {
+    lib.roots = cfg.song_dirs;
+    lib.charts = db.all_charts();
+    fill_difficulties(lib.charts);
 }
 
 
@@ -252,7 +335,7 @@ void run_select(App& app) {
 
     // 手元にあるものですぐに一覧を出し、曲フォルダの読み直しと難易度表の更新は裏で行う
     auto lib = std::make_shared<Library>();
-    lib->charts = app.db.all_charts();
+    load_charts(*lib, app.db, app.cfg);
     for (const std::string& u : app.cfg.tables) {
         DifficultyTable t;
         if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
@@ -279,7 +362,9 @@ void run_select(App& app) {
             if (wdb.open(song_db_path()) && scan_songs)
                 st = wdb.scan(dirs, static_cast<int>(std::max(2u, std::thread::hardware_concurrency())));
             auto next = std::make_shared<Library>();
+            next->roots = dirs;
             next->charts = wdb.all_charts();
+            fill_difficulties(next->charts);
             for (const ScoreRecord& s : wdb.all_scores(ln_mode)) next->scores[s.sha256] = s;
             for (const std::string& u : urls) next->tables.push_back(update_table(table_cache_dir(), u));
             char buf[160];
@@ -302,7 +387,9 @@ void run_select(App& app) {
                 // 途中では一覧を作り直さない（作り直すと選曲の邪魔になる）。読み終えたときと、10 分ごとに反映する
                 if (finished || std::chrono::steady_clock::now() - last > std::chrono::minutes(10)) {
                     auto lib2 = std::make_shared<Library>();
+                    lib2->roots = dirs;
                     lib2->charts = wdb.all_charts();
+                    fill_difficulties(lib2->charts);
                     for (const ScoreRecord& s : wdb.all_scores(ln_mode)) lib2->scores[s.sha256] = s;
                     lib2->tables = next->tables;
                     std::snprintf(buf, sizeof(buf), "譜面を読んでいます %d / %d", done, total);
@@ -337,15 +424,39 @@ void run_select(App& app) {
         std::string name;
         std::shared_ptr<std::vector<Entry>> view;  // 絞り込んだ一覧（絞り込んでいなければ空）
         const std::vector<Entry>* list;  // 見せている一覧
+        bool lr2_filter = false;         // 曲フォルダの一覧（LR2 の難易度の絞り込みをかける。難易度表などは常に ALL）
     };
-    auto make_level = [&](const std::vector<Entry>* full, int cursor, const std::string& name) {
-        Level lv{full, cursor, name, nullptr, full};
-        if (difficulty_filter != 0 || !kModeShows7[mode_filter] || sort_mode != 0) {
+    auto make_level = [&](const std::vector<Entry>* full, int cursor, const std::string& name, bool lr2_filter = false) {
+        Level lv{full, cursor, name, nullptr, full, lr2_filter};
+        // 難易度の絞り込み（LR2: songmanage:2034）。曲フォルダ（同じフォルダの差分）ごとに、選んだ難易度以下で一番上の譜面を出す。
+        // 以下が無ければ一番下の譜面。曲は消えない。選んだ難易度の譜面が一覧に 1 つも無ければ、難易度を自動で進める
+        bool use_diff = lr2_filter && difficulty_filter != 0;
+        std::unordered_map<std::string, int> shown_diff;  // 曲フォルダ → 出す難易度
+        if (use_diff) {
+            for (int tries = 0; tries < 6 && difficulty_filter != 0; ++tries) {
+                bool exact = false;
+                for (const Entry& e : *full)
+                    if (e.kind == Entry::Kind::Chart && e.chart->difficulty == difficulty_filter) exact = true;
+                if (exact) break;
+                difficulty_filter = (difficulty_filter + 1) % 6;
+            }
+            use_diff = difficulty_filter != 0;
+            std::unordered_map<std::string, std::pair<int, int>> range;  // 曲フォルダ → (d 以下で一番上, 一番下)
+            for (const Entry& e : *full) {
+                if (e.kind != Entry::Kind::Chart) continue;
+                auto [it, fresh] = range.try_emplace(e.chart->folder, std::make_pair(-1, 99));
+                int d = e.chart->difficulty;
+                if (d <= difficulty_filter) it->second.first = std::max(it->second.first, d);
+                it->second.second = std::min(it->second.second, d);
+            }
+            for (auto& [f, r] : range) shown_diff[f] = r.first >= 0 ? r.first : r.second;
+        }
+        if (use_diff || !kModeShows7[mode_filter] || sort_mode != 0) {
             auto v = std::make_shared<std::vector<Entry>>();
             for (const Entry& e : *full) {
                 if (e.kind != Entry::Kind::Folder && e.kind != Entry::Kind::Course) {
                     if (!kModeShows7[mode_filter]) continue;
-                    if (difficulty_filter != 0 && (e.kind != Entry::Kind::Chart || e.chart->difficulty != difficulty_filter)) continue;
+                    if (use_diff && e.kind == Entry::Kind::Chart && e.chart->difficulty != shown_diff[e.chart->folder]) continue;
                 }
                 v->push_back(e);
             }
@@ -610,7 +721,7 @@ void run_select(App& app) {
             const std::vector<Entry>& list = *stack.back().list;
             auto it = std::find_if(list.begin(), list.end(), [&](const Entry& e) { return e.label == path[i]; });
             if (it == list.end()) break;
-            stack.push_back(make_level(&it->children, cursors[i + 1], path[i]));
+            stack.push_back(make_level(&it->children, cursors[i + 1], path[i], it->fs_folder));
             place(stack.back(), i + 1);
         }
         if (stack.size() == path.size() + 1) {
@@ -625,7 +736,8 @@ void run_select(App& app) {
         const Entry* e = current();
         if (!e) return;
         if (e->kind == Entry::Kind::Folder) {
-            stack.push_back(make_level(&e->children, 0, e->label));
+            if (e->children.empty()) return;  // 空のフォルダには入らない（LR2 と同じ）
+            stack.push_back(make_level(&e->children, 0, e->label, e->fs_folder));
             snap();
             app.mixer.play_system(kSysFolderOpen);
         } else if (e->kind == Entry::Kind::Chart || (e->kind == Entry::Kind::Course && e->course->playable())) {
@@ -670,7 +782,7 @@ void run_select(App& app) {
             // スコアとプレイヤーの累計を読み直す
             if (refreshed) {
                 auto lib2 = std::make_shared<Library>();
-                lib2->charts = app.db.all_charts();
+                load_charts(*lib2, app.db, app.cfg);
                 lib2->tables = lib->tables;
                 for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib2->scores[s.sha256] = s;
                 std::lock_guard<std::mutex> lock(mu);
@@ -691,20 +803,22 @@ void run_select(App& app) {
         const Entry* e = current();
         const ChartRecord* target = e && e->kind == Entry::Kind::Chart ? e->chart : nullptr;
         if (to < 0) {
+            // → / SELECT（LR2 beta3 の既定）：同じ曲フォルダに今より上の難易度があれば、その中で一番下へ。
+            // 一番上にいるなら、今 ALL ならその曲の一番下の難易度、ALL でなければ ALL
             if (!target) return;
-            to = 0;
-            int best = 99;
-            for (const ChartRecord& c : lib->charts)
-                if (c.folder == target->folder && c.difficulty > target->difficulty && c.difficulty <= 5 && c.difficulty < best)
-                    best = c.difficulty;
-            if (best != 99) {
-                to = best;
+            int above = 99, lowest = 99;
+            for (const ChartRecord& c : lib->charts) {
+                if (c.folder != target->folder || c.difficulty < 1 || c.difficulty > 5) continue;
+                if (c.difficulty > target->difficulty) above = std::min(above, c.difficulty);
+                lowest = std::min(lowest, c.difficulty);
+            }
+            to = above != 99 ? above : difficulty_filter == 0 && lowest != 99 ? lowest : 0;
+            if (to > 0)
                 for (const ChartRecord& c : lib->charts)
-                    if (c.folder == target->folder && c.difficulty == best) {
+                    if (c.folder == target->folder && c.difficulty == to) {
                         target = &c;
                         break;
                     }
-            }
         }
         else if (to > 0 && target) {
             // 難易度を直接選んだとき（スキンのボタン 91..96）は、同じフォルダのその難易度の譜面へ
@@ -716,10 +830,20 @@ void run_select(App& app) {
         }
         difficulty_filter = to;
         Level& lv = stack.back();
-        lv = make_level(lv.full, 0, lv.name);
-        // 移った先の譜面にカーソルを合わせる
-        for (size_t i = 0; i < lv.list->size(); ++i)
-            if (target && (*lv.list)[i].kind == Entry::Kind::Chart && (*lv.list)[i].chart == target) lv.cursor = static_cast<int>(i);
+        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter);
+        // 移った先の譜面にカーソルを合わせる。見えていなければ、同じ曲フォルダの譜面に（カーソルは同じ曲に留まる）
+        int same_folder = -1;
+        for (size_t i = 0; i < lv.list->size(); ++i) {
+            const Entry& x = (*lv.list)[i];
+            if (!target || x.kind != Entry::Kind::Chart) continue;
+            if (x.chart == target) {
+                lv.cursor = static_cast<int>(i);
+                same_folder = -2;
+                break;
+            }
+            if (same_folder == -1 && x.chart->folder == target->folder) same_folder = static_cast<int>(i);
+        }
+        if (same_folder >= 0) lv.cursor = same_folder;
         snap();
         app.mixer.play_system(app.mixer.has_system(kSysDifficulty) ? kSysDifficulty : kSysFolderOpen);
     };
@@ -729,7 +853,7 @@ void run_select(App& app) {
         std::string label = e ? e->label : "";
         const ChartRecord* chart = e && e->kind == Entry::Kind::Chart ? e->chart : nullptr;
         Level& lv = stack.back();
-        lv = make_level(lv.full, 0, lv.name);
+        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter);
         for (size_t i = 0; i < lv.list->size(); ++i) {
             const Entry& x = (*lv.list)[i];
             if ((chart && x.kind == Entry::Kind::Chart && x.chart == chart) || (!chart && x.label == label)) {
