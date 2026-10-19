@@ -168,10 +168,10 @@ TEST(lr2_skin_customize) {
     AppConfig cfg;
     CHECK(import_lr2_skin_custom(root.string(), root.string(), cfg) == 1);
     CHECK(cfg.skin_custom.size() == 1);
-    const std::vector<int>& sel = cfg.skin_custom.begin()->second;
+    const std::vector<SkinCustomChoice>& sel = cfg.skin_custom.begin()->second;
     CHECK(sel.size() == 3);
-    CHECK(sel[0] == 2);  // 902 - 900
-    CHECK(sel[1] == 1);  // a, b, RANDOM の b
-    CHECK(sel[2] == 0);  // 範囲外の値は既定のまま
+    CHECK(sel[0].file.empty() && sel[0].index == 2);  // 902 - 900
+    CHECK(sel[1].file == "b");                        // #CUSTOMFILE は名前で残す
+    CHECK(sel[2].file.empty() && sel[2].index == 0);  // 範囲外の値は既定のまま
     fs::remove_all(root);
 }

@@ -383,7 +383,7 @@ int main(int, char**) {
         bool running = false, done = false;
         Lr2ImportResult res;
         std::vector<std::string> song_dirs, tables;
-        std::map<std::string, std::vector<int>> skin_custom;
+        decltype(AppConfig::skin_custom) skin_custom;
         ~ImportJob() {
             if (th.joinable()) th.join();
         }

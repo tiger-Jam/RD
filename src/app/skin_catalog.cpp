@@ -23,6 +23,35 @@ std::string key_of(const std::string& p) {
 
 }  // namespace
 
+void apply_skin_custom(const std::vector<SkinCustomChoice>& sel, SkinHeader& h) {
+    for (size_t i = 0; i < sel.size() && i < h.customs.size(); ++i) {
+        SkinCustomItem& c = h.customs[i];
+        const SkinCustomChoice& v = sel[i];
+        if (c.is_file && !v.file.empty()) {
+            // 名前で探す。候補に無ければ既定のまま（LR2: mng:362-371）
+            for (size_t j = 0; j < c.labels.size(); ++j)
+                if (lower(c.labels[j]) == lower(v.file)) c.selected = static_cast<int>(j);
+        } else if (v.file.empty() && v.index >= 0 && v.index < static_cast<int>(c.labels.size())) {
+            c.selected = v.index;
+        }
+    }
+}
+
+void apply_skin_custom(const AppConfig& cfg, const std::string& skin_path, SkinHeader& h) {
+    if (auto it = cfg.skin_custom.find(skin_path); it != cfg.skin_custom.end()) apply_skin_custom(it->second, h);
+}
+
+std::vector<SkinCustomChoice> skin_custom_choices(const SkinHeader& h) {
+    std::vector<SkinCustomChoice> out;
+    for (const SkinCustomItem& c : h.customs) {
+        SkinCustomChoice v;
+        if (c.is_file && c.selected >= 0 && c.selected < static_cast<int>(c.labels.size())) v.file = c.labels[c.selected];
+        else v.index = c.is_file ? -1 : c.selected;  // -1：既定が候補に無いので既定のまま
+        out.push_back(v);
+    }
+    return out;
+}
+
 std::string* SkinCatalog::config_slot(AppConfig& cfg, int type) {
     switch (type) {
     case 0: return &cfg.play_skin;
@@ -104,12 +133,13 @@ bool SkinCatalog::step_skin(AppConfig& cfg, int dir) {
 }
 
 std::vector<int> SkinCatalog::selections(const SkinEntry& e, const AppConfig& cfg) const {
+    SkinHeader h = e.header;
+    apply_skin_custom(cfg, e.path, h);
     std::vector<int> sel;
-    auto it = cfg.skin_custom.find(e.path);
-    for (size_t i = 0; i < e.header.customs.size(); ++i) {
-        int n = static_cast<int>(e.header.customs[i].labels.size());
-        int v = it != cfg.skin_custom.end() && i < it->second.size() ? it->second[i] : e.header.customs[i].selected;
-        sel.push_back(n > 0 ? std::clamp(v, 0, n - 1) : 0);
+    for (const SkinCustomItem& c : h.customs) {
+        int n = static_cast<int>(c.labels.size());
+        // -1（#CUSTOMFILE の既定が候補に無い）はそのまま残す
+        sel.push_back(n > 0 ? std::clamp(c.selected, -1, n - 1) : 0);
     }
     return sel;
 }
@@ -122,8 +152,10 @@ bool SkinCatalog::step_custom(AppConfig& cfg, int k, int dir) {
     int n = static_cast<int>(e->header.customs[idx].labels.size());
     if (n <= 0) return false;
     std::vector<int> sel = selections(*e, cfg);
-    sel[idx] = ((sel[idx] + dir) % n + n) % n;
-    cfg.skin_custom[e->path] = sel;
+    sel[idx] = sel[idx] < 0 ? (dir > 0 ? 0 : n - 1) : ((sel[idx] + dir) % n + n) % n;
+    SkinHeader h = e->header;
+    for (size_t i = 0; i < sel.size(); ++i) h.customs[i].selected = sel[i];
+    cfg.skin_custom[e->path] = skin_custom_choices(h);
     return true;
 }
 
@@ -145,7 +177,10 @@ std::string SkinCatalog::text(int id, const AppConfig& cfg) const {
         const SkinCustomItem& c = e->header.customs[idx];
         if (id < 110) return c.title;
         std::vector<int> sel = selections(*e, cfg);
-        return c.labels.empty() ? std::string() : c.labels[sel[idx]];
+        if (c.labels.empty()) return {};
+        // 既定が候補に無いときは既定の文字列（空なら読むたびにランダムなので RANDOM と出す）
+        if (sel[idx] < 0) return c.default_value.empty() ? std::string("RANDOM") : c.default_value;
+        return c.labels[sel[idx]];
     }
     return {};
 }

@@ -7,7 +7,6 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
-#include <sstream>
 #include <system_error>
 
 #include "stb_image.h"
@@ -101,17 +100,67 @@ std::vector<std::string> split_path(std::string p) {
     return parts;
 }
 
+// ファイルの名前を最初の '.' の手前で切る（LR2 の #CUSTOMFILE の候補名）
+std::string name_before_dot(const std::string& name) {
+    size_t dot = name.find('.');
+    return dot == std::string::npos ? name : name.substr(0, dot);
+}
+
+// #CUSTOMFILE のパターンに当たる名前を集める。
+// for_random が偽ならスキンセレクトの候補：最後の段に当たるフォルダとファイル（名前の末尾が txt のものは除く）。
+// 真なら RANDOM で選ぶ候補：最初の '*' の段で探し、パターンが '*' で終わるかその段の後ろに続きがあればフォルダだけ、
+// それ以外はファイルだけ
+std::vector<std::string> custom_file_candidates(const std::string& lr2_root, const std::string& pattern, bool for_random) {
+    std::vector<std::string> out;
+    std::vector<std::string> parts = split_path(pattern);
+    if (parts.empty()) return out;
+    size_t wild = parts.size() - 1;
+    if (for_random)
+        for (size_t i = 0; i < parts.size(); ++i)
+            if (parts[i].find('*') != std::string::npos) {
+                wild = i;
+                break;
+            }
+    std::string dir_rel;
+    for (size_t i = 0; i < wild; ++i) dir_rel += parts[i] + "/";
+    std::string dir = dir_rel.empty() ? lr2_root : resolve_lr2_path(lr2_root, dir_rel, false);
+    if (dir.empty()) return out;
+    const std::string& pat = parts[wild];
+    bool folders_only = wild + 1 < parts.size() || (!pattern.empty() && pattern.back() == '*');
+    std::error_code ec;
+    for (auto& e : fs::directory_iterator(dir, ec)) {
+        std::string n = e.path().filename().string();
+        if (!wildcard_match(pat, n)) continue;
+        bool is_dir = e.is_directory(ec);
+        if (for_random) {
+            if (folders_only != is_dir) continue;
+        } else if (n.size() >= 3 && lower(n.substr(n.size() - 3)) == "txt") {
+            continue;
+        }
+        out.push_back(is_dir ? n : name_before_dot(n));
+    }
+    return out;
+}
+
 std::string read_text_file(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return {};
     return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 }
 
+// 行に分ける。改行は CRLF・LF・CR のどれでもよく、行末の改行は含めない。
+// LR2 はテキストモードの fgets で読むので、CRLF も LF も同じ「改行 1 文字」になる。それに合わせて改行の形で差を出さない
 std::vector<std::string> lines_of(const std::string& bytes) {
     std::vector<std::string> out;
-    std::istringstream in(to_utf8_auto(bytes));
-    std::string l;
-    while (std::getline(in, l)) out.push_back(l);
+    std::string text = to_utf8_auto(bytes);
+    size_t begin = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '\r' && text[i] != '\n') continue;
+        out.push_back(text.substr(begin, i - begin));
+        if (text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n') ++i;
+        begin = i + 1;
+    }
+    if (begin < text.size()) out.push_back(text.substr(begin));
     return out;
 }
 
@@ -242,8 +291,9 @@ struct Loader {
         int if_count = 0;
         int if_switch[100] = {};
         for (std::string line : lines_of(bytes)) {
-            if (line.size() <= 6 || line[0] != '#') continue;
-            while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+            // LR2 は改行を含めて 7 文字以上の行だけを読む（skinload:888）。改行を除けば 6 文字以上。
+            // 素の #ENDIF（6 文字）は読み、素の #ELSE（5 文字）は読まない
+            if (line.size() < 6 || line[0] != '#') continue;
             line = std::string(trim(line));
 
             // #IF / #ELSEIF / #ELSE / #ENDIF（LR2: skinload:888）。欄の値がすべて真なら成立。負の値は常に偽
@@ -324,10 +374,14 @@ struct Loader {
                 const SkinCustomItem& it = header.customs[custom_index];
                 if (it.selected >= 0 && it.selected < static_cast<int>(it.labels.size())) chosen = it.labels[it.selected];
             }
-            if (chosen.empty()) chosen = c.s(3);
+            if (chosen.empty()) chosen = std::string(trim(c.s(3)));
             if (chosen == "RANDOM") {
-                std::string r = resolve_lr2_path(root, c.s(2));
-                if (!r.empty()) chosen = fs::path(r).stem().string();
+                // 読むたびに 1 つ選ぶ（fu:829-866）。パターンが '*' で終わるか途中に '*' の段があればフォルダから、
+                // それ以外はファイルから選ぶ。見つからなければ置き換えない
+                std::vector<std::string> hits = custom_file_candidates(root, c.s(2), true);
+                std::sort(hits.begin(), hits.end());
+                std::uniform_int_distribution<size_t> pick(0, hits.empty() ? 0 : hits.size() - 1);
+                chosen = hits.empty() ? std::string() : hits[pick(rng())];
             }
             custom_files.push_back({c.s(2), chosen});
             custom_index++;
@@ -352,10 +406,11 @@ struct Loader {
             sk.scenetime = c.val(1);
         } else if (cmd == "#IGNOREINPUT") {
             sk.ignore_input = c.val(1);
-        } else if (cmd == "#FLIPRESULT") {
-            sk.flip_result = true;
-        } else if (cmd == "#DISABLEFLIP") {
-            sk.disable_flip = true;
+        } else if (cmd == "#FLIPRESULT" || cmd == "#DISABLEFLIP") {
+            // 読んだ時点で旗と op 350/351 を書き換える（skinload:1720-1734）。後の #IF に効き、後に書いた方が勝つ
+            sk.flip_result = cmd == "#FLIPRESULT";
+            sk.op[350] = !sk.flip_result;
+            sk.op[351] = sk.flip_result;
         } else if (cmd == "#SCRATCHSIDE") {
             sk.scratch_side[0] = c.val(1);
             sk.scratch_side[1] = c.val(2);
@@ -646,8 +701,7 @@ bool read_skin_header(const std::string& lr2_root, const std::string& skin_path,
     std::string bytes = read_text_file(skin_path);
     if (bytes.empty()) return false;
     out = SkinHeader{};
-    for (std::string line : lines_of(bytes)) {
-        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+    for (const std::string& line : lines_of(bytes)) {
         if (line.rfind("#ENDOFHEADER", 0) == 0) break;
         if (line.empty() || line[0] != '#') continue;
         Csv c = split_csv(line);
@@ -686,25 +740,12 @@ bool read_skin_header(const std::string& lr2_root, const std::string& skin_path,
             it.title = c.s(1);
             it.pattern = c.s(2);
             it.default_value = std::string(trim(c.s(3)));
-            // 候補のファイル名を集める（.txt は除く）
-            std::vector<std::string> parts = split_path(it.pattern);
-            if (!parts.empty()) {
-                std::string pat = parts.back();
-                parts.pop_back();
-                std::string dir_rel;
-                for (auto& p : parts) dir_rel += p + "/";
-                std::string dir = resolve_lr2_path(lr2_root, dir_rel, false);
-                std::error_code ec;
-                if (!dir.empty()) {
-                    for (auto& e : fs::directory_iterator(dir, ec)) {
-                        std::string n = e.path().filename().string();
-                        if (wildcard_match(pat, n) && lower(e.path().extension().string()) != ".txt")
-                            it.labels.push_back(e.path().stem().string());
-                    }
-                }
-                std::sort(it.labels.begin(), it.labels.end());
-            }
+            // 候補を集める（mng:310-336）。フォルダは名前のまま、ファイルは最初の '.' の手前まで。名前の末尾が txt のものは除く
+            it.labels = custom_file_candidates(lr2_root, it.pattern, false);
+            std::sort(it.labels.begin(), it.labels.end());
             it.labels.push_back("RANDOM");
+            // 既定が候補に無ければ、どれも選ばず既定の文字列をそのまま使う（mng:362-371。空なら読むたびにランダム）
+            it.selected = -1;
             for (size_t i = 0; i < it.labels.size(); ++i)
                 if (lower(it.labels[i]) == lower(it.default_value)) it.selected = static_cast<int>(i);
             out.customs.push_back(it);
@@ -721,13 +762,16 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
     out.height = header.height;
     out.images.assign(kSpecialImages, SkinImage{});
     out.op = options;
+    // #FLIPRESULT の旗は、読み込みを始めた時点の op 351 から始める（LR2 は前のスキンの旗をそのまま持ち越し、
+    // 選曲からプレイに入るときだけ下ろす。リザルトではプレイスキンの旗が初期値になる）
+    out.flip_result = options[351];
     out.op[0] = true;
     out.op[999] = false;
     // カスタマイズの選択（LR2: LoadScene で customize_value の 900-999 を立てる）
     for (const SkinCustomItem& it : header.customs) {
         if (it.is_file) continue;
         int v = it.op_start + it.selected;
-        if (v >= 0 && v < 1000) out.op[v] = true;
+        if (v >= 900 && v < 1000) out.op[v] = true;  // 900〜999 だけ（load:1886-1889）
     }
     // black.bmp / white.bmp（LR2files/Config）
     uint8_t no_trans[3] = {0, 0, 0};

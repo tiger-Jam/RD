@@ -7,6 +7,14 @@
 
 namespace bmj {
 
+// スキンのカスタマイズの 1 項目の選択（LR2: LR2files/SkinCustomize の xml）。
+// #CUSTOMOPTION は選択肢の番号、#CUSTOMFILE は LR2 と同じく選んだ名前で持つ（ファイルが増減しても選択がずれない）
+struct SkinCustomChoice {
+    int index = 0;      // 選択肢の番号（file が空のとき。古い形式で保存した #CUSTOMFILE もこれ）
+    std::string file;   // #CUSTOMFILE で選んだ名前（空なら index を使う）
+    bool operator==(const SkinCustomChoice&) const = default;
+};
+
 struct AppConfig {
     std::string lr2_root;          // LR2のフォルダ（LR2files があるところ）
     std::string play_skin;         // プレイスキンの .lr2skin（空なら LR2 の既定）
@@ -16,7 +24,7 @@ struct AppConfig {
     std::string decide_skin;       // 決定画面のスキン（空なら LR2 の既定。"none" なら決定画面を出さない）
     std::string sound_set;         // サウンドセットの .lr2ss（空なら LR2 の既定）
     std::string skin_res;          // "", "sd", "hd", "fhd"
-    std::map<std::string, std::vector<int>> skin_custom;  // スキンのパス → カスタマイズの選択
+    std::map<std::string, std::vector<SkinCustomChoice>> skin_custom;  // スキンのパス → カスタマイズの選択（項目の順）
     std::vector<std::string> song_dirs;  // 曲フォルダ
     std::vector<std::string> tables;     // 難易度表のURL（アプリには同梱しない。ユーザーが登録する）
     int hi_speed = 100;            // LR2のハイスピ（100=1.00倍）
@@ -97,6 +105,11 @@ struct AppConfig {
 
 // 設定ファイルの置き場所（macOS なら ~/Library/Application Support/BMjoy/config.txt）
 std::string config_path();
+
+// config.txt の skin_custom の値（"2,\"name\",0" の形）を読む・書く
+std::vector<SkinCustomChoice> parse_skin_custom(const std::string& val);
+std::string format_skin_custom(const std::vector<SkinCustomChoice>& sel);
+
 // 曲データベースの置き場所（同じフォルダの songs.db）
 std::string song_db_path();
 // 難易度表を手元に保存しておくフォルダ

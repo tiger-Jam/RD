@@ -165,7 +165,7 @@
 | スキンを替える（ボタン 190） | 前・次へ。サウンドセットなら読み直して BGM を鳴らす | 同じ | 同じ | O LR2_skinobject.cpp:3770-3816 / B skin_select_scene.cpp:185-195 |
 | ボタン 191 | 選んだスキンを確定する | 無視する | BMjoyに無い（小） | O LR2_skinobject.cpp:3817-3823 |
 | カスタマイズ（220-229・文字 100-114・スライダー 7・ホイール） | 5 件ずつ表示してスクロール | 同じ | 同じ | O LR2_skinobject.cpp:3841-3878, 2585-2596, Scene07_Skinselect.cpp:69-98 / B skin_catalog.cpp:117-150, skin_select_scene.cpp:199-220 |
-| カスタマイズの保存 | 変えるたびに SkinCustomize/<スキンのパスの MD5>.xml へ書く。#CUSTOMFILE は**ファイル名**で残す | config.txt にスキンのパスごとの**番号**で残す。書き出すのは画面を閉じたとき | 違う | O LR2_skinobject.cpp:3851-3864 / B skin_catalog.cpp:126, select_scene.cpp:1178 |
+| カスタマイズの保存 | 変えるたびに SkinCustomize/<スキンのパスの MD5>.xml へ書く。#CUSTOMFILE は**ファイル名**で残す | config.txt にスキンのパスごとに残す。#CUSTOMOPTION は番号、#CUSTOMFILE は**名前**。書き出すのは画面を閉じたとき | 違う（書き出す時期）。#CUSTOMFILE を名前で残すのは直した（古い番号の形式も読む） | O LR2_skinobject.cpp:3851-3864 / B skin_catalog.cpp, config.cpp `parse_skin_custom`, select_scene.cpp:1178 |
 | プレビュー | 動くスキン。プレイ用なら sample_*.bme を自動演奏して音も鳴らし、title.bmp を STAGEFILE にする | スキンをタイマーだけで動かす。サンプル譜面の演奏と音は無い[?] | 違う | O Scene07_Skinselect.cpp:301-437 / B skin_select_scene.cpp:28-100 |
 | プレビューを出さない設定 | 有り（サムネイル表示） | 設定画面で灰色 | BMjoyに無い | O Scene07_Skinselect.cpp:101-103 / B launcher.cpp:539 |
 | サウンドセットのプレビュー | サムネイル | サムネイル | 同じ | B skin_select_scene.cpp:42-51 |
@@ -481,7 +481,7 @@
 | 項目 | LR2 | BMjoy | 判定 | 出典 |
 |---|---|---|---|---|
 | 文字コード | CP932 に固定 | 自動判定（UTF-8 のスキンも読める） | LR2に無い | load:886 / ls:112 |
-| 有効な行 | 先頭が `#` で、**改行を含めて** 7 文字以上 | 改行を除いた長さで 7 文字以上（CR は残る） | 違う（潜在）。CRLF なら同じだが、LF だけのファイルでは素の `#ENDIF`（6 文字）が捨てられ、#IF の入れ子が崩れる | load:890-892 / ls:245 |
+| 有効な行 | 先頭が `#` で、**改行を含めて** 7 文字以上 | CRLF・LF・CR のどれでも行に分け、改行を除いて 6 文字以上 | 直した（以前は LF だけのファイルで素の `#ENDIF` が捨てられ、#IF の入れ子が崩れた）。LR2 は最後の行に改行が無いとその行の最後の 1 文字を落とすが、それはまねない | load:868,888-892 / ls `lines_of` |
 | 素の `#ELSE`（CRLF） | 6 文字なので無視される（WMIX `play/csv/AC_1p.csv:1453` など 6 ファイル。無害） | 同じく無視 | 同じ | 同上 |
 | 行頭の空白 | `#` が 1 文字目でない行は無視（others.txt:32 は「タブは大丈夫」と書く [?]） | 同じ | 同じ | load:891 / ls:245 |
 | 命令名の大文字・小文字 | 区別する | 大文字にそろえて比べる | LR2に無い（受け入れが広い） | load:958 / ls:278 |
@@ -495,11 +495,11 @@
 |---|---|---|---|---|
 | `#INFORMATION` の 6・7 欄目、`#RESOLUTION` | 解像度 [EXT] | 読む | LR2に無い [EXT] | mng:246-280 / ls:655-672 |
 | `#ENDOFHEADER` | LR2 では走査が止まる。OpenLR2 は 11 文字で比べているので止まらない（不具合） | 止まる | 同じ [?] | mng:390 / ls:651 |
-| `#CUSTOMOPTION` の反映 | 保存値のうち **900〜999 だけ** op を立てる | op_start + 選択値を 0〜999 で立てる | 違う（軽微。実スキンはすべて 900 以上） | load:1886-1889 / ls:727-731 |
-| `#CUSTOMFILE` の候補 | 拡張子あり＝ファイル、なし＝フォルダ。.txt を除く。名前は**最初の `.`** の手前まで。最後に RANDOM を足す | フォルダとファイルを区別しない。`stem()`（最後の `.` の手前）なので、フォルダ名の `.` も切れる | 違う | customize.txt:41 / mng:322-336 / ls:689-707 |
-| `#CUSTOMFILE` の既定値 | 保存値が候補に無ければ第 3 欄（既定）。既定が空なら `*` が残り、読むたびにランダム | 既定が候補に無いと**先頭の候補**を選ぶ（空の既定でも先頭に固定） | 違う | mng:362-371 / ls:708-709 |
+| `#CUSTOMOPTION` の反映 | 保存値のうち **900〜999 だけ** op を立てる | 同じ（900〜999 だけ） | 直した | load:1886-1889 / ls `load_lr2_skin` |
+| `#CUSTOMFILE` の候補 | 拡張子あり＝ファイル、なし＝フォルダ。.txt を除く。名前は**最初の `.`** の手前まで。最後に RANDOM を足す | 同じ（フォルダは名前のまま、ファイルは最初の `.` の手前。名前の末尾が txt のものを除く） | 直した | customize.txt:41 / mng:322-336 / ls `custom_file_candidates` |
+| `#CUSTOMFILE` の既定値 | 保存値が候補に無ければ第 3 欄（既定）。既定が空なら `*` が残り、読むたびにランダム | 同じ（候補に無い既定は selected = -1 とし、既定の文字列をそのまま使う。スキンセレクトには既定、空なら RANDOM と出す） | 直した。WMIX_Result_HD の clear image など既定が空の項目は、読むたびにランダムになる（以前は先頭に固定） | mng:362-371 / ls `read_skin_header` |
 | `#SETOPTION` | 1000 未満を受ける。0〜899 は #IF だけに効く（描画時は実際の状態を見る） | プレイ画面では、知らない 1000 未満の番号に読み込み時の値を返す | 違う（軽微） | load:1790 / src/render/skin_play.cpp:159-160 |
-| `#FLIPRESULT` / `#DISABLEFLIP` | 読んだ時点で op350/351 を書き換え、後の #IF に効く。後に書いた方が勝つ。リザルトスキン側の #FLIPRESULT も効く | 真偽の旗だけ持ち、`result_flip = プレイ側 FLIP && !リザルト側 DISABLE`。op は読み込み中に変わらず、リザルト側の #FLIPRESULT は無視 | 違う（LR2 標準 `Result/result.lr2skin:41-48,83-88` の RESULT SIDE 911/912 が効かない） | load:1720-1734 / ls:355-358, play_session.cpp:463-466 |
+| `#FLIPRESULT` / `#DISABLEFLIP` | 読んだ時点で op350/351 を書き換え、後の #IF に効く。後に書いた方が勝つ。リザルトスキン側の #FLIPRESULT も効く | 同じ。旗は読み込み開始時の op 351（リザルトではプレイスキンの旗）から始め、読んだ順に旗と op 350/351 を書き換える | 直した（LR2 標準リザルトの RESULT SIDE が効く） | load:1720-1734, Main.cpp:1040-1042,1218 / ls `#FLIPRESULT`, play_session.cpp（リザルトに入るところ） |
 | `#FLIPSIDE` | BATTLE で 1P/2P の部品・タイマー・ボタンを入れ替える | 無い | 意図した違い（BATTLE は対象外） | load:691-778,1858 |
 | `#NOBGA` | BGA を読まない | 無い | BMjoyに無い（実スキンでの使用は 0） | H history.txt:840 / load:1716 |
 | `#TEXTMERGIN` | readme の余白（既定 10,10） | 無い | BMjoyに無い | load:1736 |
@@ -588,9 +588,9 @@
 |---|---|---|---|---|
 | #IMAGE の動画 | 拡張子の末尾 3 文字が mpg/avi/wma/ogv なら動画。シーン開始から無音でループ | 空の画像にする | BMjoyに無い（同梱スキンでの使用は 0） | load:974-978,1849-1855 / H history.txt:729 / ls:300 |
 | `*` ワイルドカード | 最後の段の `*` は読むたびにランダムな 1 ファイル | 同じ | 同じ | fu:874-879 / ls:627-637 |
-| 途中の段の `*` | #CUSTOMFILE のフォルダ置き換えでだけ解決 | 同じ。ただしフォルダ型で RANDOM を選ぶとファイルしか探さず失敗 | 違う（例 `WMIX_Result_HD` の `FRAME\*\Shutter.png`） | ls:631 |
+| 途中の段の `*` | #CUSTOMFILE のフォルダ置き換えでだけ解決 | 同じ。RANDOM はパターンが `*` で終わるか途中の段に `*` があればフォルダから、それ以外はファイルから選ぶ | 直した（例 `WMIX_Result_HD` の `FRAME\*\Shutter.png`） | fu:829-866 / ls `custom_file_candidates` |
 | CUSTOMFILE の置き換え | パスの先頭がパターンと一致したら `*` を選んだ名前に（RANDOM/ERROR/空は置き換えない）。#IMAGE・#LR2FONT・#INCLUDE が対象 | 同じ（比較は大文字小文字を区別しない [?]） | 同じ | load:980-985,1690,1751 / ls:223-233 |
-| 保存先 | `LR2files/SkinCustomize/<スキンのパス文字列の md5（小文字16進）>.xml`（shift_jis）。`<skinconfig><config_N>` に op 番号（N=0..39）、`<customfile><filename_N>`、さらに shift/rate/judge/size/dark/note_1p/note_2p | config.txt に `skin_custom <絶対パス> = 選択肢の番号,…` | 意図した違い（形式）。ただし LR2 の xml の取り込みと調整値は BMjoyに無い。番号で持つのでファイルの増減で選択がずれる（2.3 参照） | cfgsv:746-800 / load:1868-1891 / config.cpp:78-84,147-148, app.cpp:154-157 |
+| 保存先 | `LR2files/SkinCustomize/<スキンのパス文字列の md5（小文字16進）>.xml`（shift_jis）。`<skinconfig><config_N>` に op 番号（N=0..39）、`<customfile><filename_N>`、さらに shift/rate/judge/size/dark/note_1p/note_2p | config.txt に `skin_custom <絶対パス> = 選択肢の番号,…` | 意図した違い（形式）。LR2 の xml は取り込める（#CUSTOMFILE は名前で）。調整値（shift/rate など）は BMjoyに無い | cfgsv:746-800 / load:1868-1891 / config.cpp:78-84,147-148, app.cpp:154-157 |
 
 ## 6. BMjoy に無いもの（優先度の目安）
 

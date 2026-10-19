@@ -50,22 +50,21 @@ int import_lr2_skin_custom(const std::string& lr2_dir, const std::string& skin_r
                 values[std::stoi((*it)[1].str())] = std::stoll((*it)[2].str());
             for (auto it = std::sregex_iterator(xml.begin(), xml.end(), file_re); it != std::sregex_iterator(); ++it)
                 files[std::stoi((*it)[1].str())] = (*it)[2].str();
-            // 項目の番号は #CUSTOMOPTION と #CUSTOMFILE で共通。選択肢に無い値は既定のまま
-            std::vector<int> sel;
-            for (size_t i = 0; i < e.header.customs.size(); ++i) {
-                const SkinCustomItem& c = e.header.customs[i];
-                int v = c.selected;
+            // 項目の番号は #CUSTOMOPTION と #CUSTOMFILE で共通。#CUSTOMOPTION は選択肢の番号、#CUSTOMFILE は名前で残す。
+            // 選択肢に無い値は既定のまま
+            SkinHeader h = e.header;
+            for (size_t i = 0; i < h.customs.size(); ++i) {
+                SkinCustomItem& c = h.customs[i];
                 if (!c.is_file) {
                     auto it = values.find(static_cast<int>(i));
                     if (it != values.end() && it->second >= c.op_start && it->second < c.op_start + static_cast<long long>(c.labels.size()))
-                        v = static_cast<int>(it->second - c.op_start);
+                        c.selected = static_cast<int>(it->second - c.op_start);
                 } else if (auto it = files.find(static_cast<int>(i)); it != files.end()) {
                     for (size_t j = 0; j < c.labels.size(); ++j)
-                        if (lower(c.labels[j]) == lower(it->second)) v = static_cast<int>(j);
+                        if (lower(c.labels[j]) == lower(it->second)) c.selected = static_cast<int>(j);
                 }
-                sel.push_back(v);
             }
-            cfg.skin_custom[e.path] = sel;
+            cfg.skin_custom[e.path] = skin_custom_choices(h);
             count++;
         }
     return count;

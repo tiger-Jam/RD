@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "app/skin_catalog.h"
 #include "audio/system_sound.h"
 #include "render/frame_hooks.h"
 #include <filesystem>
@@ -166,14 +167,13 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
     std::string skin_path = configured.empty() ? resolve_lr2_path(app.lr2_root, default_rel, false) : configured;
     SkinHeader header;
     if (app.lr2_root.empty() || skin_path.empty() || !read_skin_header(app.lr2_root, skin_path, header)) return nullptr;
-    if (auto it = app.cfg.skin_custom.find(skin_path); it != app.cfg.skin_custom.end())
-        for (size_t i = 0; i < it->second.size() && i < header.customs.size(); ++i)
-            if (it->second[i] >= 0 && it->second[i] < static_cast<int>(header.customs[i].labels.size()))
-                header.customs[i].selected = it->second[i];
+    apply_skin_custom(app.cfg, skin_path, header);
     std::printf("スキン: %s（%s）\n", header.title.c_str(), skin_path.c_str());
     for (size_t i = 0; i < header.customs.size(); ++i) {
         const SkinCustomItem& c = header.customs[i];
-        std::string sel = c.selected < static_cast<int>(c.labels.size()) ? c.labels[c.selected] : "?";
+        std::string sel = c.selected >= 0 && c.selected < static_cast<int>(c.labels.size()) ? c.labels[c.selected]
+                          : c.is_file                                                        ? "（既定）" + c.default_value
+                                                                                             : "?";
         std::printf("  [%zu] %s = %s\n", i, c.title.c_str(), sel.c_str());
     }
     auto skin = std::make_unique<Lr2Skin>();
