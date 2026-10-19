@@ -42,6 +42,9 @@ target_link_libraries(bmj_third_party PUBLIC Threads::Threads)
 add_library(bmj_core STATIC
     src/chart/chart.cpp
     src/chart/bms_parser.cpp
+    src/chart/osu_parser.cpp
+    src/chart/bmson_parser.cpp
+    src/chart/chart_loader.cpp
     src/game/judge.cpp
     src/game/lane_option.cpp
     src/game/gauge.cpp
@@ -111,7 +114,7 @@ if(WIN32)
 endif()
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
-    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp src/input/input.cpp src/input/keyconfig.cpp)
+    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp src/input/input.cpp src/input/keyconfig.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 if(WIN32)

@@ -19,6 +19,11 @@ JudgeWindows JudgeWindows::for_rank(int rank) {
 
 JudgeEngine::JudgeEngine(const Chart& chart, const JudgeConfig& cfg)
     : chart_(chart), cfg_(cfg), win_(JudgeWindows::for_rank(chart.judge_rank)), gauge_type_(cfg.gauge_type) {
+    // 判定幅の倍率（bmson の judge_rank）。空POOR の幅はそのまま
+    if (chart.judge_scale != 1.0 && chart.judge_scale > 0) {
+        auto sc = [&](int& w) { w = std::max(1, static_cast<int>(std::lround(w * chart.judge_scale))); };
+        sc(win_.pgreat), sc(win_.great), sc(win_.good), sc(win_.bad);
+    }
     done_.assign(chart.notes.size(), false);
     active_.assign(chart.notes.size(), 0);
     head_fast_.assign(chart.notes.size(), false);

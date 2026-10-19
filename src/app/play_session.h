@@ -38,6 +38,8 @@ enum class PlayExit { Back, Quit };
 
 // 譜面のキー音のファイル名を、実在するファイルに解決する（見つからないものは missing に入れる）
 std::vector<std::string> resolve_chart_sounds(const Chart& chart, std::vector<std::string>& missing);
+// キー音の切り出しの範囲（bmson の継続ノーツ）。SoundBank::load に渡す
+std::vector<std::pair<int64_t, int64_t>> sound_ranges(const Chart& chart);
 
 // 譜面を1つ遊ぶ。リザルトで F5 を押すと同じ譜面をもう一度遊ぶ
 PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt);

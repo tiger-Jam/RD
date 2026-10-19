@@ -1,5 +1,8 @@
 #include "audio/sound_bank.h"
 
+#include <algorithm>
+#include <map>
+
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -114,27 +117,54 @@ bool decode_sound_file(const std::string& path, uint32_t out_rate, Sample& out, 
 }
 
 void SoundBank::load(const std::vector<std::string>& paths, uint32_t out_rate, int threads,
-                     std::vector<std::string>* errors, std::atomic<int>* done) {
+                     std::vector<std::string>* errors, std::atomic<int>* done,
+                     const std::vector<std::pair<int64_t, int64_t>>* ranges) {
     samples_.assign(paths.size(), Sample{});
+    // 同じファイルは 1 回だけデコードする
+    std::map<std::string, size_t> first_of;
+    std::vector<size_t> unique;
+    for (size_t i = 0; i < paths.size(); ++i)
+        if (!paths[i].empty() && first_of.try_emplace(paths[i], unique.size()).second) unique.push_back(i);
+    std::vector<Sample> decoded(unique.size());
     std::atomic<size_t> next{0};
     std::mutex err_mu;
     auto worker = [&] {
         for (;;) {
-            size_t i = next.fetch_add(1);
-            if (i >= paths.size()) return;
-            if (paths[i].empty()) continue;
+            size_t k = next.fetch_add(1);
+            if (k >= unique.size()) return;
             std::string err;
-            if (!decode_sound_file(paths[i], out_rate, samples_[i], err) && errors) {
+            if (!decode_sound_file(paths[unique[k]], out_rate, decoded[k], err) && errors) {
                 std::lock_guard<std::mutex> lock(err_mu);
                 errors->push_back(err);
             }
-            if (done) done->fetch_add(1);
         }
     };
     if (threads < 1) threads = 1;
     std::vector<std::thread> pool;
     for (int t = 0; t < threads; ++t) pool.emplace_back(worker);
     for (auto& th : pool) th.join();
+    // 番号ごとに、ファイル全体か切り出した範囲を割り当てる
+    std::vector<int> uses(unique.size(), 0);
+    for (size_t i = 0; i < paths.size(); ++i)
+        if (!paths[i].empty()) uses[first_of[paths[i]]]++;
+    for (size_t i = 0; i < paths.size(); ++i) {
+        if (paths[i].empty()) continue;
+        size_t k = first_of[paths[i]];
+        Sample& src = decoded[k];
+        int64_t start = 0, end = -1;
+        if (ranges && i < ranges->size()) start = (*ranges)[i].first, end = (*ranges)[i].second;
+        if (start <= 0 && end < 0) {
+            // ファイル全体：最後の 1 つは移し、ほかは写す
+            if (--uses[k] == 0) samples_[i] = std::move(src);
+            else samples_[i] = src;
+        } else {
+            --uses[k];
+            int64_t f0 = std::clamp<int64_t>(start * out_rate / 1000000, 0, src.frames());
+            int64_t f1 = end < 0 ? src.frames() : std::clamp<int64_t>(end * out_rate / 1000000, f0, src.frames());
+            samples_[i].pcm.assign(src.pcm.begin() + f0 * 2, src.pcm.begin() + f1 * 2);
+        }
+        if (done) done->fetch_add(1);
+    }
 }
 
 }  // namespace bmj

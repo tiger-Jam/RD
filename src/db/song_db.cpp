@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "chart/bms_parser.h"
+#include "chart/chart_loader.h"
 #include "sqlite3.h"
 #include "util/hash.h"
 #include "util/text.h"
@@ -52,7 +53,7 @@ CREATE TABLE IF NOT EXISTS player(
 
 bool is_chart_file(const fs::path& p) {
     std::string e = to_upper_ascii(p.extension().string());
-    return e == ".BMS" || e == ".BME" || e == ".BML";
+    return e == ".BMS" || e == ".BME" || e == ".BML" || e == ".OSU" || e == ".BMSON";
 }
 
 int64_t mtime_of(const fs::directory_entry& e) {
@@ -133,7 +134,7 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     BmsParseOptions opt;
     opt.random_seed = 1;
-    BmsParseResult res = parse_bms_text(to_utf8_auto(bytes), opt);
+    BmsParseResult res = parse_chart_bytes(path, bytes, opt);
     if (!res.ok) return false;
     const Chart& c = res.chart;
     r.path = path;

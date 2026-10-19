@@ -17,6 +17,7 @@
 #include "audio/sound_bank.h"
 #include "audio/system_sound.h"
 #include "chart/bms_parser.h"
+#include "chart/chart_loader.h"
 #include "game/ghost.h"
 #include "game/graph.h"
 #include "game/hispeed.h"
@@ -36,6 +37,12 @@ namespace {
 
 // キー音のファイル名を解決する（LR2: FindAltSound。書かれた名前→拡張子をogg/wavに替える→1つ上のフォルダ）
 }  // namespace
+
+std::vector<std::pair<int64_t, int64_t>> sound_ranges(const Chart& chart) {
+    std::vector<std::pair<int64_t, int64_t>> r;
+    for (const SoundSlice& s : chart.wav_slice) r.push_back({s.start_us, s.end_us});
+    return r;
+}
 
 std::vector<std::string> resolve_chart_sounds(const Chart& chart, std::vector<std::string>& missing) {
     DirIndex dir(chart.base_dir);
@@ -158,7 +165,7 @@ double hs_fix_multiplier(const Chart& chart, int hs_fix) {
 PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     BmsParseOptions popt;
     popt.random_seed = opt.seed ? opt.seed : static_cast<uint32_t>(SDL_GetTicksNS() % 0x7fff);
-    BmsParseResult parsed = parse_bms_file(chart_path, popt);
+    BmsParseResult parsed = parse_chart_file(chart_path, popt);
     if (!parsed.ok) {
         std::fprintf(stderr, "読み込めない: %s\n", parsed.error.c_str());
         return PlayExit::Back;
@@ -239,6 +246,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     // キー音はワーカーで読み込む。読み込み中もスキンの読み込み画面を動かす
     std::vector<std::string> missing;
     std::vector<std::string> paths = resolve_chart_sounds(chart, missing);
+    std::vector<std::pair<int64_t, int64_t>> ranges = sound_ranges(chart);
     for (const auto& m : missing) std::printf("キー音が見つからない: %s\n", m.c_str());
     int total_sounds = static_cast<int>(std::count_if(paths.begin(), paths.end(), [](auto& p) { return !p.empty(); }));
     // BGAの画像と動画（動画は FFmpeg が読み込めたときだけ出す）
@@ -264,7 +272,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     std::atomic<int> load_done{0};
     std::thread loader([&] {
         int threads = std::max(2u, std::thread::hardware_concurrency() / 2) + 1;
-        bank.load(paths, mixer.sample_rate(), threads, &load_errors, &load_done);
+        bank.load(paths, mixer.sample_rate(), threads, &load_errors, &load_done, &ranges);
         // BGAは黒を透過色にする（LR2: bmsload:731 SetTransColor(0,0,0)）
         const uint8_t black[3] = {0, 0, 0};
         for (size_t i = 0; i < bga_paths.size(); ++i) {

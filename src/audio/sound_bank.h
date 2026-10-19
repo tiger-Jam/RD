@@ -18,10 +18,12 @@ bool decode_sound_file(const std::string& path, uint32_t out_rate, Sample& out, 
 
 class SoundBank {
 public:
-    // paths[id] が空なら、そのIDは無音。threads 本のワーカーで並列にデコードする
+    // paths[id] が空なら、そのIDは無音。threads 本のワーカーで並列にデコードする（同じファイルは 1 回だけ）。
+    // ranges[id] があれば、その範囲（マイクロ秒。終わりが負ならファイルの終わりまで）だけを切り出す（bmson の継続ノーツ）。
     // done には読み終えた数を数える（読み込み画面の進み具合に使う）
     void load(const std::vector<std::string>& paths, uint32_t out_rate, int threads,
-              std::vector<std::string>* errors, std::atomic<int>* done = nullptr);
+              std::vector<std::string>* errors, std::atomic<int>* done = nullptr,
+              const std::vector<std::pair<int64_t, int64_t>>* ranges = nullptr);
     const std::vector<Sample>& samples() const { return samples_; }
 
 private:

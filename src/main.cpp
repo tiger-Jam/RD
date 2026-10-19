@@ -32,6 +32,7 @@
 #include "app/play_session.h"
 #include "app/select_scene.h"
 #include "chart/bms_parser.h"
+#include "chart/chart_loader.h"
 #include "db/difficulty_table.h"
 #include "db/song_db.h"
 #include "game/judge.h"
@@ -358,7 +359,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (opt.info || opt.simulate) {
-        BmsParseResult parsed = parse_bms_file(opt.chart_path, {opt.play.seed ? opt.play.seed : 1});
+        BmsParseResult parsed = parse_chart_file(opt.chart_path, {opt.play.seed ? opt.play.seed : 1});
         if (!parsed.ok) {
             std::fprintf(stderr, "読み込めない: %s\n", parsed.error.c_str());
             return 1;

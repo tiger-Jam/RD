@@ -47,6 +47,11 @@ struct ScrollSeg {
     bool stop = false;
 };
 
+// 音の切り出し（bmson の継続ノーツ）。ファイルの start_us から end_us まで（end_us が負ならファイルの終わりまで）
+struct SoundSlice {
+    int64_t start_us = 0, end_us = -1;
+};
+
 struct BarLine {
     int64_t time_us = 0;
     double pos = 0.0;
@@ -70,6 +75,7 @@ struct Chart {
     std::vector<ScrollSeg> scroll;
     std::vector<BarLine> bars;
     std::vector<std::string> wav;  // ID→ファイル名（譜面フォルダからの相対）
+    std::vector<SoundSlice> wav_slice;  // ID→切り出し（空ならどれもファイル全体）
     std::vector<std::string> bmp;
     std::string base_dir;
     LnHint ln_hint = LnHint::None;
@@ -78,6 +84,7 @@ struct Chart {
     double initial_bpm = 130.0;
     double main_bpm = 130.0;
     int judge_rank = 2;  // LR2の#RANK。0=VERY HARD, 1=HARD, 2=NORMAL, 3=EASY
+    double judge_scale = 1.0;  // 判定幅の倍率（bmson の judge_rank。100% = 1.0）
     int64_t end_us = 0;  // 最後のイベントの時刻
 
     // 時刻からスクロール位置を求める（描画用）
@@ -85,6 +92,9 @@ struct Chart {
     double bpm_at(int64_t time_us) const;
     // 判定対象のノーツ数（LNモードLN：LN1本＝1）
     int judgeable_notes() const;
+    // BMS 以外のインポーター用の仕上げ。scroll に time_us・bpm・scroll・stop を入れて時刻順に並べてから呼ぶ。
+    // 区間の速さと位置を決め、ノーツと小節線の位置を付け、主 BPM・TOTAL（未定義なら LR2 の既定式）・曲の終わりを決める
+    void finish_import();
     // 一定速度にする（HS-FIX の CONSTANT）。BPM とスクロール速度の変化を無視し、BPM 150 の速さで流す。停止では止まる。
     // ノーツと小節線の位置も付け直す
     void make_constant_speed();

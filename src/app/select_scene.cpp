@@ -18,6 +18,7 @@
 #include "app/play_session.h"
 #include "audio/sound_bank.h"
 #include "chart/bms_parser.h"
+#include "chart/chart_loader.h"
 #include "app/select_context.h"
 #include "app/decide_scene.h"
 #include "app/skin_select_scene.h"
@@ -1180,14 +1181,16 @@ void run_select(App& app) {
                 preview_load = std::async(std::launch::async, [want, rate]() -> std::shared_ptr<Preview> {
                     BmsParseOptions popt;
                     popt.random_seed = 1;
-                    BmsParseResult parsed = parse_bms_file(want, popt);
+                    BmsParseResult parsed = parse_chart_file(want, popt);
                     if (!parsed.ok) return nullptr;
                     auto p = std::make_shared<Preview>();
                     p->path = want;
                     p->chart = std::move(parsed.chart);
                     std::vector<std::string> missing;
                     std::vector<std::string> paths = resolve_chart_sounds(p->chart, missing);
-                    p->bank.load(paths, rate, static_cast<int>(std::max(2u, std::thread::hardware_concurrency() / 2)), nullptr);
+                    auto ranges = sound_ranges(p->chart);
+                    p->bank.load(paths, rate, static_cast<int>(std::max(2u, std::thread::hardware_concurrency() / 2)), nullptr,
+                                 nullptr, &ranges);
                     return p;
                 });
             }
