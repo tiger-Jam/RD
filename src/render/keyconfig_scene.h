@@ -15,7 +15,7 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
 
 class TextCache;
 // 「1鍵を押してください」…「皿を回してください」と順に聞いて割り当てる（選曲画面から呼ぶ）。
-// 押した入力がコントローラーならコントローラーの割り当てだけを、キーボードならキーボードの割り当てだけを入れ替える。
+// 押した入力と同じ種類（キーボード／パッド／MIDI）の割り当てだけを入れ替える。
 // 最後まで行ったら path に保存して true、途中でやめたら何も変えずに false
 bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg, const std::string& path);
 

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <initializer_list>
 #include <sstream>
 
 #include "util/text.h"
@@ -28,51 +29,98 @@ const char* hat_name(int dir) {
     }
 }
 
+// 「joy2:」の機器の番号を読む。番号が無ければ 0（どのパッドでもよい）
+bool split_joy(std::string_view s, int& device, std::string_view& rest) {
+    if (s.rfind("joy", 0) != 0) return false;
+    size_t colon = s.find(':');
+    if (colon == std::string_view::npos) return false;
+    std::string_view num = s.substr(3, colon - 3);
+    device = 0;
+    for (char c : num) {
+        if (c < '0' || c > '9') return false;
+        device = device * 10 + (c - '0');
+        if (device > 99) return false;
+    }
+    if (!num.empty() && device == 0) return false;  // joy0: は使わない
+    rest = s.substr(colon + 1);
+    return true;
+}
+
+}  // namespace
+
 bool parse_binding(std::string_view s, Binding& b) {
     s = trim(s);
-    auto starts = [&](const char* p) { return s.rfind(p, 0) == 0; };
-    if (starts("key:")) {
+    auto starts = [&](std::string_view t, const char* p) { return t.rfind(p, 0) == 0; };
+    if (starts(s, "key:")) {
         std::string name(trim(s.substr(4)));
         SDL_Scancode sc = SDL_GetScancodeFromName(name.c_str());
         if (sc == SDL_SCANCODE_UNKNOWN) return false;
         b = {Binding::Type::Key, sc, 0};
         return true;
     }
-    if (starts("joy:button ")) {
-        b = {Binding::Type::JoyButton, std::atoi(std::string(s.substr(11)).c_str()), 0};
+    if (starts(s, "midi:")) {
+        std::string_view r = trim(s.substr(5));
+        if (starts(r, "note ")) {
+            int n = std::atoi(std::string(trim(r.substr(5))).c_str());
+            if (n < 0 || n > 127) return false;
+            b = {Binding::Type::Midi, n, 0};
+            return true;
+        }
+        if (r == "bend -" || r == "bend +") {
+            b = {Binding::Type::Midi, r.back() == '-' ? kMidiBendMinus : kMidiBendPlus, 0};
+            return true;
+        }
+        if (r == "pedal") {
+            b = {Binding::Type::Midi, kMidiPedal, 0};
+            return true;
+        }
+        return false;
+    }
+    int device = 0;
+    std::string_view r;
+    if (!split_joy(s, device, r)) return false;
+    if (starts(r, "button ")) {
+        b = {Binding::Type::JoyButton, std::atoi(std::string(r.substr(7)).c_str()), 0, device};
         return true;
     }
-    if (starts("joy:axis ")) {
-        std::string v(trim(s.substr(9)));
+    if (starts(r, "axis ")) {
+        std::string v(trim(r.substr(5)));
         if (v.empty()) return false;
         int dir = v.back() == '-' ? -1 : 1;
-        b = {Binding::Type::JoyAxis, std::atoi(v.c_str()), dir};
+        b = {Binding::Type::JoyAxis, std::atoi(v.c_str()), dir, device};
         return true;
     }
-    if (starts("joy:hat ")) {
-        std::istringstream in{std::string(s.substr(8))};
+    if (starts(r, "hat ")) {
+        std::istringstream in{std::string(r.substr(4))};
         int idx;
         std::string d;
         in >> idx >> d;
         int dir = d == "up" ? SDL_HAT_UP : d == "down" ? SDL_HAT_DOWN : d == "left" ? SDL_HAT_LEFT : d == "right" ? SDL_HAT_RIGHT : 0;
         if (!dir) return false;
-        b = {Binding::Type::JoyHat, idx, dir};
+        b = {Binding::Type::JoyHat, idx, dir, device};
         return true;
     }
     return false;
 }
 
-}  // namespace
-
 const char* button_name(int button) { return button >= 0 && button < kButtonCount ? kNames[button] : "?"; }
 
 std::string describe(const Binding& b) {
     char buf[96];
+    // 機器を決めたパッドは joy2: のように番号を付ける（番号の無い joy: はどのパッドでもよい）
+    char joy[16] = "joy";
+    if (b.device > 0) std::snprintf(joy, sizeof(joy), "joy%d", b.device);
     switch (b.type) {
     case Binding::Type::Key: std::snprintf(buf, sizeof(buf), "key:%s", SDL_GetScancodeName(static_cast<SDL_Scancode>(b.index))); break;
-    case Binding::Type::JoyButton: std::snprintf(buf, sizeof(buf), "joy:button %d", b.index); break;
-    case Binding::Type::JoyAxis: std::snprintf(buf, sizeof(buf), "joy:axis %d%c", b.index, b.dir < 0 ? '-' : '+'); break;
-    case Binding::Type::JoyHat: std::snprintf(buf, sizeof(buf), "joy:hat %d %s", b.index, hat_name(b.dir)); break;
+    case Binding::Type::JoyButton: std::snprintf(buf, sizeof(buf), "%s:button %d", joy, b.index); break;
+    case Binding::Type::JoyAxis: std::snprintf(buf, sizeof(buf), "%s:axis %d%c", joy, b.index, b.dir < 0 ? '-' : '+'); break;
+    case Binding::Type::JoyHat: std::snprintf(buf, sizeof(buf), "%s:hat %d %s", joy, b.index, hat_name(b.dir)); break;
+    case Binding::Type::Midi:
+        if (b.index == kMidiBendMinus) std::snprintf(buf, sizeof(buf), "midi:bend -");
+        else if (b.index == kMidiBendPlus) std::snprintf(buf, sizeof(buf), "midi:bend +");
+        else if (b.index == kMidiPedal) std::snprintf(buf, sizeof(buf), "midi:pedal");
+        else std::snprintf(buf, sizeof(buf), "midi:note %d", b.index);
+        break;
     }
     return buf;
 }
@@ -103,6 +151,8 @@ void clear_bindings(KeyConfig& cfg) {
 
 std::string binding_label(const Binding& b) {
     char buf[64];
+    char joy[16] = "JOY";
+    if (b.device > 0) std::snprintf(joy, sizeof(joy), "JOY%d", b.device);
     switch (b.type) {
     case Binding::Type::Key: {
         std::string s = SDL_GetScancodeName(static_cast<SDL_Scancode>(b.index));
@@ -110,17 +160,27 @@ std::string binding_label(const Binding& b) {
         for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         return s;
     }
-    case Binding::Type::JoyButton: std::snprintf(buf, sizeof(buf), "JOY:BUTTON%d", b.index + 1); break;
+    case Binding::Type::JoyButton: std::snprintf(buf, sizeof(buf), "%s:BUTTON%d", joy, b.index + 1); break;
     case Binding::Type::JoyAxis:
         // 軸 0 は左右、軸 1 は上下（LR2 の方向の名前に合わせる）
-        if (b.index == 0) std::snprintf(buf, sizeof(buf), "JOY:%s", b.dir < 0 ? "LEFT" : "RIGHT");
-        else if (b.index == 1) std::snprintf(buf, sizeof(buf), "JOY:%s", b.dir < 0 ? "UP" : "DOWN");
-        else std::snprintf(buf, sizeof(buf), "JOY:AXIS%d%c", b.index + 1, b.dir < 0 ? '-' : '+');
+        if (b.index == 0) std::snprintf(buf, sizeof(buf), "%s:%s", joy, b.dir < 0 ? "LEFT" : "RIGHT");
+        else if (b.index == 1) std::snprintf(buf, sizeof(buf), "%s:%s", joy, b.dir < 0 ? "UP" : "DOWN");
+        else std::snprintf(buf, sizeof(buf), "%s:AXIS%d%c", joy, b.index + 1, b.dir < 0 ? '-' : '+');
         break;
     case Binding::Type::JoyHat: {
         std::string d = hat_name(b.dir);
         for (char& c : d) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        std::snprintf(buf, sizeof(buf), "JOY:HAT%d %s", b.index + 1, d.c_str());
+        std::snprintf(buf, sizeof(buf), "%s:HAT%d %s", joy, b.index + 1, d.c_str());
+        break;
+    }
+    case Binding::Type::Midi: {
+        // ノートは音名とオクターブ（ノート番号 / 12。60 は C5）
+        static const char* const kNotes[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+        if (b.index == kMidiBendMinus) return "MIDI BEND:-";
+        if (b.index == kMidiBendPlus) return "MIDI BEND:+";
+        if (b.index == kMidiPedal) return "MIDI PEDAL";
+        if (b.index < 0 || b.index > 127) return "MIDI ?";
+        std::snprintf(buf, sizeof(buf), "MIDI NOTE:%s%d", kNotes[b.index % 12], b.index / 12);
         break;
     }
     }
@@ -150,6 +210,16 @@ KeyConfig KeyConfig::lr2_default() {
     c.buttons[kScratchB].push_back({Binding::Type::JoyAxis, 1, -1});
     pad(kStart, 9);
     pad(kSelect, 10);
+    // MIDI 鍵盤：鍵盤は 41〜47 と 53〜59、皿は 36・38・48・50 とピッチベンドの −（scratch_a）、
+    // 40・52 とベンドの +（scratch_b）、START = 39・51、SELECT = 37・49
+    auto midi = [&](int button, std::initializer_list<int> notes) {
+        for (int n : notes) c.buttons[button].push_back({Binding::Type::Midi, n, 0});
+    };
+    for (int i = 0; i < 7; ++i) midi(kKey1 + i, {41 + i, 53 + i});
+    midi(kScratchA, {36, 38, 48, 50, kMidiBendMinus});
+    midi(kScratchB, {40, 52, kMidiBendPlus});
+    midi(kStart, {39, 51});
+    midi(kSelect, {37, 49});
     return c;
 }
 
@@ -192,6 +262,8 @@ bool KeyConfig::save(const std::string& path) const {
     f << "# BMjoy キーコンフィグ（bmjoy --keyconfig で編集できる）\n";
     f << "# 書式: ボタン = 割り当て | 割り当て ...\n";
     f << "#   key:キー名 / joy:button 番号 / joy:axis 番号+ または 番号- / joy:hat 番号 up|down|left|right\n";
+    f << "#   joy2:button 番号 のように joy の後に機器の番号（1 から。つないだ順）を付けると、そのパッドだけに効く\n";
+    f << "#   midi:note ノート番号 / midi:bend - / midi:bend + / midi:pedal（MIDI はどの機器・チャンネルでも同じ）\n";
     for (int b = 0; b < kButtonCount; ++b) {
         f << kNames[b] << " =";
         for (size_t i = 0; i < buttons[b].size(); ++i) f << (i ? " | " : " ") << describe(buttons[b][i]);

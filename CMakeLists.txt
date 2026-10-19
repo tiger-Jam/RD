@@ -96,6 +96,7 @@ add_executable(BMjoybody WIN32
     src/input/input.cpp
     src/input/keyconfig.cpp
     src/input/win_rawhid.cpp
+    src/input/midi.cpp
     src/render/keyconfig_scene.cpp
     src/render/frame_hooks.cpp
     src/render/play_scene.cpp
@@ -123,13 +124,22 @@ if(WIN32)
 endif()
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
-    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp tests/test_dsp.cpp src/input/input.cpp src/input/keyconfig.cpp
+    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp tests/test_dsp.cpp src/input/input.cpp src/input/keyconfig.cpp src/input/midi.cpp
     src/app/config.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/keyconfig_editor.cpp src/audio/sound_bank.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 if(WIN32)
     target_sources(bmj_tests PRIVATE src/app/bmjoy.manifest)
 endif()
+
+# MIDI の入力（src/input/midi.cpp）。macOS は CoreMIDI、Windows は winmm
+foreach(t BMjoybody bmj_tests)
+    if(APPLE)
+        target_link_libraries(${t} PRIVATE "-framework CoreMIDI")
+    elseif(WIN32)
+        target_link_libraries(${t} PRIVATE winmm)
+    endif()
+endforeach()
 
 foreach(t bmj_core BMjoybody BMjoy bmj_tests)
     if(MSVC)
