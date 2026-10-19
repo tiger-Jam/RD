@@ -48,6 +48,8 @@ struct App {
     void toggle_fullscreen();
     // 設定の音量をミキサーに渡す（スライダーで変えたときも呼ぶ）
     void apply_volume() { mixer.set_volume(cfg.volume_on, cfg.vol_master, cfg.vol_key, cfg.vol_bgm); }
+    // 設定のイコライザ・ピッチ・エフェクタをミキサーに渡す（スライダーやボタンで変えたときも呼ぶ）
+    void apply_sound_fx() { mixer.set_sound_fx(cfg.sound_fx); }
 };
 
 }  // namespace bmj

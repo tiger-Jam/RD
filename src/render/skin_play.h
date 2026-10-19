@@ -6,6 +6,7 @@
 #include <string>
 
 #include "app/course.h"
+#include "audio/dsp.h"
 #include "chart/chart.h"
 #include "game/ghost.h"
 #include "game/judge.h"
@@ -55,6 +56,8 @@ struct PlayContext {
     int green_number = 0, visible_ms = 0, lift = 0;
     std::array<int, 5> diff_level{-1, -1, -1, -1, -1};  // 同じフォルダの難易度ごとのレベル（数値45〜49）
     int fps = 0;
+    // イコライザ・ピッチ・エフェクタの設定（スライダー 10〜16・20〜26、数値 50〜56・60〜66、ボタン 20〜29・32・33）。無ければ 0
+    const SoundFx* sound_fx = nullptr;
     int loaded = 0, load_total = 1;
     int judge_draw = 0;
     double last_miss_ms = -1e9;

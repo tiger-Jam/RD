@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "audio/dsp.h"
 #include "audio/sound_bank.h"
 
 struct ma_device;
@@ -82,6 +83,10 @@ public:
         fade_target_.store(target);
         fade_step_.store(ms > 0 ? 1.0f / (ms * 0.001f * static_cast<float>(rate_)) : 1.0f);
     }
+    // イコライザ・ピッチ・エフェクタ（LR2: ApplySoundFX）。メインスレッドからだけ呼ぶ。音声スレッドは次の周期で使う
+    void set_sound_fx(const SoundFx& fx);
+    // 今の再生の速さ（FREQ・SPEED。曲の時計の進む速さ）
+    double play_rate() const { return clock_rate_.load(std::memory_order_relaxed); }
     // くり返し鳴らしているシステム音（選曲 BGM）の音量を、ms かけて target にする（LR2: SetFadePreview）
     void fade_system_loop(float target, int ms) {
         sys_loop_target_.store(target);
@@ -102,19 +107,23 @@ public:
 private:
     static void callback(ma_device* dev, void* out, const void* in, unsigned int frames);
     void render(float* out, uint32_t frames);
+    // 1 区間（kChunk フレームまで）を鳴らす
+    void render_chunk(float* out, uint32_t n, bool running);
+    void apply_sound_fx(const SoundFx& fx);
     void push_command(int32_t cmd);
-    void start_voice(uint16_t sound, int64_t delay_frames, bool key);
+    // pos は始めの再生位置（負なら、その分だけ譜面の時刻で遅れて始まる）
+    void start_voice(uint16_t sound, double pos, bool key);
     void update_clock(uint64_t wall_ns);
 
     struct Voice {
         const Sample* sample = nullptr;
-        int64_t pos = 0;  // 再生位置（負なら、その分だけ遅れて始まる）
+        double pos = 0;  // 再生位置（フレーム。負なら、その分だけ遅れて始まる）
         uint16_t sound = 0;
         bool key = false;  // KEY 側の音量を使う
     };
     struct SysVoice {
         const Sample* sample = nullptr;
-        int64_t pos = 0;
+        double pos = 0;
         int id = 0;
         bool loop = false;
     };
@@ -152,7 +161,22 @@ private:
     std::atomic<size_t> queue_head_{0}, queue_tail_{0};
 
     std::atomic<bool> running_{false};
-    int64_t song_frame_ = 0;  // 次に書き出すフレームの譜面上の位置（音声スレッドだけが触る）
+    // 次に書き出すフレームの譜面上の位置（譜面の時刻のフレーム。FREQ・SPEED なら 1 フレームで play_rate_ 進む）。
+    // 音声スレッドだけが触る
+    double song_pos_ = 0;
+
+    // イコライザ・ピッチ・エフェクタ。設定はメインスレッドから 3 つの枠で受け渡す（ロックを使わない）
+    std::array<SoundFx, 3> fx_slots_{};
+    int fx_write_ = 0, fx_read_ = 1;    // それぞれメインスレッド・音声スレッドだけが触る
+    std::atomic<int> fx_mid_{2};        // 下位 2 ビットが受け渡し中の枠、4 が「新しい」の印
+    double play_rate_ = 1.0;            // 音声スレッドだけが触る
+    std::atomic<int64_t> shift_latency_us_{0};  // 音程だけを変えるときに増える遅れ
+    Equalizer eq_;
+    std::array<Effector, 3> effector_{};
+    PitchShifter shifter_;
+    static constexpr uint32_t kChunk = 512;
+    std::vector<float> key_bus_, bgm_bus_;  // KEY 側・BGM 側の音を混ぜる所（kChunk フレーム）
+    std::array<float, kChunk> fade_curve_{}, loop_curve_{};
 
     // 平滑化したクロック。base_wall_ns の時点で譜面の時刻が base_us だった、という組
     bool clock_valid_ = false;
@@ -161,6 +185,7 @@ private:
     std::atomic<uint64_t> clock_seq_{0};
     std::atomic<int64_t> base_us_{0};
     std::atomic<uint64_t> base_wall_ns_{0};
+    std::atomic<double> clock_rate_{1.0};
 };
 
 }  // namespace bmj

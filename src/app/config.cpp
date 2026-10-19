@@ -100,6 +100,20 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "vol_master") vol_master = std::clamp(iv, 0, 100);
         else if (key == "vol_key") vol_key = std::clamp(iv, 0, 100);
         else if (key == "vol_bgm") vol_bgm = std::clamp(iv, 0, 100);
+        else if (key == "eq_on") sound_fx.eq_on = iv != 0;
+        else if (key.size() == 4 && key.rfind("eq_", 0) == 0 && key[3] >= '0' && key[3] <= '6') sound_fx.eq[key[3] - '0'] = iv;
+        else if (key == "pitch_on") sound_fx.pitch_on = iv != 0;
+        else if (key == "pitch") sound_fx.pitch = iv;
+        else if (key == "pitch_type") sound_fx.pitch_type = iv;
+        else if (key.size() > 4 && key.rfind("fx", 0) == 0 && key[2] >= '0' && key[2] <= '2' && key[3] == '_') {
+            FxSlot& s = sound_fx.fx[key[2] - '0'];
+            std::string k = key.substr(4);
+            if (k == "on") s.on = iv != 0;
+            else if (k == "type") s.type = iv;
+            else if (k == "target") s.target = iv;
+            else if (k == "p1") s.p1 = iv;
+            else if (k == "p2") s.p2 = iv;
+        }
         else if (key == "select_difficulty") select_difficulty = std::clamp(iv, 0, 5);
         else if (key == "select_mode") select_mode = std::clamp(iv, 0, 7);
         else if (key == "select_sort") select_sort = std::clamp(iv, 0, 8);
@@ -137,6 +151,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key.rfind("skin_custom ", 0) == 0)
             skin_custom[std::string(trim(std::string_view(key).substr(12)))] = parse_skin_custom(val);
     }
+    sound_fx.clamp();
     return true;
 }
 
@@ -174,6 +189,20 @@ bool AppConfig::save(const std::string& path) const {
     f << "vol_master = " << vol_master << "  # 音量 MASTER 0〜100\n";
     f << "vol_key = " << vol_key << "  # 音量 KEY 0〜100\n";
     f << "vol_bgm = " << vol_bgm << "  # 音量 BGM 0〜100\n";
+    f << "eq_on = " << (sound_fx.eq_on ? 1 : 0) << "  # イコライザを使う 0/1\n";
+    for (int i = 0; i < 7; ++i)
+        f << "eq_" << i << " = " << sound_fx.eq[i] << "  # " << static_cast<int>(Equalizer::kFreq[i]) << " Hz（dB。-12〜12）\n";
+    f << "pitch_on = " << (sound_fx.pitch_on ? 1 : 0) << "  # ピッチを使う 0/1\n";
+    f << "pitch = " << sound_fx.pitch << "  # 半音 -12〜12\n";
+    f << "pitch_type = " << sound_fx.pitch_type << "  # 0=FREQ（音程と速さ） 1=PITCH（音程だけ） 2=SPEED（速さだけ）\n";
+    for (int i = 0; i < 3; ++i) {
+        const FxSlot& s = sound_fx.fx[i];
+        f << "fx" << i << "_on = " << (s.on ? 1 : 0) << "\n";
+        f << "fx" << i << "_type = " << s.type << "  # 0=OFF 1=REVERB 2=ECHO 3=LPF 4=HPF 5=FLANGER 6=CHORUS 7=DISTORTION\n";
+        f << "fx" << i << "_target = " << s.target << "  # 0=MASTER 1=KEY 2=BGM\n";
+        f << "fx" << i << "_p1 = " << s.p1 << "\n";
+        f << "fx" << i << "_p2 = " << s.p2 << "  # パラメータ 0〜100\n";
+    }
     f << "select_difficulty = " << select_difficulty << "  # 選曲の難易度の絞り込み 0=ALL 1〜5\n";
     f << "select_mode = " << select_mode << "  # 選曲の鍵盤数の絞り込み 0=ALL 1=7KEY 2=14KEY 3=9KEY 4=5KEY 5=10KEY 6=SINGLE 7=DOUBLE\n";
     f << "select_sort = " << select_sort << "  # 選曲のソート 0=OFF 1=TITLE 2=ARTIST 3=BPM 4=LENGTH 5=LEVEL 6=CLEAR 7=SCORE 8=MISSCOUNT\n";

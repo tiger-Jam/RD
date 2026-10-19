@@ -320,7 +320,7 @@
 | 項目 | LR2 | BMjoy | 判定 | 出典 |
 |---|---|---|---|---|
 | 音量（volumeflag / key / bgm / master） | 1 / 100 / 100 / 100 | 無し | BMjoyに無い | configsave:1019-1022 |
-| EQ / ピッチ / FX ×3 | 既定は全部 0 | 無し | BMjoyに無い | configsave:1023-1048 |
+| EQ / ピッチ / FX ×3 | 既定は全部 0 | `eq_on`・`eq_0`〜`eq_6`・`pitch_on`・`pitch`・`pitch_type`・`fx0_on`/`_type`/`_target`/`_p1`/`_p2`（〜`fx2_`）。既定は全部 0 | 直した | configsave:1023-1048 / config.h:75, config.cpp:103-115 |
 | skin.play_7 | "" | `play_skin` | 同じ | configsave:1085 / config.h:12 |
 | skin.play_5 / 14 / 10 / 9、play_*_b | "" | 無し | 意図した違い（7K+S 専用） | configsave:1086-1089,1097-1099 |
 | skin.select / decide / result / soundset | "" | `select_skin` / `decide_skin`（"none" で決定画面を出さない）/ `result_skin` / `sound_set` | 同じ（"none" は BMjoy の追加） | configsave:1090-1095 / config.h:13-17 |
@@ -355,7 +355,7 @@
 
 ## 4. 音声・画面・入力・スクリーンショット
 
-**この章でいちばん大きい点：BMjoy の自前ミキサーには音量・イコライザ・ピッチ・エフェクタが一切無い。** ゲイン（音量の倍率）の処理がどこにも無く、すべて足して -1〜1 に切り詰めているだけ（B src/audio/mixer.cpp:242-339）。
+~~この章でいちばん大きい点：BMjoy の自前ミキサーには音量・イコライザ・ピッチ・エフェクタが一切無い。~~ 音量（MASTER/KEY/BGM）、イコライザ、ピッチ、エフェクタ 3 つを足した（直した。4.3 参照）。
 
 ### 4.1 サウンドセット（.lr2ss）の読み込み
 
@@ -396,14 +396,16 @@
 
 | 項目 | LR2 | BMjoy | 判定 | 出典 |
 |---|---|---|---|---|
-| スライダー 10〜16 | イコライザ 7 バンド、±12 dB | 0 を返すだけ | BMjoyに無い | O LR2_skinobject.cpp:2610-2651 / B select_context.cpp:281-289, src/render/skin_play.cpp:324-334 |
+| スライダー 10〜16 | イコライザ 7 バンド、±12 dB | 同じ（表示。ドラッグは選曲画面の側） | 直した | O LR2_skinobject.cpp:2610-2651 / B select_context.cpp:322, src/render/skin_play.cpp:361 |
 | スライダー 17・18・19 | MASTER・KEY・BGM の音量、0〜100 | 無い | BMjoyに無い | O LR2_skinobject.cpp:2652-2669 |
-| スライダー 20〜25 | エフェクタ 3 つ × パラメータ 2 つ | 無い | BMjoyに無い | O LR2_skinobject.cpp:2670-2705 |
-| スライダー 26 | ピッチ ±12 半音 | 無い | BMjoyに無い | O LR2_skinobject.cpp:2706-2711 |
+| スライダー 20〜25 | エフェクタ 3 つ × パラメータ 2 つ、0〜100 | 同じ（表示） | 直した | O LR2_skinobject.cpp:2670-2705 / B select_context.cpp:323-327, skin_play.cpp:364-368 |
+| スライダー 26 | ピッチ ±12 半音 | 同じ（表示） | 直した | O LR2_skinobject.cpp:2706-2711 / B select_context.cpp:328, skin_play.cpp:369 |
+| 数値 50〜66・ボタン 20〜33 | 50〜56 EQ、57〜59 音量、60〜65 FX のパラメータ、66 ピッチ。ボタン 20〜22 FX の種類、23〜25 FX のオンオフ、26〜28 掛け先、29 EQ のオンオフ、30 EQ のプリセット（OpenLR2 でも未実装）、31 音量のオンオフ、32 ピッチのオンオフ、33 ピッチの方式 | 同じ（値。30 は 0 のまま。クリックは選曲画面の側） | 直した | O LR2_skinobject.cpp:1723-1755,3134-3285 / B select_context.cpp:197-206,284-291, skin_play.cpp:198-203,406-411 |
+| FX の種類を変えたときのパラメータ | LPF なら 100 / 0、それ以外は 0 / 0 に戻す | 同じ（`SoundFx::set_fx_type`） | 直した | O LR2_audio.cpp:221-230 / B src/audio/dsp.cpp:37 |
 | 音量の掛け方 | BGM 側 = BGM×MASTER×フェード、KEY 側 = KEY×MASTER×フェード | ゲインの処理が無い | BMjoyに無い | O En_audio.cpp:740-747 / B mixer.cpp:242-339 |
-| イコライザの中身 | 63 / 160 / 400 / 1k / 2.5k / 6.3k / 16k Hz のピーキング（Q=1.5）を全体に。既定はオフ | 無い | BMjoyに無い | O En_audio.cpp:833-882 / H help/4.html |
-| ピッチの方式 | FREQ（回転数）、PITCH（音程だけ）、SPEED（速さだけ）。FREQ と SPEED で 0 以外ならスコアを保存しない | 無い | BMjoyに無い | O En_audio.cpp:758-831 / H history.txt:912-915 |
-| エフェクタの種類と掛け先 | リバーブ・エコー・LPF・HPF・フランジャー・コーラス・ディストーション。掛け先は MASTER/KEY/BGM | 無い | BMjoyに無い | O En_audio.cpp:891-999 / H help/4.html |
+| イコライザの中身 | 63 / 160 / 400 / 1k / 2.5k / 6.3k / 16k Hz のピーキング（Q=1.5）を全体に。既定はオフ | 同じ（自前の 2 次 IIR。FMOD の EQ と特性は少し違う [?]） | 直した | O En_audio.cpp:833-882 / H help/4.html / B src/audio/dsp.cpp:59,112, mixer.cpp:385 |
+| ピッチの方式 | FREQ（回転数）、PITCH（音程だけ）、SPEED（速さだけ）。FREQ と SPEED で 0 以外ならスコアを保存しない（history）。OpenLR2 は**遅くしたときだけ**保存しない | FREQ は全部の音を読む速さを変え、曲の時計も同じ倍率で進む。PITCH・SPEED は全体の後ろで遅延線 2 本のクロスフェードで音程を変える（音は粗い。平均 20ms 遅れ、その分は曲の時計で差し引く）。保存しない判定は `AppConfig::pitch_changes_speed()`（0 以外）を用意しただけで、まだ使っていない | 直した（保存の判定はまだ。速くしたときに保存するかは history と OpenLR2 で食い違う [?]） | O En_audio.cpp:758-831, LR2_bmsload.cpp:2115-2124,3336, LR2_statplay.cpp:791 / H history.txt:912-915 / B dsp.cpp:25-35,317, mixer.cpp:178,328 |
+| エフェクタの種類と掛け先 | 0 OFF・1 リバーブ・2 エコー・3 LPF・4 HPF・5 フランジャー・6 コーラス・7 ディストーション。掛け先は MASTER/KEY/BGM。パラメータの換算（リバーブ 残響 p1×200ms・返り 10log10(p2/100) dB、エコー 遅れ p1×10ms・返り同じ、LPF 22000/1.06^(100-p1) Hz、HPF 22×1.06^p1 Hz、どちらも共振 p2×0.09+1、フランジャー 深さ p1/100・速さ 0.02×1.06^p2 Hz、コーラス 速さ p1/5 Hz・深さ p2、ディストーション 強さ p1/100） | 同じ種類・掛け先・換算。中身は自前（リバーブはくし形 8 本＋全域通過 4 本、エコーは返り 50%、フランジャー・コーラスは揺らした遅延線を半々に混ぜる）で、FMOD と同じ音ではない | 直した（音色は違う） | O En_audio.cpp:891-999 / H help/4.html / B dsp.cpp:166-315, mixer.cpp:377-384 |
 | MIDI のツマミへの割り当て | midi.xml の S01〜S39 → スライダー | 無い | BMjoyに無い | O LR2_audio.cpp:9-206, LR2_configsave.cpp:107-140, Config/midi_def.xml |
 | リプレイへの記録 | エフェクタの変化もリプレイに残す | 無い | BMjoyに無い | O LR2_skinobject.cpp:2611-2711 / H history.txt:885 |
 | コースのつなぎのピッチ | stagePitch で合わせる | 無い | BMjoyに無い | O En_audio.cpp:749-754, LR2_bmsload.cpp:2431 |

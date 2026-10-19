@@ -11,6 +11,9 @@
 #include <windows.h>
 #include <audioclient.h>
 #endif
+#if defined(__SSE__) || defined(_M_X64) || defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
 
 namespace bmj {
 
@@ -51,6 +54,12 @@ bool Mixer::open(uint32_t preferred_rate, uint32_t period_frames, bool exclusive
     uint64_t buffered = static_cast<uint64_t>(device_->playback.internalPeriodSizeInFrames) *
                         std::max<ma_uint32>(1, device_->playback.internalPeriods);
     latency_us_ = static_cast<int64_t>(buffered * 1000000ull / device_->playback.internalSampleRate);
+    // イコライザ・エフェクタの遅延線は、音声スレッドが動く前にここで確保する
+    key_bus_.assign(kChunk * 2, 0.0f);
+    bgm_bus_.assign(kChunk * 2, 0.0f);
+    for (Effector& e : effector_) e.prepare(rate_);
+    shifter_.prepare(rate_);
+    eq_.set(rate_, {});
     if (ma_device_start(device_.get()) != MA_SUCCESS) {
         ma_device_uninit(device_.get());
         device_.reset();
@@ -132,7 +141,7 @@ void Mixer::set_song(const std::vector<Sample>* samples, std::vector<ScheduledSo
 void Mixer::start(int64_t lead_in_frames) {
     // 音声スレッドは running_ が立つまで曲のボイスを読まないので、ここで初期化してよい
     for (Voice& v : voices_) v = Voice{};
-    song_frame_ = -lead_in_frames;
+    song_pos_ = static_cast<double>(-lead_in_frames);
     schedule_next_ = 0;
     clock_valid_ = false;
     clock_seq_.fetch_add(1);
@@ -155,22 +164,38 @@ void Mixer::push_command(int32_t cmd) {
 int64_t Mixer::song_time_us_at(uint64_t wall_ns) const {
     int64_t base;
     uint64_t wall;
+    double rate;
     uint64_t s0, s1;
     do {
         s0 = clock_seq_.load(std::memory_order_acquire);
         base = base_us_.load(std::memory_order_relaxed);
         wall = base_wall_ns_.load(std::memory_order_relaxed);
+        rate = clock_rate_.load(std::memory_order_relaxed);
         s1 = clock_seq_.load(std::memory_order_acquire);
     } while (s0 != s1 || (s0 & 1));
     int64_t dt_us = (static_cast<int64_t>(wall_ns) - static_cast<int64_t>(wall)) / 1000;
-    return base + dt_us - latency_us_;
+    // FREQ・SPEED なら譜面の時刻は実時間の rate 倍で進む。出力の遅れ（実時間）もその分だけ譜面の時刻ではのびる
+    return song_time_at(base, dt_us, latency_us_ + shift_latency_us_.load(std::memory_order_relaxed), rate);
 }
 
 void Mixer::callback(ma_device* dev, void* out, const void*, unsigned int frames) {
     static_cast<Mixer*>(dev->pUserData)->render(static_cast<float*>(out), frames);
 }
 
-void Mixer::start_voice(uint16_t sound, int64_t delay_frames, bool key) {
+void Mixer::set_sound_fx(const SoundFx& fx) {
+    fx_slots_[fx_write_] = fx;
+    fx_write_ = fx_mid_.exchange(fx_write_ | 4, std::memory_order_acq_rel) & 3;
+}
+
+void Mixer::apply_sound_fx(const SoundFx& fx) {
+    eq_.set(rate_, fx.eq_on ? fx.eq : std::array<int, 7>{});
+    for (int i = 0; i < 3; ++i) effector_[i].set(fx.fx[i]);
+    play_rate_ = fx.play_rate();
+    shifter_.set_ratio(fx.shift_ratio());
+    shift_latency_us_.store(static_cast<int64_t>(shifter_.latency_frames()) * 1000000 / rate_, std::memory_order_relaxed);
+}
+
+void Mixer::start_voice(uint16_t sound, double pos, bool key) {
     if (!samples_ || sound >= samples_->size()) return;
     const Sample& s = (*samples_)[sound];
     if (s.pcm.empty()) return;
@@ -193,7 +218,7 @@ void Mixer::start_voice(uint16_t sound, int64_t delay_frames, bool key) {
     }
     slot->sample = &s;
     slot->sound = sound;
-    slot->pos = -delay_frames;
+    slot->pos = pos;
     slot->key = key;
 }
 
@@ -220,13 +245,13 @@ void Mixer::run_system_command(int32_t cmd) {
 }
 
 void Mixer::update_clock(uint64_t wall_ns) {
-    int64_t raw_us = song_frame_ * 1000000 / rate_;
+    int64_t raw_us = static_cast<int64_t>(std::llround(song_pos_ * 1e6 / rate_));
     if (!clock_valid_) {
         est_us_ = raw_us;
         est_wall_ = wall_ns;
         clock_valid_ = true;
     } else {
-        int64_t predicted = est_us_ + static_cast<int64_t>(wall_ns - est_wall_) / 1000;
+        int64_t predicted = song_time_at(est_us_, static_cast<int64_t>(wall_ns - est_wall_) / 1000, 0, play_rate_);
         int64_t err = raw_us - predicted;
         // コールバックの揺れを均すため、ずれの1/16ずつ寄せる。大きくずれたら合わせ直す
         if (std::llabs(err) > 20000) predicted = raw_us;
@@ -237,12 +262,23 @@ void Mixer::update_clock(uint64_t wall_ns) {
     clock_seq_.fetch_add(1, std::memory_order_acq_rel);
     base_us_.store(est_us_, std::memory_order_relaxed);
     base_wall_ns_.store(est_wall_, std::memory_order_relaxed);
+    clock_rate_.store(play_rate_, std::memory_order_relaxed);
     clock_seq_.fetch_add(1, std::memory_order_acq_rel);
 }
 
 void Mixer::render(float* out, uint32_t frames) {
+#if defined(__SSE__) || defined(_M_X64) || defined(_M_IX86)
+    // 残響が消えていくときの非正規化数で重くならないように、0 に丸める
+    _mm_setcsr(_mm_getcsr() | 0x8040);
+#endif
     std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
     bool running = running_.load(std::memory_order_acquire);
+
+    // イコライザ・ピッチ・エフェクタの新しい設定
+    if (fx_mid_.load(std::memory_order_relaxed) & 4) {
+        fx_read_ = fx_mid_.exchange(fx_read_, std::memory_order_acq_rel) & 3;
+        apply_sound_fx(fx_slots_[fx_read_]);
+    }
 
     // メインスレッドからの命令（キー押下の音・システム音）
     size_t head = queue_head_.load(std::memory_order_relaxed);
@@ -267,7 +303,16 @@ void Mixer::render(float* out, uint32_t frames) {
     }
     queue_head_.store(head, std::memory_order_release);
 
-    // 測定用のクリック音
+    if (running) update_clock(SDL_GetTicksNS());
+    for (uint32_t off = 0; off < frames; off += kChunk)
+        render_chunk(out + static_cast<size_t>(off) * 2, std::min(kChunk, frames - off), running);
+    if (running) {
+        int active = 0;
+        for (const Voice& v : voices_) active += v.sample != nullptr;
+        active_voices_.store(active, std::memory_order_relaxed);
+    }
+
+    // 測定用のクリック音（効果は掛けない）
     if (test_click_pos_ >= 0) {
         int64_t len = test_click_.frames();
         for (uint32_t i = 0; i < frames && test_click_pos_ < len; ++i, ++test_click_pos_) {
@@ -277,80 +322,68 @@ void Mixer::render(float* out, uint32_t frames) {
         if (test_click_pos_ >= len) test_click_pos_ = -1;
     }
     rendered_frames_.fetch_add(frames, std::memory_order_relaxed);
-    // システム音。くり返し鳴らすもの（選曲 BGM）は、プレビュー中に音量を下げる
-    const float loop_target = sys_loop_target_.load(std::memory_order_relaxed);
-    const float loop_step = sys_loop_step_.load(std::memory_order_relaxed);
-    const float loop_gain0 = sys_loop_gain_;
-    auto loop_gain_at = [&](uint32_t i) {
-        float d = loop_step * static_cast<float>(i + 1);
-        return loop_gain0 < loop_target ? std::min(loop_target, loop_gain0 + d) : std::max(loop_target, loop_gain0 - d);
-    };
-    sys_loop_gain_ = frames ? loop_gain_at(frames - 1) : loop_gain0;
-    // 全体のフェード（リザルトを抜けるときなど）と、KEY 側・BGM 側の音量
+    for (uint32_t i = 0; i < frames * 2; ++i) out[i] = std::clamp(out[i], -1.0f, 1.0f);
+}
+
+void Mixer::render_chunk(float* out, uint32_t n, bool running) {
+    float* key = key_bus_.data();
+    float* bgm = bgm_bus_.data();
+    std::fill(key, key + n * 2, 0.0f);
+    std::fill(bgm, bgm + n * 2, 0.0f);
+    // 全体のフェード（リザルトを抜けるときなど）と、くり返し鳴らすシステム音（選曲 BGM）の音量。
+    // くり返す音はプレビュー中に下げる。どちらも 1 フレームずつ目標に寄せる
     const float fade_target = fade_target_.load(std::memory_order_relaxed);
     const float fade_step = fade_step_.load(std::memory_order_relaxed);
-    const float fade0 = fade_gain_;
-    auto fade_at = [&](uint32_t i) {
-        float d = fade_step * static_cast<float>(i + 1);
-        return fade0 < fade_target ? std::min(fade_target, fade0 + d) : std::max(fade_target, fade0 - d);
+    const float loop_target = sys_loop_target_.load(std::memory_order_relaxed);
+    const float loop_step = sys_loop_step_.load(std::memory_order_relaxed);
+    auto approach = [](float g, float target, float step) {
+        return g < target ? std::min(target, g + step) : std::max(target, g - step);
     };
-    fade_gain_ = frames ? fade_at(frames - 1) : fade0;
+    for (uint32_t i = 0; i < n; ++i) {
+        fade_gain_ = approach(fade_gain_, fade_target, fade_step);
+        sys_loop_gain_ = approach(sys_loop_gain_, loop_target, loop_step);
+        fade_curve_[i] = fade_gain_;
+        loop_curve_[i] = fade_gain_ * sys_loop_gain_;
+    }
+    // KEY 側・BGM 側の音量（MASTER×KEY / MASTER×BGM）。FREQ・SPEED なら play_rate_ 倍の速さで読む
     const float gk = gain_key_.load(std::memory_order_relaxed), gb = gain_bgm_.load(std::memory_order_relaxed);
     const uint32_t key_mask = sys_key_mask_.load(std::memory_order_relaxed);
+    const double step = play_rate_;
     for (SysVoice& v : sys_voices_) {
         if (!v.sample) continue;
-        const float* pcm = v.sample->pcm.data();
-        int64_t len = v.sample->frames();
-        const float side = v.id < 32 && (key_mask >> v.id & 1u) ? gk : gb;
-        for (uint32_t i = 0; i < frames; ++i) {
-            if (v.pos >= len) {
-                if (!v.loop) break;
-                v.pos = 0;
-            }
-            float g = (v.loop ? loop_gain_at(i) : 1.0f) * side * fade_at(i);
-            out[i * 2] += pcm[v.pos * 2] * g;
-            out[i * 2 + 1] += pcm[v.pos * 2 + 1] * g;
-            ++v.pos;
+        const bool key_side = v.id < 32 && (key_mask >> v.id & 1u);
+        if (!mix_resampled(v.sample->pcm.data(), v.sample->frames(), v.pos, step, v.loop,
+                           v.loop ? loop_curve_.data() : fade_curve_.data(), key_side ? gk : gb, key_side ? key : bgm, n))
+            v.sample = nullptr;
+    }
+
+    if (running) {
+        // この区間に入る予定の音（BGM・自動演奏）を、フレーム単位の位置で鳴らす
+        double end = song_pos_ + n * step;
+        while (schedule_next_ < schedule_.size() && static_cast<double>(schedule_[schedule_next_].frame) < end) {
+            const ScheduledSound& e = schedule_[schedule_next_++];
+            start_voice(e.sound, std::min(0.0, song_pos_ - static_cast<double>(e.frame)), e.key);
         }
-        if (!v.loop && v.pos >= len) v.sample = nullptr;
-    }
-    if (!running) {
-        for (uint32_t i = 0; i < frames * 2; ++i) out[i] = std::clamp(out[i], -1.0f, 1.0f);
-        return;
-    }
-    update_clock(SDL_GetTicksNS());
-
-    // この区間に入る予定の音（BGM・自動演奏）を、フレーム単位の位置で鳴らす
-    int64_t end = song_frame_ + frames;
-    while (schedule_next_ < schedule_.size() && schedule_[schedule_next_].frame < end) {
-        const ScheduledSound& e = schedule_[schedule_next_++];
-        int64_t delay = std::max<int64_t>(0, e.frame - song_frame_);
-        start_voice(e.sound, delay, e.key);
-    }
-
-    int active = 0;
-    for (Voice& v : voices_) {
-        if (!v.sample) continue;
-        const float* pcm = v.sample->pcm.data();
-        int64_t len = v.sample->frames();
-        int64_t i0 = 0;
-        if (v.pos < 0) i0 = std::min<int64_t>(frames, -v.pos);
-        const float side = v.key ? gk : gb;
-        for (int64_t i = i0; i < frames; ++i) {
-            int64_t p = v.pos + i;
-            if (p >= len) break;
-            float g = side * fade_at(static_cast<uint32_t>(i));
-            out[i * 2] += pcm[p * 2] * g;
-            out[i * 2 + 1] += pcm[p * 2 + 1] * g;
+        for (Voice& v : voices_) {
+            if (!v.sample) continue;
+            if (!mix_resampled(v.sample->pcm.data(), v.sample->frames(), v.pos, step, false, fade_curve_.data(),
+                               v.key ? gk : gb, v.key ? key : bgm, n))
+                v.sample = nullptr;
         }
-        v.pos += frames;
-        if (v.pos >= len) v.sample = nullptr;
-        else ++active;
+        song_pos_ = end;
     }
-    active_voices_.store(active, std::memory_order_relaxed);
 
-    for (uint32_t i = 0; i < frames * 2; ++i) out[i] = std::clamp(out[i], -1.0f, 1.0f);
-    song_frame_ = end;
+    // エフェクタ（KEY・BGM に掛けるもの）→ 足し合わせ → エフェクタ（MASTER）→ イコライザ → 音程
+    for (Effector& e : effector_) {
+        if (!e.active()) continue;
+        if (e.target() == kFxKey) e.process(key, n);
+        else if (e.target() == kFxBgm) e.process(bgm, n);
+    }
+    for (uint32_t i = 0; i < n * 2; ++i) out[i] += key[i] + bgm[i];
+    for (Effector& e : effector_)
+        if (e.active() && e.target() == kFxMaster) e.process(out, n);
+    eq_.process(out, n);
+    shifter_.process(out, n);
 }
 
 }  // namespace bmj
