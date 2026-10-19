@@ -45,6 +45,8 @@ struct SelectContext {
     const SkinCatalog* catalog = nullptr;  // スキンセレクト（文字列 50/51/100〜114、ボタン 170〜188、スライダー7）
     bool autoplay = false;
     bool windowed = true;
+    std::string custom_gauge_name;  // カスタムゲージを選んでいればその名前
+    int custom_gauge_frame = -1;    // そのときのゲージのボタンのコマ
     int favorite = 0;            // カーソルの譜面のお気に入り（ボタン 90。0 / 1 = FAVORITE / 2 = IGNORE）
     bool replay_exists = false;  // カーソルの譜面のリプレイがある（op 196 / 197）
     // レベルバーの最大値（LR2: levelbarflash_5 / _7）。5 鍵の譜面は 5 鍵の値

@@ -78,6 +78,8 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "skin_res") skin_res = val;
         else if (key == "song_dir") song_dirs.push_back(val);
         else if (key == "custom_folder_dir") custom_folder_dirs.push_back(val);
+        else if (key == "mod") enabled_mods.push_back(val);
+        else if (key == "custom_gauge") custom_gauge = val;
         else if (key == "table") tables.push_back(val);
         else if (key == "hi_speed") hi_speed = iv;
         else if (key == "judge_timing") judge_timing = iv;
@@ -185,6 +187,9 @@ bool AppConfig::save(const std::string& path) const {
     f << "skin_res = " << skin_res << "\n";
     for (const std::string& d : song_dirs) f << "song_dir = " << d << "\n";
     for (const std::string& d : custom_folder_dirs) f << "custom_folder_dir = " << d << "\n";
+    for (const std::string& m : enabled_mods) f << "mod = " << m << "\n";
+    f << "# カスタムゲージで遊ぶならその鍵（MOD の id/ゲージの id）\n";
+    f << "custom_gauge = " << custom_gauge << "\n";
     for (const std::string& t : tables) f << "table = " << t << "\n";
     f << "hi_speed = " << hi_speed << "\n";
     f << "judge_timing = " << judge_timing << "\n";
@@ -286,6 +291,25 @@ std::string replay_path(const std::string& sha256) {
 std::string input_log_path(const std::string& sha256, int64_t played_at) {
     char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
     std::string p = (dir ? std::string(dir) : std::string()) + "inputlog/" + sha256 + "/" + std::to_string(played_at) + ".bjr";
+    SDL_free(dir);
+    return p;
+}
+
+std::string official_mods_dir() {
+    const char* base = SDL_GetBasePath();
+    return std::string(base ? base : "") + "mods";
+}
+
+std::string user_mods_dir() {
+    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
+    std::string p = dir ? std::string(dir) + "mods" : "mods";
+    SDL_free(dir);
+    return p;
+}
+
+std::string mod_data_dir(const std::string& id) {
+    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
+    std::string p = (dir ? std::string(dir) : std::string()) + "moddata/" + id;
     SDL_free(dir);
     return p;
 }

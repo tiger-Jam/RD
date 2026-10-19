@@ -43,6 +43,11 @@ struct PlayGraph {
         for (int i = target_cursor; i < kPoints; ++i) target[i] = target_ex;
         cursor = best_cursor = target_cursor = kPoints;
     }
+    // カスタムゲージで遊んでいるとき、見せるゲージの列（slot）を遊んでいるゲージの値で上書きする。log・finish のすぐ後に呼ぶ
+    int overlay_cursor = 0;
+    void overlay(int slot, double v) {
+        for (; overlay_cursor < cursor; ++overlay_cursor) hp[slot][overlay_cursor] = static_cast<int>(v);
+    }
 };
 
 }  // namespace bmj

@@ -16,15 +16,44 @@ JudgeWindows JudgeWindows::for_rank(int rank) {
     }
     w.bad = 200;
     w.empty_poor = 1000;
+    w.pgreat_late = w.pgreat, w.great_late = w.great, w.good_late = w.good, w.bad_late = w.bad;
     return w;
+}
+
+int JudgeWindows::classify(int offset) const {
+    if (offset >= 0) {
+        if (offset <= pgreat_late) return kPGreat;
+        if (offset <= great_late) return kGreat;
+        if (offset <= good_late) return kGood;
+        if (offset <= bad_late) return kBad;
+        return -1;
+    }
+    int a = -offset;
+    if (a <= pgreat) return kPGreat;
+    if (a <= great) return kGreat;
+    if (a <= good) return kGood;
+    if (a <= bad) return kBad;
+    return -1;
 }
 
 JudgeEngine::JudgeEngine(const Chart& chart, const JudgeConfig& cfg)
     : chart_(chart), cfg_(cfg), win_(JudgeWindows::for_rank(chart.judge_rank)), gauge_type_(cfg.gauge_type) {
+    // カスタム判定（判定の MOD）。rank_scaled なら #RANK に合わせて、NORMAL に対する LR2 の比で伸び縮みさせる
+    if (cfg.custom_judge) {
+        const CustomJudgeDef& j = *cfg.custom_judge;
+        const JudgeWindows base = JudgeWindows::for_rank(2), here = JudgeWindows::for_rank(chart.judge_rank);
+        auto sc = [&](int v, int b, int h) { return j.rank_scaled ? static_cast<int>(std::lround(v * static_cast<double>(h) / b)) : v; };
+        win_.pgreat = sc(j.pgreat[0], base.pgreat, here.pgreat), win_.pgreat_late = sc(j.pgreat[1], base.pgreat, here.pgreat);
+        win_.great = sc(j.great[0], base.great, here.great), win_.great_late = sc(j.great[1], base.great, here.great);
+        win_.good = sc(j.good[0], base.good, here.good), win_.good_late = sc(j.good[1], base.good, here.good);
+        win_.bad = j.bad[0], win_.bad_late = j.bad[1];
+        win_.empty_poor = j.empty_poor;
+    }
     // 判定幅の倍率（bmson の judge_rank）。空POOR の幅はそのまま
     if (chart.judge_scale != 1.0 && chart.judge_scale > 0) {
         auto sc = [&](int& w) { w = std::max(1, static_cast<int>(std::lround(w * chart.judge_scale))); };
         sc(win_.pgreat), sc(win_.great), sc(win_.good), sc(win_.bad);
+        sc(win_.pgreat_late), sc(win_.great_late), sc(win_.good_late), sc(win_.bad_late);
     }
     done_.assign(chart.notes.size(), false);
     active_.assign(chart.notes.size(), 0);
@@ -53,6 +82,14 @@ JudgeEngine::JudgeEngine(const Chart& chart, const JudgeConfig& cfg)
         tail_scr_ = make(130, 170, 210, 290, 230);
     }
     gauge_.init(static_cast<int>(chart.total), stats_.total_notes, cfg.course);
+    // カスタムゲージ：判定ごとの増減は「決まった値 + total × TOTAL ÷ 総ノーツ数」
+    for (const CustomGaugeDef& g : cfg_.custom_gauges) {
+        chp_.push_back(g.initial);
+        std::array<double, 6> t{};
+        for (int j = 0; j < 6; ++j)
+            t[j] = g.delta[j].fixed + (stats_.total_notes > 0 ? g.delta[j].total * chart.total / stats_.total_notes : 0.0);
+        ctable_.push_back(t);
+    }
     if (cfg.course >= 0 && cfg.carry) {
         gauge_.set_hp(cfg.carry_hp);
         stats_.course_combo = cfg.carry_combo;
@@ -61,13 +98,41 @@ JudgeEngine::JudgeEngine(const Chart& chart, const JudgeConfig& cfg)
 }
 
 int JudgeEngine::clear() const {
+    int c = custom_play();
+    if (c >= 0) {
+        // カスタムゲージで遊んだ：フルコンボはそのまま、クリアならそのゲージのランプ（本体やスキンには lamp_as で見せる）
+        if (stats_.total_notes == stats_.max_combo) return stats_.judge_count[kGood] == 0 ? 6 : 5;
+        return custom_cleared(c) ? std::clamp(cfg_.custom_gauges[c].lamp_as, 1, 4) : 1;
+    }
     return clear_type(gauge_, gauge_type_, stats_.total_notes, stats_.note_current, stats_.max_combo,
                       stats_.judge_count[kGood], cfg_.course >= 0);
+}
+
+bool JudgeEngine::failed() const {
+    int c = custom_play();
+    if (c >= 0) return cfg_.custom_gauges[c].survival && chp_[c] < 2.0;
+    return gauge_failed(gauge_, gauge_type_);
+}
+
+bool JudgeEngine::custom_cleared(int i) const {
+    if (stats_.note_current < stats_.total_notes) return false;
+    const CustomGaugeDef& g = cfg_.custom_gauges[i];
+    return g.survival ? chp_[i] >= 2.0 : chp_[i] >= g.border;
 }
 
 void JudgeEngine::apply_judge(int judge, double mul) {
     gauge_.apply_judge(judge, mul);
     if (cfg_.gas) gauge_type_ = gas_select(gauge_, cfg_.gauge_type);
+    for (size_t i = 0; i < chp_.size(); ++i) {
+        const CustomGaugeDef& g = cfg_.custom_gauges[i];
+        double& hp = chp_[i];
+        if (g.survival && hp <= 0) continue;  // 一度 0 になったら戻らない
+        double d = ctable_[i][judge] * mul;
+        if (d < 0 && hp <= g.low_hp) d *= g.low_hp_mul;
+        hp = std::clamp(hp + d, 0.0, 100.0);
+        if (!g.survival) hp = std::max(hp, g.floor);
+        else if (hp < 2.0) hp = 0;
+    }
 }
 
 void JudgeEngine::apply_mine(int damage, int lane, int64_t t_us) {
@@ -80,6 +145,13 @@ void JudgeEngine::apply_mine(int damage, int lane, int64_t t_us) {
     e.mine = true;
     events_.push_back(e);
     gauge_.apply_mine(damage);
+    for (size_t i = 0; i < chp_.size(); ++i) {
+        const CustomGaugeDef& g = cfg_.custom_gauges[i];
+        if (g.survival && chp_[i] <= 0) continue;
+        chp_[i] = std::clamp(chp_[i] - damage * g.mine_mul, 0.0, 100.0);
+        if (!g.survival) chp_[i] = std::max(chp_[i], g.floor);
+        else if (chp_[i] < 2.0) chp_[i] = 0;
+    }
     if (cfg_.gas) gauge_type_ = gas_select(gauge_, cfg_.gauge_type);
 }
 
@@ -253,7 +325,7 @@ void JudgeEngine::proc_single(int lane, int keypress, int timing, int64_t t_us) 
 
     bool remaining = stats_.note_current < stats_.total_notes;
     // 見逃し
-    if (timing - real > win_.bad && remaining) {
+    if (timing - real > win_.bad_late && remaining) {
         judge_to_score(kPoor, lane, t_us, 0, false);
         l.note_val = note.sound;
         done_[idx] = true;
@@ -263,12 +335,7 @@ void JudgeEngine::proc_single(int lane, int keypress, int timing, int64_t t_us) 
     if (keypress != 1) return;
 
     int offset = timing - note_ms;
-    int gap = std::abs(offset);
-    int judge = -1;
-    if (gap <= win_.pgreat) judge = kPGreat;
-    else if (gap <= win_.great) judge = kGreat;
-    else if (gap <= win_.good) judge = kGood;
-    else if (gap <= win_.bad) judge = kBad;
+    int judge = win_.classify(offset);
     judge = demote(judge);
     if (judge >= 0 && remaining) {
         judge_to_score(judge, lane, t_us, offset, true);
@@ -279,7 +346,7 @@ void JudgeEngine::proc_single(int lane, int keypress, int timing, int64_t t_us) 
         // BADのあと、同じレーンの次のノーツもBAD幅に入っていれば、同じ入力で判定する（LR2: Play.cpp:902）
         if (judge == kBad && l.cur < l.notes.size()) {
             const Note& next = chart_.notes[l.notes[l.cur]];
-            if (std::abs(timing - static_cast<int>(next.time_us / 1000.0)) <= win_.bad) proc(lane, 1, timing, t_us);
+            if (win_.classify(timing - static_cast<int>(next.time_us / 1000.0)) >= 0) proc(lane, 1, timing, t_us);
         }
         return;
     }
@@ -301,7 +368,7 @@ void JudgeEngine::proc_long(int lane, int keypress, int timing, int64_t t_us) {
     int end_ms = static_cast<int>(note.end_us / 1000.0);
 
     // 始点の見逃し（LNはGOOD幅を過ぎたら）
-    if (timing - real > win_.good && active_[idx] <= 0) {
+    if (timing - real > win_.good_late && active_[idx] <= 0) {
         judge_to_score(kPoor, lane, t_us, 0, false);
         l.note_val = note.sound;
         done_[idx] = true;
@@ -311,12 +378,7 @@ void JudgeEngine::proc_long(int lane, int keypress, int timing, int64_t t_us) {
 
     if (keypress == 1) {
         int offset = timing - note_ms;
-        int gap = std::abs(offset);
-        int judge = -1;
-        if (gap <= win_.pgreat) judge = kPGreat;
-        else if (gap <= win_.great) judge = kGreat;
-        else if (gap <= win_.good) judge = kGood;
-        else if (gap <= win_.bad) judge = kBad;
+        int judge = win_.classify(offset);
         judge = demote(judge);
         if (judge >= 0) {
             // 始点ではまだ数えない。終点で始点の判定として数える
@@ -400,7 +462,7 @@ void JudgeEngine::proc_charge(int lane, int keypress, int timing, int64_t t_us) 
 
     if (active_[idx] <= 0) {
         // 始点の見逃し：BAD 幅を過ぎたら、始点と終点の両方を POOR（HCN は押し直せばゲージが戻る）
-        if (timing - real > win_.bad && remaining) {
+        if (timing - real > win_.bad_late && remaining) {
             judge_to_score(kPoor, lane, t_us, 0, false);
             judge_to_score(kPoor, lane, t_us, 0, false);
             l.note_val = note.sound;
@@ -410,12 +472,7 @@ void JudgeEngine::proc_charge(int lane, int keypress, int timing, int64_t t_us) 
         }
         if (keypress != 1) return;
         int offset = timing - note_ms;
-        int gap = std::abs(offset);
-        int judge = -1;
-        if (gap <= win_.pgreat) judge = kPGreat;
-        else if (gap <= win_.great) judge = kGreat;
-        else if (gap <= win_.good) judge = kGood;
-        else if (gap <= win_.bad) judge = kBad;
+        int judge = win_.classify(offset);
         judge = demote(judge);
         if (judge >= 0 && remaining) {
             judge_to_score(judge, lane, t_us, offset, true);
@@ -446,7 +503,7 @@ void JudgeEngine::proc_charge(int lane, int keypress, int timing, int64_t t_us) 
         return;
     }
     // 押し続けて、終点の時刻から BAD 幅を過ぎたら終点は POOR（押しっぱなしでは取れない）
-    if (timing - end_ms > win_.bad) {
+    if (timing - end_ms > win_.bad_late) {
         judge_to_score(kPoor, lane, t_us, 0, false);
         finish();
     }

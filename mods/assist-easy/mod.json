@@ -1,0 +1,22 @@
+{
+  "id": "assist-easy",
+  "name": "ASSIST EASY",
+  "version": "1",
+  "author": "BMjoy",
+  "description": "EASY より減りが小さく、60% でクリアになるゲージ",
+  "gauges": [
+    {
+      "id": "assist-easy",
+      "name": "ASSIST EASY",
+      "initial": 20,
+      "border": 60,
+      "survival": false,
+      "floor": 2,
+      "delta": {
+        "pgreat": { "total": 1.0 }, "great": { "total": 1.0 }, "good": { "total": 0.5 },
+        "bad": -1.5, "poor": -3, "empty_poor": -0.5
+      },
+      "lamp": { "name": "ASSIST EASY", "color": "#b080ff", "rank": 1.5, "as": 1 }
+    }
+  ]
+}

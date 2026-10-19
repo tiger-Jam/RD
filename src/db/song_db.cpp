@@ -38,10 +38,21 @@ CREATE INDEX IF NOT EXISTS chart_sha256 ON chart(sha256);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
 CREATE TABLE IF NOT EXISTS chart_added(path TEXT PRIMARY KEY, added INTEGER);
 CREATE TABLE IF NOT EXISTS favorite(md5 TEXT PRIMARY KEY, value INTEGER);
+CREATE TABLE IF NOT EXISTS mod_set(id INTEGER PRIMARY KEY, key TEXT UNIQUE);
 CREATE TABLE IF NOT EXISTS play_log(
     sha256 TEXT, played_at INTEGER, kind TEXT, rate REAL,
     clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     pg INTEGER, gr INTEGER, gd INTEGER, bd INTEGER, pr INTEGER, op_history INTEGER, rseed INTEGER, op_best INTEGER, ghost TEXT);
+CREATE TABLE IF NOT EXISTS play(
+    id INTEGER PRIMARY KEY, sha256 TEXT, played_at INTEGER, kind TEXT, rate REAL, ln_mode INTEGER, profile INTEGER,
+    gauge TEXT, clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
+    pg INTEGER, gr INTEGER, gd INTEGER, bd INTEGER, pr INTEGER, fast INTEGER, slow INTEGER,
+    offset_count INTEGER, offset_mean REAL, offset_sd REAL, gauges TEXT,
+    op_history INTEGER, rseed INTEGER, op_best INTEGER, ghost TEXT, input_log TEXT);
+CREATE INDEX IF NOT EXISTS play_sha ON play(sha256);
+CREATE TABLE IF NOT EXISTS custom_lamp(
+    sha256 TEXT, ln_mode INTEGER, profile INTEGER, gauge TEXT, lamp INTEGER,
+    PRIMARY KEY(sha256, ln_mode, profile, gauge));
 CREATE TABLE IF NOT EXISTS lr2_score(
     md5 TEXT PRIMARY KEY, clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     playcount INTEGER, clearcount INTEGER,
@@ -481,14 +492,46 @@ std::vector<ChartRecord> SongDb::all_charts() const {
     return out;
 }
 
-void SongDb::log_play(const std::string& sha256, const PlayRecord& r, const std::string& kind, double rate) {
+void SongDb::log_play(const std::string& sha256, const PlayRecord& r, const PlayEntry& e) {
     if (!db_) return;
-    Stmt st(db_, "INSERT INTO play_log(sha256, played_at, kind, rate, clear, exscore, bp, max_combo, pg, gr, gd, bd, pr, "
-                 "op_history, rseed, op_best, ghost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    st.text(1, sha256).i64(2, now).text(3, kind).dbl(4, rate).i64(5, r.clear).i64(6, r.exscore).i64(7, r.bp).i64(8, r.max_combo);
-    for (int i = 0; i < 5; ++i) st.i64(9 + i, r.judge[i]);
-    st.i64(14, r.op_history).i64(15, r.rseed).i64(16, r.op_best).text(17, r.ghost).run();
+    Stmt st(db_, "INSERT INTO play(sha256, played_at, kind, rate, ln_mode, profile, gauge, clear, exscore, bp, max_combo, "
+                 "pg, gr, gd, bd, pr, fast, slow, offset_count, offset_mean, offset_sd, gauges, op_history, rseed, op_best, ghost, "
+                 "input_log) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    int64_t at = e.played_at ? e.played_at
+                             : std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    st.text(1, sha256).i64(2, at).text(3, e.kind).dbl(4, e.rate).i64(5, r.ln_mode).i64(6, r.profile).text(7, e.gauge)
+        .i64(8, r.clear).i64(9, r.exscore).i64(10, r.bp).i64(11, r.max_combo);
+    for (int i = 0; i < 5; ++i) st.i64(12 + i, r.judge[i]);
+    st.i64(17, e.fast).i64(18, e.slow).i64(19, e.offset_count).dbl(20, e.offset_mean).dbl(21, e.offset_sd).text(22, e.gauges)
+        .i64(23, r.op_history).i64(24, r.rseed).i64(25, r.op_best).text(26, r.ghost).text(27, e.input_log).run();
+}
+
+void SongDb::save_custom_lamp(const std::string& sha256, int ln_mode, int profile, const std::string& gauge, int lamp) {
+    if (!db_) return;
+    Stmt st(db_, "INSERT INTO custom_lamp(sha256, ln_mode, profile, gauge, lamp) VALUES(?,?,?,?,?) "
+                 "ON CONFLICT(sha256, ln_mode, profile, gauge) DO UPDATE SET lamp = max(lamp, excluded.lamp)");
+    st.text(1, sha256).i64(2, ln_mode).i64(3, profile).text(4, gauge).i64(5, lamp).run();
+}
+
+std::unordered_map<std::string, int> SongDb::custom_lamps(const std::string& sha256, int ln_mode, int profile) const {
+    std::unordered_map<std::string, int> out;
+    if (!db_) return out;
+    Stmt st(db_, "SELECT gauge, lamp FROM custom_lamp WHERE sha256 = ? AND ln_mode = ? AND profile = ?");
+    st.text(1, sha256).i64(2, ln_mode).i64(3, profile);
+    while (st.step()) out[st.col_text(0)] = static_cast<int>(st.col_i64(1));
+    return out;
+}
+
+int SongDb::mod_profile(const std::string& key) {
+    if (!db_ || key.empty()) return 0;
+    {
+        Stmt get(db_, "SELECT id FROM mod_set WHERE key = ?");
+        get.text(1, key);
+        if (get.step()) return static_cast<int>(get.col_i64(0));
+    }
+    Stmt put(db_, "INSERT INTO mod_set(key) VALUES(?)");
+    put.text(1, key).run();
+    return static_cast<int>(sqlite3_last_insert_rowid(db_));
 }
 
 std::unordered_map<std::string, int> SongDb::favorites() const {
@@ -545,33 +588,34 @@ void merge_score(ScoreRecord& r, int clear, int ex, int bp, int combo, int play,
 // 譜面ごとの記録。種類を決めていない LN のある譜面は ln_mode の記録、それ以外は 0 の記録を読む。
 // 曲データベースに無いキー（コース）の記録と、LR2 から取り込んだ記録（LN で遊んだもの）も合わせる
 // with_ghost なら、最後にゴーストの欄も付ける（一覧では使わないので、1 譜面を読むときだけ）
-std::string merged_scores_sql(int ln_mode, bool with_ghost = false) {
+std::string merged_scores_sql(int ln_mode, bool with_ghost = false, int profile = 0) {
     std::string m = std::to_string(ln_mode);
+    const std::string p = std::to_string(profile);
     const std::string gs = with_ghost ? ", s.ghost" : "", gl = with_ghost ? ", l.ghost" : "";
     return R"SQL(
 SELECT c.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
        s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history, s.rseed, s.op_best)SQL" + gs + R"SQL(
   FROM score s JOIN (SELECT sha256, MAX(ln_free) AS ln_free FROM chart GROUP BY sha256) c ON c.sha256 = s.sha256
- WHERE s.judge_profile = 0 AND s.ln_mode = (CASE WHEN c.ln_free > 0 THEN )SQL" + m + R"SQL( ELSE 0 END)
+ WHERE s.judge_profile = )SQL" + p + R"SQL( AND s.ln_mode = (CASE WHEN c.ln_free > 0 THEN )SQL" + m + R"SQL( ELSE 0 END)
 UNION ALL
 SELECT s.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcount, s.last_played, 0,
        s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history, s.rseed, s.op_best)SQL" + gs + R"SQL(
   FROM score s
- WHERE s.judge_profile = 0 AND s.ln_mode = 0 AND s.sha256 NOT IN (SELECT sha256 FROM chart)
+ WHERE s.judge_profile = )SQL" + p + R"SQL( AND s.ln_mode = 0 AND s.sha256 NOT IN (SELECT sha256 FROM chart)
 UNION ALL
 SELECT c.sha256, l.clear, l.exscore, l.bp, l.max_combo, l.playcount, l.clearcount, 0, 1,
        l.pg, l.gr, l.gd, l.bd, l.pr, l.op_history, l.rseed, l.op_best)SQL" + gl + R"SQL(
   FROM lr2_score l JOIN (SELECT sha256, md5, MAX(ln_free) AS ln_free FROM chart GROUP BY sha256, md5) c ON c.md5 = l.md5
- WHERE c.ln_free = 0 OR )SQL" + m + " = 0\n";
+ WHERE (c.ln_free = 0 OR )SQL" + m + " = 0) AND " + p + " = 0\n";  // LR2 の記録は MOD を使っていないときだけ
 }
 
 }  // namespace
 
-std::vector<ScoreRecord> SongDb::all_scores(int ln_mode) const {
+std::vector<ScoreRecord> SongDb::all_scores(int ln_mode, int profile) const {
     std::vector<ScoreRecord> out;
     if (!db_) return out;
     std::unordered_map<std::string, size_t> idx;
-    std::string sql = merged_scores_sql(ln_mode);
+    std::string sql = merged_scores_sql(ln_mode, false, profile);
     Stmt st(db_, sql.c_str());
     while (st.step()) {
         std::string sha = st.col_text(0);
@@ -591,9 +635,9 @@ std::vector<ScoreRecord> SongDb::all_scores(int ln_mode) const {
     return out;
 }
 
-bool SongDb::get_score(const std::string& sha256, ScoreRecord& out, int ln_mode) const {
+bool SongDb::get_score(const std::string& sha256, ScoreRecord& out, int ln_mode, int profile) const {
     if (!db_) return false;
-    std::string sql = "SELECT * FROM (" + merged_scores_sql(ln_mode, true) + ") WHERE sha256 = ?";
+    std::string sql = "SELECT * FROM (" + merged_scores_sql(ln_mode, true, profile) + ") WHERE sha256 = ?";
     Stmt st(db_, sql.c_str());
     st.text(1, sha256);
     bool found = false;
@@ -676,8 +720,8 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
     bool had = false;
     {
         Stmt st(db_, "SELECT clear, exscore, bp, max_combo, playcount, clearcount, pg, gr, gd, bd, pr, op_history, "
-                     "rseed, op_best, ghost FROM score WHERE sha256 = ? AND ln_mode = ? AND judge_profile = 0");
-        st.text(1, sha256).i64(2, play.ln_mode);
+                     "rseed, op_best, ghost FROM score WHERE sha256 = ? AND ln_mode = ? AND judge_profile = ?");
+        st.text(1, sha256).i64(2, play.ln_mode).i64(3, play.profile);
         if (st.step()) {
             had = true;
             r.clear = static_cast<int>(st.col_i64(0));
@@ -714,11 +758,11 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
     r.last_played = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     Stmt st(db_, "INSERT OR REPLACE INTO score(sha256, ln_mode, judge_profile, clear, exscore, bp, max_combo, "
                  "playcount, clearcount, last_played, pg, gr, gd, bd, pr, op_history, rseed, op_best, ghost) "
-                 "VALUES(?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-    st.text(1, sha256).i64(2, play.ln_mode).i64(3, r.clear).i64(4, r.exscore).i64(5, r.bp).i64(6, r.max_combo)
-        .i64(7, r.playcount).i64(8, r.clearcount).i64(9, r.last_played).i64(10, r.judge[0]).i64(11, r.judge[1])
-        .i64(12, r.judge[2]).i64(13, r.judge[3]).i64(14, r.judge[4]).i64(15, r.op_history).i64(16, r.rseed)
-        .i64(17, r.op_best).text(18, r.ghost);
+                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    st.text(1, sha256).i64(2, play.ln_mode).i64(3, play.profile).i64(4, r.clear).i64(5, r.exscore).i64(6, r.bp)
+        .i64(7, r.max_combo).i64(8, r.playcount).i64(9, r.clearcount).i64(10, r.last_played).i64(11, r.judge[0])
+        .i64(12, r.judge[1]).i64(13, r.judge[2]).i64(14, r.judge[3]).i64(15, r.judge[4]).i64(16, r.op_history)
+        .i64(17, r.rseed).i64(18, r.op_best).text(19, r.ghost);
     st.run();
     if (play.course_stage) return;
     // プレイヤーの累計

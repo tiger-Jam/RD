@@ -10,6 +10,7 @@
 #include "audio/mixer.h"
 #include "db/folder_watch.h"
 #include "db/song_db.h"
+#include "mod/mod.h"
 #include "input/keyconfig.h"
 #include "skin/lr2_skin.h"
 #include "skin/skin_renderer.h"
@@ -29,6 +30,19 @@ struct App {
     std::unique_ptr<SkinRenderer> skin_renderer, result_renderer, select_renderer, decide_renderer;
     // 曲フォルダの監視（起動の画面の前から見て、そのあいだの変化も取りこぼさない）
     FolderWatcher watcher;
+    // MOD：見つけた全部（実行ファイルの横の mods/ が公式、設定フォルダの mods/ が利用者のもの）
+    std::vector<ModManifest> mods;
+    void load_mods();
+    // 設定で使うことにしている MOD
+    std::vector<const ModManifest*> active_mods() const;
+    // 使っている MOD のカスタムゲージ（鍵は「MOD の id/ゲージの id」）
+    std::vector<std::pair<std::string, const CustomGaugeDef*>> custom_gauges() const;
+    // ゲージを前後に替える（LR2 のゲージ 6 つのあとに、使っている MOD のカスタムゲージが続く）
+    void cycle_gauge(int dir);
+    // 遊んでいるゲージの名前（カスタムゲージならその名前。LR2 のゲージなら空）
+    std::string custom_gauge_name() const;
+    // 使っている MOD のうち、プレーに影響するものの組み合わせの記録の番号（0 は MOD 無し。初めてなら曲データベースに足す）
+    int mod_profile();
     int view_w = 640, view_h = 480;
     double refresh_hz = 60.0;
     bool updated_at_start = false;  // 起動の画面で曲データベースと難易度表を更新した（選曲画面では読み直さない）

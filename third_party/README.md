@@ -8,6 +8,7 @@
 | stb_vorbis.c, stb_image.h, stb_truetype.h | stb `f58f558` | Public Domain / MIT |
 | sqlite/ | SQLite 3.46.1（amalgamation） | Public Domain |
 | yyjson/ | yyjson 0.10.0 | MIT |
+| lua/ | Lua 5.4.7（src から lua.c・luac.c を除いたもの。sha256 9fbf5e28…1e30） | MIT |
 | ffmpeg/9/, ffmpeg/8/ | FFmpeg 9.0.1 と 8 系のヘッダーだけ（libavcodec・libavformat・libavutil・libswscale） | LGPL 2.1 以降 |
 
 実装は `third_party_impl.c` でまとめて生成する。

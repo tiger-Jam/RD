@@ -21,6 +21,7 @@
 #include "app/config.h"
 #include "app/lr2_import.h"
 #include "db/song_db.h"
+#include "mod/mod.h"
 #include "render/text_cache.h"
 #include "util/dev.h"
 
@@ -373,6 +374,11 @@ int main(int, char**) {
     std::string d_font = "HG丸ｺﾞｼｯｸM-PRO";
 
     int tab = 0;
+    // MOD（仕様書14章）。公式のあとに利用者のもの
+    std::vector<std::string> mod_errors;
+    std::vector<ModManifest> mods = scan_mods(official_mods_dir(), true, &mod_errors);
+    for (ModManifest& m : scan_mods(user_mods_dir(), false, &mod_errors)) mods.push_back(std::move(m));
+    int mod_sel = mods.empty() ? -1 : 0, mod_scroll = 0;
     int song_sel = -1, song_scroll = 0, table_sel = -1, table_scroll = 0;
     std::string table_input;
     std::string message;
@@ -432,12 +438,12 @@ int main(int, char**) {
         g.label(6, 3, "Language");
 
         // タブ（クラシック：選んでいるタブは少し大きく、ページとつながる）
-        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY", "PLAY"};
+        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY", "PLAY", "MOD"};
         const SDL_FRect page{10, 56, 590, 368};
         g.fill(page, kFace);
         g.raised(page);
         float tx = 12;
-        for (int i = 0; i < 8; ++i) {
+        for (int i = 0; i < 9; ++i) {
             float w = text.get(g.font, 0, tabs[i]).w + 10.0f;
             bool on = i == tab;
             SDL_FRect rc{on ? tx - 2 : tx, on ? 38.0f : 40.0f, on ? w + 4 : w, on ? 19.0f : 16.0f};
@@ -659,6 +665,51 @@ int main(int, char**) {
 #ifdef _WIN32
             g.check(X + 280, by + 30, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
 #endif
+        } else if (tab == 8) {
+            // MOD：使うものに印を付ける。プレーに影響する MOD（判定・譜面・入力）を使うと、記録はふだんのものと分かれる
+            float y = Y + 12;
+            const float row_h = 22;
+            const int rows = 8;
+            g.sunken({X + 10, y, 558, rows * row_h + 4}, kHi);
+            mod_scroll = std::clamp(mod_scroll, 0, std::max(0, static_cast<int>(mods.size()) - rows));
+            for (int i = mod_scroll; i < static_cast<int>(mods.size()) && i < mod_scroll + rows; ++i) {
+                const ModManifest& m = mods[i];
+                float ry = y + 2 + (i - mod_scroll) * row_h;
+                if (i == mod_sel) g.fill({X + 12, ry, 554, row_h}, kLight);
+                auto it = std::find(cfg.enabled_mods.begin(), cfg.enabled_mods.end(), m.id);
+                bool on = it != cfg.enabled_mods.end();
+                std::string name = m.name + "  " + m.version + (m.official ? "  （公式）" : "") + (m.affects_play() ? "  ＊記録を分ける" : "");
+                if (g.check(X + 18, ry + 4, name, on)) {
+                    if (on) cfg.enabled_mods.push_back(m.id);
+                    else cfg.enabled_mods.erase(it);
+                    mod_sel = i;
+                } else if (g.clicked({X + 12, ry, 554, row_h})) {
+                    mod_sel = i;
+                }
+            }
+            if (g.wheel != 0 && g.mx >= X + 10 && g.mx < X + 568 && g.my >= y && g.my < y + rows * row_h)
+                mod_scroll -= static_cast<int>(g.wheel);
+            if (mods.empty()) g.label(X + 20, y + 8, "MOD が見つかりません（" + user_mods_dir() + " に入れる）", false);
+            y += rows * row_h + 14;
+            if (mod_sel >= 0 && mod_sel < static_cast<int>(mods.size())) {
+                const ModManifest& m = mods[mod_sel];
+                g.label(X + 14, y, m.author.empty() ? m.id : m.id + "  作者：" + m.author);
+                g.label(X + 14, y + 18, m.description);
+                std::string parts;
+                for (const CustomGaugeDef& gd : m.gauges) parts += (parts.empty() ? "" : "、") + gd.name;
+                if (!parts.empty()) g.label(X + 14, y + 36, "ゲージ：" + parts);
+                parts.clear();
+                for (const CustomJudgeDef& jd : m.judges) parts += (parts.empty() ? "" : "、") + jd.name;
+                if (!parts.empty()) g.label(X + 14, y + 54, "判定：" + parts);
+            }
+            // 組み合わせの問題（判定の MOD が 2 つなど）
+            std::vector<const ModManifest*> on;
+            for (const std::string& id : cfg.enabled_mods)
+                for (const ModManifest& m : mods)
+                    if (m.id == id) on.push_back(&m);
+            float wy = Y + 300;
+            for (const std::string& w : mod_conflicts(on)) g.label(X + 14, wy, "！ " + w), wy += 18;
+            for (const std::string& e : mod_errors) g.label(X + 14, wy, e, false), wy += 18;
         } else {
             // ハイスピ（仕様書6章）
             g.label(X + 28, Y + 30, "ハイスピのモード");

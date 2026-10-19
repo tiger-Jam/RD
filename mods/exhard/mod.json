@@ -1,0 +1,18 @@
+{
+  "id": "exhard",
+  "name": "EX-HARD",
+  "version": "1",
+  "author": "BMjoy",
+  "description": "HARD より減りが大きく、残りが少なくても減りが緩まないゲージ",
+  "gauges": [
+    {
+      "id": "exhard",
+      "name": "EX-HARD",
+      "initial": 100,
+      "survival": true,
+      "delta": { "pgreat": 0.15, "great": 0.06, "good": 0, "bad": -8, "poor": -16, "empty_poor": -8 },
+      "mine": 1.0,
+      "lamp": { "name": "EX-HARD", "color": "#ffd800", "rank": 4.5, "as": 4 }
+    }
+  ]
+}

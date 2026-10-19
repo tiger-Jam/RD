@@ -35,6 +35,8 @@ bool save_replay(const std::string& path, const Replay& r) {
         f << "hi_speed = " << r.hi_speed << "\n";
         f << "lane_cover = " << r.lane_cover << "\n";
         f << "lane_cover_v = " << r.lane_cover_v << "\n";
+        if (!r.mods.empty()) f << "mods = " << r.mods << "\n";
+        if (!r.custom_gauge.empty()) f << "custom_gauge = " << r.custom_gauge << "\n";
         f << "EVENTS\n";
         for (const ReplayEvent& e : r.events) f << e.time_us << ' ' << static_cast<int>(e.lane) << ' ' << (e.down ? 1 : 0) << '\n';
         if (!f) return false;
@@ -83,6 +85,8 @@ bool load_replay(const std::string& path, Replay& r) {
         else if (k == "hi_speed") r.hi_speed = iv;
         else if (k == "lane_cover") r.lane_cover = iv;
         else if (k == "lane_cover_v") r.lane_cover_v = iv;
+        else if (k == "mods") r.mods = v;
+        else if (k == "custom_gauge") r.custom_gauge = v;
     }
     return events;
 }

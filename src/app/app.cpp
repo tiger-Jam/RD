@@ -93,6 +93,7 @@ bool App::init(const char* argv0) {
     apply_volume();
     apply_sound_fx();
     load_sound_set();
+    load_mods();
     frame_hooks_install([this] { mixer.play_system(kSysScreenshot); });
     if (!db.open(song_db_path())) std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
     double estimate = mixer.output_latency_us() / 1000.0;
@@ -158,6 +159,52 @@ void App::window_size(int skin_w, int skin_h, int& w, int& h) const {
     w = w * scale / 100;
     h = h * scale / 100;
 }
+
+void App::load_mods() {
+    std::vector<std::string> errors;
+    mods = scan_mods(official_mods_dir(), true, &errors);
+    for (ModManifest& m : scan_mods(user_mods_dir(), false, &errors)) mods.push_back(std::move(m));
+    for (const std::string& e : errors) std::printf("MOD を読めない：%s\n", e.c_str());
+    for (const ModManifest* m : active_mods()) std::printf("MOD：%s %s\n", m->name.c_str(), m->version.c_str());
+}
+
+std::vector<const ModManifest*> App::active_mods() const {
+    std::vector<const ModManifest*> out;
+    for (const std::string& id : cfg.enabled_mods)
+        for (const ModManifest& m : mods)
+            if (m.id == id) {
+                out.push_back(&m);
+                break;
+            }
+    return out;
+}
+
+std::vector<std::pair<std::string, const CustomGaugeDef*>> App::custom_gauges() const {
+    std::vector<std::pair<std::string, const CustomGaugeDef*>> out;
+    for (const ModManifest* m : active_mods())
+        for (const CustomGaugeDef& g : m->gauges) out.push_back({m->id + "/" + g.id, &g});
+    return out;
+}
+
+void App::cycle_gauge(int dir) {
+    // 並び：GROOVE … G-ATTACK（LR2 の番号の順）→ カスタムゲージ
+    auto gauges = custom_gauges();
+    const int n = kGaugeCount + static_cast<int>(gauges.size());
+    int cur = cfg.gauge;
+    for (size_t i = 0; i < gauges.size(); ++i)
+        if (gauges[i].first == cfg.custom_gauge) cur = kGaugeCount + static_cast<int>(i);
+    cur = ((cur + dir) % n + n) % n;
+    if (cur < kGaugeCount) cfg.gauge = cur, cfg.custom_gauge.clear();
+    else cfg.custom_gauge = gauges[cur - kGaugeCount].first;
+}
+
+std::string App::custom_gauge_name() const {
+    for (const auto& [key, g] : custom_gauges())
+        if (key == cfg.custom_gauge) return g->name;
+    return {};
+}
+
+int App::mod_profile() { return db.mod_profile(play_mod_key(active_mods())); }
 
 void App::toggle_fullscreen() {
     cfg.fullscreen = !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN);

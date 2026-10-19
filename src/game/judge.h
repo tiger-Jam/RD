@@ -3,11 +3,13 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <cstdint>
 #include <vector>
 
 #include "chart/chart.h"
 #include "game/gauge.h"
+#include "mod/mod.h"
 
 namespace bmj {
 
@@ -15,9 +17,13 @@ namespace bmj {
 constexpr uint16_t kMineSystemSound = 0xFFFF;
 
 // 判定幅（ms）。LR2: bmsload:3810
+// 判定の幅（ms）。pgreat〜bad は早い側、*_late は遅い側（LR2 の幅は両側とも同じ。カスタム判定で分けられる）
 struct JudgeWindows {
     int pgreat = 18, great = 40, good = 100, bad = 200, empty_poor = 1000;
+    int pgreat_late = 18, great_late = 40, good_late = 100, bad_late = 200;
     static JudgeWindows for_rank(int rank);
+    // ずれ（入力 − ノーツ、ms。正なら遅い）の判定。幅の外なら -1
+    int classify(int offset) const;
 };
 
 struct JudgeEvent {
@@ -61,6 +67,11 @@ struct JudgeConfig {
     int ln_mode = 0;
     // 難易度表のコースの制約：GOOD を無くす（no_good）、GREAT と GOOD を無くす（no_great）。無くした判定は BAD になる
     bool no_good = false, no_great = false;
+    // カスタムゲージ（評価の MOD。仕様書14章）。全部を裏で計算し、custom_play が 0 以上ならそのゲージで遊ぶ（コースでは使わない）
+    std::vector<CustomGaugeDef> custom_gauges;
+    int custom_play = -1;
+    // カスタム判定（判定の MOD）。無ければ LR2 の判定幅
+    std::optional<CustomJudgeDef> custom_judge;
 };
 
 class JudgeEngine {
@@ -80,7 +91,21 @@ public:
     const PlayStats& stats() const { return stats_; }
     const GaugeSet& gauge() const { return gauge_; }
     int gauge_type() const { return gauge_type_; }
-    bool failed() const { return gauge_failed(gauge_, gauge_type_); }
+    bool failed() const;
+    // 遊んでいるゲージの値（カスタムゲージで遊んでいればそのゲージ）
+    double play_hp() const { return custom_play() >= 0 ? chp_[custom_play()] : gauge_.hp(gauge_type_); }
+    // スキンに見せるゲージの種類（カスタムゲージは、落ちるものを HARD、落ちないものを GROOVE として見せる）
+    int display_gauge_type() const {
+        if (custom_play() < 0) return gauge_type_;
+        return cfg_.custom_gauges[custom_play()].survival ? kHard : kGroove;
+    }
+    // カスタムゲージ
+    int custom_play() const { return cfg_.course < 0 ? cfg_.custom_play : -1; }
+    int custom_count() const { return static_cast<int>(chp_.size()); }
+    double custom_hp(int i) const { return chp_[i]; }
+    // そのカスタムゲージで、曲の終わりにクリアの条件を満たしているか
+    bool custom_cleared(int i) const;
+    const CustomGaugeDef& custom_def(int i) const { return cfg_.custom_gauges[i]; }
     bool in_course() const { return cfg_.course >= 0; }
     bool finished() const { return stats_.note_current >= stats_.total_notes; }
     int clear() const;
@@ -132,6 +157,8 @@ private:
     JudgeWindows win_;
     GaugeSet gauge_;
     int gauge_type_;
+    std::vector<double> chp_;                    // カスタムゲージの値
+    std::vector<std::array<double, 6>> ctable_;  // カスタムゲージの判定ごとの増減
     PlayStats stats_;
     std::array<Lane, kLaneCount> lanes_;
     std::array<bool, kLaneCount> held_{};

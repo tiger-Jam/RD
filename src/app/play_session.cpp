@@ -103,8 +103,10 @@ uint32_t option_history(int lamp, int gauge_type, const AppConfig& cfg, bool ass
 
 // lamp_only：ランプ・回数・オプション履歴だけを残す（皿の自動演奏・CONSTANT・SCATTER・CONVERGE。LR2: statplay.cpp:895）
 // ghost は判定の列、rseed は譜面の乱数の種（自己ベストを更新したときだけ残る）
+// entry は 1 回ごとのプレーの表に残す分（ずれの統計と入力の記録の場所。ここでゲージなどを足す）
 void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int lamp, const AppConfig& cfg, bool assist,
-                  bool lamp_only, bool count_only, bool course_stage, int ln_mode, const std::vector<int8_t>& ghost, uint32_t rseed) {
+                  bool lamp_only, bool count_only, bool course_stage, int ln_mode, int profile, const std::vector<int8_t>& ghost,
+                  uint32_t rseed, PlayEntry entry) {
     const PlayStats& s = j.stats();
     PlayRecord rec;
     rec.count_only = count_only;
@@ -114,14 +116,36 @@ void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int
     rec.course_stage = course_stage;
     rec.lamp_only = lamp_only;
     rec.ln_mode = ln_mode;
+    rec.profile = profile;
     rec.clear = lamp, rec.exscore = s.exscore(), rec.max_combo = s.max_combo;
     rec.judge = {s.judge_count[kPGreat], s.judge_count[kGreat], s.judge_count[kGood], s.judge_count[kBad], s.judge_count[kPoor]};
     rec.op_history = option_history(lamp, j.gauge_type(), cfg, assist);
     // 処理しなかったノーツは、どう終わっても BP に入れる（途中でやめたときも閉店したときも。LR2: statplay.cpp:992）
     rec.bp = s.bp() + s.total_notes - s.note_current;
     app.db.save_score(sha256, rec);
-    // 遅くして遊んだときは、ふだんの記録には回数しか残さない代わりに、中身を別の表に残す（画面には出さない）
-    if (count_only) app.db.log_play(sha256, rec, "slow", cfg.sound_fx.play_rate());
+    // カスタムゲージで遊んだときは、そのゲージのランプも残す（ランプは遊んでいるゲージだけで決める）
+    const int c = j.custom_play();
+    if (c >= 0 && !lamp_only && !count_only) {
+        int clamp = lamp >= 5 ? lamp - 2 : j.custom_cleared(c) ? 2 : 1;
+        app.db.save_custom_lamp(sha256, ln_mode, profile, cfg.custom_gauge, clamp);
+    }
+    // 1 回ごとのプレーの表には、全部のプレーを残す。遅くして遊んだときは、ふだんの記録には回数しか残さない代わりに、中身はここに残る
+    static const char* names[kGaugeCount] = {"GROOVE", "HARD", "HAZARD", "EASY", "P-ATTACK", "G-ATTACK"};
+    entry.kind = count_only ? "slow" : course_stage ? "course" : "";
+    entry.rate = cfg.sound_fx.play_rate();
+    entry.gauge = c >= 0 ? cfg.custom_gauge : names[j.gauge_type()];
+    entry.fast = s.fast, entry.slow = s.slow;
+    char buf[64];
+    for (int g = 0; g < kGaugeCount; ++g) {
+        std::snprintf(buf, sizeof(buf), "%s%s=%.1f", g ? "," : "", names[g], j.gauge().hp(g));
+        entry.gauges += buf;
+    }
+    const auto keys = app.custom_gauges();
+    for (int i = 0; i < j.custom_count() && i < static_cast<int>(keys.size()); ++i) {
+        std::snprintf(buf, sizeof(buf), "=%.1f", j.custom_hp(i));
+        entry.gauges += "," + keys[i].first + buf;
+    }
+    app.db.log_play(sha256, rec, entry);
 }
 
 void print_result(const Chart& chart, const JudgeEngine& j) {
@@ -133,7 +157,7 @@ void print_result(const Chart& chart, const JudgeEngine& j) {
     std::printf("  PG %d GR %d GD %d BD %d PR %d (空POOR %d) FAST %d SLOW %d / %d ノーツ\n", s.judge_count[kPGreat],
                 s.judge_count[kGreat], s.judge_count[kGood], s.judge_count[kBad], s.judge_count[kPoor], s.empty_poor,
                 s.fast, s.slow, s.total_notes);
-    std::printf("  ゲージ %.1f%%\n", j.gauge().hp(j.gauge_type()));
+    std::printf("  ゲージ %.1f%%\n", j.play_hp());
 }
 
 }  // namespace
@@ -183,20 +207,23 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         cfg.random = saved_cfg.random, cfg.gauge = saved_cfg.gauge, cfg.ln_mode = saved_cfg.ln_mode, cfg.hs_fix = saved_cfg.hs_fix;
         cfg.effect = saved_cfg.effect, cfg.assist = saved_cfg.assist, cfg.gas = saved_cfg.gas, cfg.hi_speed = saved_cfg.hi_speed;
         cfg.lane_cover = saved_cfg.lane_cover, cfg.lane_cover_v = saved_cfg.lane_cover_v, cfg.judge_timing = saved_cfg.judge_timing;
+        cfg.custom_gauge = saved_cfg.custom_gauge;
     }};
     // 開発用：BMJ_INPUT_REPLAY のファイルの入力を、手で押したものとして流す（記録・ゴースト・リプレイの保存はふだんどおり）
     bool feed_input = false;
     if (const char* f = dev_env("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) feed_input = load_replay(f, replay);
     if (opt.replay) {
         // 配置の作り方の版が違う記録は、同じ譜面を作れないので再生しない（古い版の作り方を残したら、ここで選ぶ）
-        if (!load_replay(replay_path(sha256), replay) || replay.sha256 != sha256 || replay.random_version != kRandomAlgorithmVersion) {
+        // プレーに影響する MOD の組み合わせが今と違う記録も、同じ判定にならないので再生しない
+        if (!load_replay(replay_path(sha256), replay) || replay.sha256 != sha256 || replay.random_version != kRandomAlgorithmVersion ||
+            replay.mods != play_mod_key(app.active_mods())) {
             std::fprintf(stderr, "リプレイが無い: %s\n", chart_path.c_str());
             opt.replay = false;
             return PlayExit::Back;
         }
         cfg.random = replay.random, cfg.gauge = replay.gauge, cfg.ln_mode = replay.ln_mode, cfg.hs_fix = replay.hs_fix;
         cfg.effect = replay.effect, cfg.assist = replay.assist, cfg.gas = replay.gas, cfg.hi_speed = replay.hi_speed;
-        cfg.lane_cover = replay.lane_cover, cfg.lane_cover_v = replay.lane_cover_v;
+        cfg.lane_cover = replay.lane_cover, cfg.lane_cover_v = replay.lane_cover_v, cfg.custom_gauge = replay.custom_gauge;
         opt.seed = replay.seed, opt.save_score = false, opt.autoplay = false;
     }
     BmsParseOptions popt;
@@ -253,8 +280,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     int start_green = cfg.fhs_green;  // 曲の始まりの緑数字（ギアチェンの「緑数字に戻す」で使う）
     // 記録は LN の種類ごとに分ける（種類を決めていない LN が無い譜面は 0 にまとめる）
     const int score_ln_mode = chart.free_ln_count() > 0 ? cfg.ln_mode : 0;
+    // プレーに影響する MOD（判定など）を使っているときは、組み合わせごとに別の記録にする
+    const int profile = app.mod_profile();
     ScoreRecord best_score;
-    bool has_best = app.db.get_score(sha256, best_score, score_ln_mode);
+    bool has_best = app.db.get_score(sha256, best_score, score_ln_mode, profile);
     Mixer& mixer = app.mixer;
 
     // 決定の音（LR2では決定画面で鳴る。BMjoyには決定画面が無いので、読み込みの間に鳴らす）
@@ -367,6 +396,16 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         jcfg.gauge_type = cfg.gauge;
         jcfg.gas = cfg.gas;
         jcfg.autoplay = opt.autoplay;
+        // MOD：カスタムゲージは全部を裏で計算し、選んでいればそれで遊ぶ。カスタム判定は 1 つだけ。GAS は MOD でも入れられる
+        const auto custom_gauges = app.custom_gauges();
+        for (size_t i = 0; i < custom_gauges.size(); ++i) {
+            jcfg.custom_gauges.push_back(*custom_gauges[i].second);
+            if (custom_gauges[i].first == cfg.custom_gauge) jcfg.custom_play = static_cast<int>(i);
+        }
+        for (const ModManifest* m : app.active_mods()) {
+            if (!m->judges.empty() && !jcfg.custom_judge) jcfg.custom_judge = m->judges.front();
+            jcfg.gas = jcfg.gas || m->gas;
+        }
         jcfg.assist_scratch = assist;
         jcfg.ln_mode = cfg.ln_mode;
         if (course) {
@@ -387,7 +426,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.judge_draw = 0;
         ctx.last_miss_ms = -1e9;
         // 自己ベストとターゲットのゴースト（LR2: Scene04_Play.cpp:1969）。リトライでは、記録し直した自己ベストを読み直す
-        if (retried) has_best = app.db.get_score(sha256, best_score, score_ln_mode);
+        if (retried) has_best = app.db.get_score(sha256, best_score, score_ln_mode, profile);
         const int total_notes = judge.stats().total_notes;
         ctx.best = Ghost{};
         if (has_best && !best_score.ghost.empty()) ctx.best.set_from_judges(decode_ghost(best_score.ghost));
@@ -423,6 +462,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.replay_rec = !opt.replay && !opt.autoplay && !course && cfg.replay_save > 0;
         // このプレイの判定の列（自己ベストを更新したらゴーストとして残す）と、リプレイに残す入力
         std::vector<int8_t> ghost_log;
+        // 判定のずれの統計（PGREAT〜BAD のずれの和と二乗の和。1 回ごとのプレーの表に残す）
+        int offset_n = 0;
+        double offset_sum = 0, offset_sq = 0;
         Replay record;
         size_t replay_pos = 0;
         bool audio_fading = false;  // リザルトを抜ける音のフェードを始めた
@@ -462,6 +504,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         bool recorded = false;
         PlayGraph graph;
         graph.start(judge.gauge());
+        // カスタムゲージで遊んでいるときは、見せるゲージの列を遊んでいるゲージの値で上書きする
+        const int graph_slot = judge.custom_play() >= 0 ? judge.display_gauge_type() : -1;
+        if (graph_slot >= 0) graph.hp[graph_slot][0] = static_cast<int>(judge.play_hp());
         // リザルト画面（LR2: Scene05_Result.cpp）。タイマーはプレイ画面とは別
         SkinTimers rtimers;
         uint64_t result_start_ns = 0;
@@ -486,6 +531,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             std::array<double, kGaugeCount> hp{};
             for (int g = 0; g < kGaugeCount; ++g) hp[g] = quit_early || judge.failed() ? 0.0 : judge.gauge().hp(g);
             graph.finish(hp, ps.combo, ps.exscore(), ctx.best.exscore(), ctx.target.exscore());
+            if (graph_slot >= 0) graph.overlay(graph_slot, quit_early || judge.failed() ? 0.0 : judge.play_hp());
             ctx.quit_early = quit_early;
             {
                 // 演奏中に押されたままの入力をリザルトに持ち込まない
@@ -500,22 +546,33 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.old_maxcombo = has_best ? best_score.max_combo : 0;
             ctx.old_minbp = has_best ? best_score.bp : -1;
             ctx.old_total_notes = has_best ? ps.total_notes : 0;
+            const int64_t played_at =
+                std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            const bool log_input = !recorded && !opt.autoplay && !opt.replay && started;
             if (!recorded && opt.save_score && !opt.autoplay && started && !(course && (lamp_only || slowed))) {
+                PlayEntry entry;
+                entry.played_at = played_at;
+                entry.offset_count = offset_n;
+                if (offset_n > 0) {
+                    entry.offset_mean = offset_sum / offset_n;
+                    entry.offset_sd = std::sqrt(std::max(0.0, offset_sq / offset_n - entry.offset_mean * entry.offset_mean));
+                }
+                if (log_input) entry.input_log = input_log_path(sha256, played_at);
                 record_score(app, sha256, judge, ctx.result_clear, cfg, assist, lamp_only, slowed, course != nullptr, score_ln_mode,
-                             ghost_log, popt.random_seed);
+                             profile, ghost_log, popt.random_seed, entry);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
                 // （コースのステージではフルコンボのときだけ上がる）
                 if ((!course || ctx.result_clear >= 5) && !slowed) ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
             }
-            // リプレイの保存（LR2: replaysave。Main.cpp:1796）。ALWAYS は毎回、HISCORE は EX が自己ベスト以上、
-            // CLEAR はクリア、FULLCOMBO はフルコンボのとき（どれも EX が 0 なら残さない）。コースのステージは残さない
             // 入力の記録（仕様書6章「リプレイ（入力ログ）」）。オートとリプレイの再生以外は、全部のプレーで 1 つずつ残す
-            if (!recorded && !opt.autoplay && !opt.replay && started) {
+            if (log_input) {
                 record.sha256 = sha256;
                 record.seed = popt.random_seed;
                 record.random_version = kRandomAlgorithmVersion;
                 record.judge_timing = cfg.judge_timing;
-                record.played_at = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                record.played_at = played_at;
+                record.mods = play_mod_key(app.active_mods());
+                record.custom_gauge = cfg.custom_gauge;
                 record.random = cfg.random, record.gauge = cfg.gauge, record.ln_mode = cfg.ln_mode, record.hs_fix = cfg.hs_fix;
                 record.effect = cfg.effect, record.assist = cfg.assist, record.gas = cfg.gas, record.hi_speed = cfg.hi_speed;
                 record.lane_cover = cfg.lane_cover, record.lane_cover_v = cfg.lane_cover_v;
@@ -845,7 +902,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                                    ? (ps0.judge_count[kGood] + (ps0.judge_count[kGreat] + ps0.judge_count[kPGreat] * 2) * 2) * 50000.0 / ps0.total_notes
                                    : 0;
                 score_tw.aim(static_cast<int>(score), now_ms, 500);
-                double hp = judge.gauge().hp(judge.gauge_type());
+                double hp = judge.play_hp();
                 hp_tw.aim(hp, now_ms, std::abs(hp_tw.at(now_ms) - hp) * 10);
                 ctx.score_print = score_tw.at(now_ms);
                 ctx.hp_print = hp_tw.at(now_ms);
@@ -1023,7 +1080,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         else if (j == kEmptyPoor) ctx.last_fast_slow = 1;
                         else if (je.has_offset) ctx.last_fast_slow = je.fast ? 1 : 2;
                         else ctx.last_fast_slow = 2;
-                        if (je.has_offset) ctx.last_offset_ms = je.offset_ms;
+                        if (je.has_offset) {
+                            ctx.last_offset_ms = je.offset_ms;
+                            ++offset_n, offset_sum += je.offset_ms, offset_sq += static_cast<double>(je.offset_ms) * je.offset_ms;
+                        }
                         if (j < kGood) ctx.last_miss_ms = at, last_miss_ms = at;
                         ctx.judge_draw = j;
                         ctx.timers.set(46, at);
@@ -1073,10 +1133,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 const PlayStats& ps = judge.stats();
                 graph.log(static_cast<int>(song_ms), static_cast<int>(chart.end_us / 1000), judge.gauge(), ps.combo,
                           ps.exscore(), ctx.best.exscore(), ctx.target.exscore());
+                if (graph_slot >= 0) graph.overlay(graph_slot, judge.play_hp());
                 if (!last_note_set && ps.note_current >= ps.total_notes) ctx.timers.set(143, now_ms), last_note_set = true;
                 if (!fc_set && ps.total_notes > 0 && ps.combo == ps.total_notes) ctx.timers.set(48, now_ms), fc_set = true;
                 // ゲージのタイマー（LR2: ApplyJudgeNote の 42/44）
-                int hp = static_cast<int>(judge.gauge().hp(judge.gauge_type())) / 2 * 2;
+                int hp = static_cast<int>(judge.play_hp()) / 2 * 2;
                 // 初期値が 100% のゲージ（HARD 系）は、曲が始まった時点で MAX（LR2: タイマー41 と同時に 44）
                 if (old_hp < 0 && hp == 100) ctx.timers.set(44, now_ms);
                 if (old_hp >= 0 && hp != old_hp) {
@@ -1090,7 +1151,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 old_hp = hp;
 
                 // コースでは GROOVE/EASY も 2% を割ると閉店する
-                bool survival = course || !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
+                bool survival = course || !(judge.display_gauge_type() == kGroove || judge.display_gauge_type() == kEasy);
                 if (survival && judge.failed()) {
                     phase = Phase::Failed;
                     ctx.timers.set(3, now_ms);
@@ -1173,7 +1234,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.chart = &chart;
                 st.judge = &judge;
                 st.graph = &graph;
-                st.graph_gauge = judge.gauge_type();
+                st.graph_gauge = judge.display_gauge_type();
                 st.total_notes = judge.stats().total_notes;
                 st.chart_op3 = chart_op3;
                 st.chart_op4 = chart_op4;
@@ -1214,8 +1275,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.show_judge = !silent;
                 // 判定の絵の横のコンボは、コースならコース通し（LR2: Play.cpp:237）
                 st.combo_draw = course ? judge.stats().course_combo : judge.stats().combo;
-                st.gauge_hp = ctx.hp_print >= 0 ? ctx.hp_print : judge.gauge().hp(judge.gauge_type());
-                st.gauge_survival = course || !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
+                st.gauge_hp = ctx.hp_print >= 0 ? ctx.hp_print : judge.play_hp();
+                st.gauge_survival = course || !(judge.display_gauge_type() == kGroove || judge.display_gauge_type() == kEasy);
                 st.scratch_angle = scratch_angle;
                 st.bga = &bga_textures;
                 st.bga_base = bga_base;
@@ -1336,7 +1397,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     const bool assist = cfg.assist && cfg.random != kConverge;
 
     ScoreRecord best;
-    const bool has_best = app.db.get_score(course.hash, best);
+    const bool has_best = app.db.get_score(course.hash, best, 0, app.mod_profile());
     PlayContext ctx;
     ctx.course = &course;
     ctx.course_stage = cr.stage;
@@ -1357,6 +1418,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     ctx.best_exscore = ctx.old_exscore;
     if (opt.save_score && !opt.autoplay) {
         PlayRecord rec;
+        rec.profile = app.mod_profile();
         rec.clear = clear, rec.exscore = total.exscore(), rec.max_combo = total.max_combo;
         rec.judge = {total.judge_count[kPGreat], total.judge_count[kGreat], total.judge_count[kGood], total.judge_count[kBad],
                      total.judge_count[kPoor]};

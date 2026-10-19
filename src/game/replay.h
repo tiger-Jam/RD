@@ -26,6 +26,8 @@ struct Replay {
     bool assist = false, gas = false;
     // 見た目のオプション（再生でも同じ見え方にする）
     int hi_speed = 100, lane_cover = 0, lane_cover_v = 0;
+    // MOD：プレーに影響する MOD の組み合わせ（play_mod_key）と、遊んだカスタムゲージの鍵（無ければ空）
+    std::string mods, custom_gauge;
     std::vector<ReplayEvent> events;
 };
 

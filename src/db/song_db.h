@@ -54,9 +54,23 @@ struct PlayRecord {
     bool lamp_only = false;
     // 回数だけを残す（ランプも変えない。曲を遅くして遊んだとき。LR2: statplay.cpp:791）
     bool count_only = false;
-    int ln_mode = 0;
+    int ln_mode = 0;  // 記録を分ける LN の種類（種類を決めていない LN が無い譜面は 0）
+    int profile = 0;  // MOD の組み合わせの番号（mod_profile）
     int rseed = -1, op_best = 0;
-    std::string ghost;  // 判定の列（LR2 のゴーストの文字列）  // 記録を分ける LN の種類（種類を決めていない LN が無い譜面は 0）
+    std::string ghost;  // 判定の列（LR2 のゴーストの文字列）
+};
+
+// 1 回ごとのプレー（仕様書8章 play の表）。ふだんの記録（score）とは別に、全部のプレーを 1 行ずつ残す。画面には出さない
+struct PlayEntry {
+    std::string kind;            // "" ふだん、"slow" 曲を遅くした、"course" コースのステージ
+    double rate = 1.0;           // 曲の速さ
+    std::string gauge;           // 遊んだゲージ（"GROOVE" などか、カスタムゲージの鍵「MOD の id/ゲージの id」）
+    std::string gauges;          // 裏で計算した全部のゲージの最後の値（"GROOVE=80.0,HARD=0.0,…,exhard/exhard=12.0"）
+    int fast = 0, slow = 0;
+    int offset_count = 0;        // ずれを数えた判定の数（PGREAT〜BAD）
+    double offset_mean = 0, offset_sd = 0;  // ずれの平均と標準偏差（ms。正が遅い）
+    std::string input_log;       // 入力の記録のファイル
+    int64_t played_at = 0;
 };
 
 // プレイヤーの累計（LR2: player 表。スキンの数値 30〜37）
@@ -91,19 +105,25 @@ public:
     void set_chart_text(const std::string& path, const std::string& title, const std::string& subtitle, const std::string& genre,
                         const std::string& artist, const std::string& subartist);
     // ln_mode：LN の種類（種類を決めていない LN のある譜面だけ、その種類の記録を読む）
-    std::vector<ScoreRecord> all_scores(int ln_mode = 0) const;
+    // profile は MOD の組み合わせの番号（mod_profile。0 は MOD 無し。LR2 から取り込んだ記録は 0 のときだけ）
+    std::vector<ScoreRecord> all_scores(int ln_mode = 0, int profile = 0) const;
     bool find_by_md5(const std::string& md5, ChartRecord& out) const;
     // お気に入り（LR2: favorite）。md5 → 1 = FAVORITE 2 = IGNORE（0 は書かない）
     std::unordered_map<std::string, int> favorites() const;
-    // ふだんの記録には混ぜない 1 回ごとのプレイの記録（画面には出さない。MOD などがあとで読む）。
-    // kind はなぜ分けたか（"slow" = 曲を遅くして遊んだ）、rate はそのときの速さの倍率
-    void log_play(const std::string& sha256, const PlayRecord& r, const std::string& kind, double rate);
+    // 1 回ごとのプレーの記録（play の表。全部のプレーを残し、画面には出さない。MOD などがあとで読む）。
+    // 前の版が使っていた play_log（遅くして遊んだときだけ）は読むだけ残す
+    void log_play(const std::string& sha256, const PlayRecord& r, const PlayEntry& e);
+    // カスタムゲージのランプ（遊んだカスタムゲージごとの一番よいもの。1 FAILED、2 クリア、3 フルコンボ、4 PERFECT）
+    void save_custom_lamp(const std::string& sha256, int ln_mode, int profile, const std::string& gauge, int lamp);
+    std::unordered_map<std::string, int> custom_lamps(const std::string& sha256, int ln_mode, int profile) const;
     void set_favorite(const std::string& md5, int value);
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）
     void save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo);
     void save_score(const std::string& sha256, const PlayRecord& r);
     PlayerStats player_stats() const;
-    bool get_score(const std::string& sha256, ScoreRecord& out, int ln_mode = 0) const;
+    bool get_score(const std::string& sha256, ScoreRecord& out, int ln_mode = 0, int profile = 0) const;
+    // プレーに影響する MOD の組み合わせ（play_mod_key）を記録の番号にする。空なら 0。初めての組み合わせなら新しく振る
+    int mod_profile(const std::string& key);
     // LR2のスコアデータベース（LR2files/Database/Score/<名前>.db）を取り込む。取り込んだ件数を返す（失敗なら -1）。
     // 手元に無い譜面のスコアも MD5 のまま残し、表示するときに BMjoy の記録と合わせて良いほうを使う
     int import_lr2_scores(const std::string& lr2_score_db, std::string* error = nullptr);

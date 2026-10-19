@@ -425,7 +425,8 @@ void load_charts(Library& lib, const SongDb& db, const AppConfig& cfg) {
 // プレイオプションのパネルを開いている間の鍵盤（LR2: Songselect.cpp:1350 SetPlayOption）。
 //   1=鍵盤数の絞り込み 2=RANDOM 3=BATTLE 4=GAUGE 5=HS- 7=HS+ 6=ASSIST 6+7=HIDDEN/SUDDEN 5+7=HS-FIX
 // BMjoy にまだ無いもの（BATTLE）は何もしない。変えたら true
-bool play_option_keys(AppConfig& cfg, const InputMapper& input, const std::vector<ButtonInput>& buttons) {
+bool play_option_keys(App& app, const InputMapper& input, const std::vector<ButtonInput>& buttons) {
+    AppConfig& cfg = app.cfg;
     bool pressed[8] = {};
     for (const ButtonInput& b : buttons)
         if (b.down && b.button >= kKey1 && b.button <= kKey7) pressed[b.button - kKey1 + 1] = true;
@@ -439,7 +440,7 @@ bool play_option_keys(AppConfig& cfg, const InputMapper& input, const std::vecto
     };
     bool changed = false;
     if (pressed[1]) loop(0, 7, 1, cfg.select_mode), changed = true;  // 鍵盤数の絞り込み
-    if (pressed[4]) loop(kGroove, kGAttack, 1, cfg.gauge), changed = true;
+    if (pressed[4]) app.cycle_gauge(1), changed = true;  // ゲージ（使っている MOD のカスタムゲージも並ぶ）
     if (pressed[2]) loop(0, 5, 1, cfg.random), changed = true;  // RANDOM
     if (pressed[6] && !down(7)) cfg.assist = !cfg.assist, changed = true;  // ASSIST（皿の自動演奏）
     if ((pressed[6] && held(7)) || (pressed[7] && held(6))) loop(0, 3, -1, cfg.effect), changed = true;
@@ -512,7 +513,8 @@ void run_select(App& app) {
         if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
         lib->tables.push_back(std::move(t));
     }
-    for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
+    const int profile = app.mod_profile();  // MOD の組み合わせごとに記録を分ける
+    for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
     std::unordered_map<std::string, int> favs = app.db.favorites();
     load_custom(*lib, app.cfg, favs);
     std::vector<Entry> root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
@@ -534,7 +536,7 @@ void run_select(App& app) {
         std::vector<DifficultyTable> keep_tables;
         if (!only_under.empty()) keep_tables = lib->tables;
         worker = std::thread([&, scan_songs, only_under, keep_tables = std::move(keep_tables), dirs = app.cfg.song_dirs,
-                              urls = app.cfg.tables, ln_mode = app.cfg.ln_mode] {
+                              urls = app.cfg.tables, ln_mode = app.cfg.ln_mode, profile] {
             // 曲データベースは別の接続で書く（書き込みはこのスレッドだけ）
             SongDb wdb;
             ScanStats st;
@@ -544,7 +546,7 @@ void run_select(App& app) {
             next->roots = dirs;
             next->charts = wdb.all_charts();
             fill_difficulties(next->charts);
-            for (const ScoreRecord& s : wdb.all_scores(ln_mode)) next->scores[s.sha256] = s;
+            for (const ScoreRecord& s : wdb.all_scores(ln_mode, profile)) next->scores[s.sha256] = s;
             if (!only_under.empty()) next->tables = keep_tables;
             else
                 for (const std::string& u : urls) next->tables.push_back(update_table(table_cache_dir(), u));
@@ -571,7 +573,7 @@ void run_select(App& app) {
                     lib2->roots = dirs;
                     lib2->charts = wdb.all_charts();
                     fill_difficulties(lib2->charts);
-                    for (const ScoreRecord& s : wdb.all_scores(ln_mode)) lib2->scores[s.sha256] = s;
+                    for (const ScoreRecord& s : wdb.all_scores(ln_mode, profile)) lib2->scores[s.sha256] = s;
                     lib2->tables = next->tables;
                     std::snprintf(buf, sizeof(buf), "譜面を読んでいます %d / %d", done, total);
                     std::lock_guard<std::mutex> lock(mu);
@@ -1049,11 +1051,11 @@ void run_select(App& app) {
                 auto lib2 = std::make_shared<Library>();
                 load_charts(*lib2, app.db, app.cfg);
                 lib2->tables = lib->tables;
-                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib2->scores[s.sha256] = s;
+                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib2->scores[s.sha256] = s;
                 std::lock_guard<std::mutex> lock(mu);
                 pending = lib2;
             } else {
-                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
+                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
                 folder_lamps.clear();
                 // 記録で集めるカスタムフォルダ（クリアやランク）を作り直す
                 if (!lib->custom_nodes.empty()) {
@@ -1432,7 +1434,10 @@ void run_select(App& app) {
                             decide();
                             autoplay = was;
                         }
-                    } else if (ty == 40) loop(app.cfg.gauge, kGroove, kGAttack);
+                    } else if (ty == 40) {
+                        app.cycle_gauge(dir > 0 ? 1 : -1);
+                        app.mixer.play_system(kSysOptionChange);
+                    }
                     else if (ty == 46) app.cfg.lane_cover = !app.cfg.lane_cover, app.mixer.play_system(kSysOptionChange);
                     else if (ty == 42) loop(app.cfg.random, 0, 5);
                     else if (ty == 17) {
@@ -1683,7 +1688,7 @@ void run_select(App& app) {
         if (panel == 1) {
             // 開いている間は、鍵盤はオプションの変更に使う
             const int old_mode = mode_filter;
-            if (play_option_keys(app.cfg, input, buttons)) app.mixer.play_system(kSysOptionChange);
+            if (play_option_keys(app, input, buttons)) app.mixer.play_system(kSysOptionChange);
             if (mode_filter != old_mode) reapply_view(false);
             buttons.clear();
         }
@@ -1952,6 +1957,11 @@ void run_select(App& app) {
             sctx.mode_name = kModeNames[mode_filter];
             sctx.sort_name = kSortNames[sort_mode];
             sctx.autoplay = autoplay;
+            // カスタムゲージを選んでいれば、その名前と、ゲージのボタンの絵（落ちるものは HARD、落ちないものは GROOVE の絵）
+            sctx.custom_gauge_name.clear();
+            sctx.custom_gauge_frame = -1;
+            for (const auto& [key, g] : app.custom_gauges())
+                if (key == app.cfg.custom_gauge) sctx.custom_gauge_name = g->name, sctx.custom_gauge_frame = g->survival ? kHard : kGroove;
             if (auto f = sctx.type == 0 && sctx.chart ? favs.find(sctx.chart->md5) : favs.end(); f != favs.end()) sctx.favorite = f->second;
             else sctx.favorite = 0;
             {

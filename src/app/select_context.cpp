@@ -256,7 +256,7 @@ std::string SelectContext::text(int id) const {
     case 62: return opt("DIFFICULTY", difficulty_filter);
     case 63: return opt("RANDOM", cfg->random);
     case 64: return opt("RANDOM", 0);
-    case 65: return opt("GAUGE", cfg->gauge);
+    case 65: return custom_gauge_name.empty() ? opt("GAUGE", cfg->gauge) : custom_gauge_name;
     case 66: return opt("GAUGE", 0);
     case 67: return opt("ASSIST", cfg->assist ? 1 : 0);
     case 68: return opt("ASSIST", 0);
@@ -303,7 +303,7 @@ int SelectContext::button(int t) const {
     case 31: return cfg->volume_on ? 1 : 0;
     case 32: return cfg->sound_fx.pitch_on ? 1 : 0;
     case 33: return cfg->sound_fx.pitch_type;
-    case 40: return cfg->gauge;
+    case 40: return custom_gauge_frame >= 0 ? custom_gauge_frame : cfg->gauge;
     case 41: return 0;
     case 46: return cfg->lane_cover ? 1 : 0;
     case 42: return cfg->random;

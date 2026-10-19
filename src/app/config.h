@@ -83,6 +83,9 @@ struct AppConfig {
     int select_difficulty = 0, select_mode = 0, select_sort = 0;
     bool no_right_click_exit = false;
     bool folder_lamp = false;
+    // MOD（仕様書14章）。使う MOD の id と、カスタムゲージで遊ぶならその鍵（「MOD の id/ゲージの id」。空なら gauge の LR2 のゲージ）
+    std::vector<std::string> enabled_mods;
+    std::string custom_gauge;
     bool watch_folders = true;  // 曲フォルダを見張って、変わったフォルダを選曲画面のまま読み直す（BMjoy の拡張）
     std::map<std::string, SkinAdjust> skin_adjust;  // プレイスキンのパス → 位置の調整（LR2: SkinCustomize の shift など）
     int title_flash = 24;  // この時間（時間）より後に見つけた譜面を新曲にする（LR2: titleflash）  // フォルダのバーにランプを付ける（LR2: folderlamp）  // 演奏中の右クリックで曲を終えない（LR2: disableleftclickexit）
@@ -133,5 +136,10 @@ std::string table_cache_dir();
 std::string replay_path(const std::string& sha256);
 // 全プレーの入力の記録（設定フォルダの inputlog/<sha256>/<日時>.bjr）
 std::string input_log_path(const std::string& sha256, int64_t played_at);
+// MOD の置き場所：公式（実行ファイルの横の mods/）と利用者のもの（設定フォルダの mods/）。
+// MOD が書いてよいのは設定フォルダの moddata/<MOD の id>/ だけ
+std::string official_mods_dir();
+std::string user_mods_dir();
+std::string mod_data_dir(const std::string& id);
 
 }  // namespace bmj
