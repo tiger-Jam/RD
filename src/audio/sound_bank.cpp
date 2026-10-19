@@ -9,6 +9,7 @@
 #include <mutex>
 #include <thread>
 
+#include "dr_flac.h"
 #include "dr_mp3.h"
 #include "dr_wav.h"
 #include "miniaudio.h"
@@ -22,16 +23,26 @@ namespace bmj {
 
 namespace {
 
-enum class Format { Unknown, Wav, Ogg, Mp3 };
+enum class Format { Unknown, Wav, Ogg, Mp3, Flac };
 
 Format sniff(const std::string& path) {
     FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) return Format::Unknown;
     unsigned char h[12] = {};
     size_t n = std::fread(h, 1, sizeof(h), f);
+    // ID3v2 のタグが前に付いた FLAC もある。タグを飛ばした先が "fLaC" なら FLAC
+    bool id3_flac = false;
+    if (n >= 10 && std::memcmp(h, "ID3", 3) == 0) {
+        long tag = ((h[6] & 0x7F) << 21) | ((h[7] & 0x7F) << 14) | ((h[8] & 0x7F) << 7) | (h[9] & 0x7F);
+        unsigned char m[4] = {};
+        id3_flac = std::fseek(f, 10 + tag + ((h[5] & 0x10) ? 10 : 0), SEEK_SET) == 0 && std::fread(m, 1, 4, f) == 4 &&
+                   std::memcmp(m, "fLaC", 4) == 0;
+    }
     std::fclose(f);
     if (n >= 4 && std::memcmp(h, "RIFF", 4) == 0) return Format::Wav;
     if (n >= 4 && std::memcmp(h, "OggS", 4) == 0) return Format::Ogg;
+    if (n >= 4 && std::memcmp(h, "fLaC", 4) == 0) return Format::Flac;
+    if (id3_flac) return Format::Flac;
     if (n >= 3 && std::memcmp(h, "ID3", 3) == 0) return Format::Mp3;
     if (n >= 2 && h[0] == 0xFF && (h[1] & 0xE0) == 0xE0) return Format::Mp3;
     return Format::Unknown;
@@ -83,6 +94,15 @@ bool decode_sound_file(const std::string& path, uint32_t out_rate, Sample& out, 
         if (data) {
             ok = convert(data, f, c.channels, c.sampleRate, out_rate, out);
             drmp3_free(data, nullptr);
+        }
+        break;
+    }
+    case Format::Flac: {
+        drflac_uint64 f = 0;
+        data = drflac_open_file_and_read_pcm_frames_f32(path.c_str(), &ch, &rate, &f, nullptr);
+        if (data) {
+            ok = convert(data, f, ch, rate, out_rate, out);
+            drflac_free(data, nullptr);
         }
         break;
     }

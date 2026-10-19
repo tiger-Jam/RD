@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -72,10 +73,65 @@ struct Obj {
     double real_ms = 0.0;
     double beat = 0.0;  // スクロール位置（拍）
     double real_ln = -1.0, beat_ln = 0.0;
+    double bpm = 0.0;   // この位置での BPM（主 BPM を数えるため）
     int mine = 0;
 };
 
+// 選曲用のテキストのヘッダー「#NAME 値」。名前の直後の 1 文字（空白かタブ）を区切りとする（LR2: fileutil:271）
+bool text_header(const std::string& up, const std::string& org, const char* name, std::string& out) {
+    size_t n = std::char_traits<char>::length(name);
+    if (up.size() <= n || up.compare(0, n, name) != 0 || (org[n] != ' ' && org[n] != '\t')) return false;
+    out = std::string(trim(std::string_view(org).substr(n + 1)));
+    return true;
+}
+
+// 選曲用の整数のヘッダー。区切りの次から整数として読めたときだけ値を替える（LR2: songmanage:166 GetRawBodyInt）
+bool int_header(const std::string& up, const char* name, int& out) {
+    size_t n = std::char_traits<char>::length(name);
+    if (up.size() <= n + 1 || up.compare(0, n, name) != 0 || (up[n] != ' ' && up[n] != '\t')) return false;
+    int v = 0;
+    auto r = std::from_chars(up.data() + n + 1, up.data() + up.size(), v);
+    if (r.ec == std::errc()) out = v;
+    return true;
+}
+
 }  // namespace
+
+void guess_difficulty_lr2(std::string_view text, int& difficulty, std::string* title, std::string* subtitle) {
+    std::string up = to_upper_ascii(text);
+    auto ends = [&](std::string_view t) { return up.size() >= t.size() && std::string_view(up).substr(up.size() - t.size()) == t; };
+    // 末尾の言葉（後に書いたものが勝つ）
+    if (ends("HARD")) difficulty = 2;
+    if (ends("HYPER")) difficulty = 3;
+    if (ends("ANOTHER")) difficulty = 4;
+    if (ends("EASY")) difficulty = 1;
+    if (ends("EX")) difficulty = 4;
+    if (ends("MANIAC")) difficulty = 4;
+    // 末尾の括弧。開きは最後の文字より前で一番右にあるもの。開きが先頭なら分けない
+    static const std::pair<std::string_view, std::string_view> kTokens[] = {
+        {"(", ")"}, {"[", "]"}, {"-", "-"}, {"\"", "\""}, {"<", ">"}, {"\uFF5E", "\uFF5E"}, {"\u3010", "\u3011"}};
+    for (auto [l, r] : kTokens) {
+        if (up.size() < l.size() + 1) continue;
+        size_t pos = up.rfind(l, up.size() - 1 - l.size());
+        if (pos == std::string::npos || pos == 0 || !ends(r)) continue;
+        if (title) *title = std::string(trim(text.substr(0, pos)));
+        if (subtitle) *subtitle = std::string(trim(text.substr(pos)));
+        // 括弧の中の言葉。上から順に、最初に含まれていたもの
+        static const std::pair<std::string_view, int> kWords[] = {
+            {"BEG", 1}, {"HARD", 3}, {"HYPE", 3}, {"HD", 3}, {"5H", 3}, {"7H", 3}, {"10H", 3}, {"14H", 3}, {"9H", 3},
+            {"DIF", 3}, {"VERYHARD", 4}, {"EX", 4}, {"AN", 4}, {"SHD", 4}, {"5A", 4}, {"7A", 4}, {"10A", 4}, {"14A", 4},
+            {"9A", 4}, {"ULT", 4}, {"MANI", 4}, {"LUNA", 4}, {"AHO", 4}, {"AFO", 4}, {"ASDF", 4}, {"HELL", 4}};
+        std::string_view in = std::string_view(up).substr(pos + 1);
+        for (auto [w, v] : kWords)
+            if (in.find(w) != std::string_view::npos) {
+                difficulty = v;
+                break;
+            }
+        return;
+    }
+    if (title) *title = std::string(text);
+    if (subtitle) subtitle->clear();
+}
 
 BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts) {
     BmsParseResult res;
@@ -98,6 +154,8 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     Lr2Random rng(opts.random_seed);
     int order = 0;
 
+    // UTF-8 の BOM は落とす（LR2 は CP932 として読むので 1 行目ごと捨ててしまうが、UTF-8 を読む以上は落とす）
+    if (text.substr(0, 3) == "\xEF\xBB\xBF") text.remove_prefix(3);
     std::istringstream in{std::string(text)};
     std::string raw;
     while (std::getline(in, raw)) {
@@ -108,8 +166,13 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
         std::string org(sv);
         std::string up = to_upper_ascii(org);
 
-        // #RANDOM / #IF / #ENDIF は、読み飛ばし中の行でも評価する（LR2: bmsload:2317）
-        if (starts_with(up, "#RANDOM")) {
+        // #RANDOM / #IF / #ENDIF は、読み飛ばし中の行でも評価する（LR2: bmsload:2317）。
+        // 選曲用の読み込みは #RANDOM を評価せず、「#IF 1」で始まらない #IF の中を読み飛ばす。
+        // こちらは大文字小文字を区別する（LR2: songmanage:2952-2957）
+        if (opts.select_meta) {
+            if (starts_with(org, "#IF")) if_on = starts_with(org, "#IF 1");
+            else if (starts_with(org, "#ENDIF")) if_on = true;
+        } else if (starts_with(up, "#RANDOM")) {
             int n = std::atoi(up.size() > 8 ? up.c_str() + 8 : "");
             random_val = rng.get_rand(n - 1) + 1;
             res.random_values.push_back(random_val);
@@ -184,33 +247,41 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
             int id = base_id(org[4], org[5], base62);
             if (id >= 0 && id < kSlots) chart.bmp[id] = std::string(trim(std::string_view(org).substr(7)));
         } else {
-            // 以下は選曲画面用のメタデータ（LR2: ParseBMSMETA）
-            auto rest = [&](size_t n) { return std::string(trim(std::string_view(org).substr(std::min(n, org.size())))); };
-            if (starts_with(up, "#TITLE ")) chart.meta.title = rest(7);
-            else if (starts_with(up, "#SUBTITLE ")) chart.meta.subtitle = rest(10);
-            else if (starts_with(up, "#ARTIST ")) chart.meta.artist = rest(8);
-            else if (starts_with(up, "#SUBARTIST ")) chart.meta.subartist = rest(11);
-            else if (starts_with(up, "#GENRE ")) chart.meta.genre = rest(7);
-            else if (starts_with(up, "#STAGEFILE ")) chart.meta.stagefile = rest(11);
-            else if (starts_with(up, "#BANNER ")) chart.meta.banner = rest(8);
-            else if (starts_with(up, "#BACKBMP ")) chart.meta.backbmp = rest(9);
-            else if (starts_with(up, "#PLAYLEVEL ")) chart.meta.playlevel = std::atoi(up.c_str() + 11);
-            else if (starts_with(up, "#DIFFICULTY ")) chart.meta.difficulty = std::atoi(up.c_str() + 12);
+            // 以下は選曲画面用のメタデータ（LR2: ParseBMSMETA の ParseTextCommand。songmanage:208）
+            ChartMeta& m = chart.meta;
+            std::string v;
+            if (text_header(up, org, "#TITLE", v)) {
+                // 末尾の括弧を副題に分ける。分けられなければ副題は空（前の #SUBTITLE も消える）
+                guess_difficulty_lr2(v, m.difficulty, &m.title, &m.subtitle);
+            } else if (text_header(up, org, "#GENRE", v)) {
+                m.genre = v;
+                guess_difficulty_lr2(v, m.difficulty, nullptr, nullptr);
+            } else if (text_header(up, org, "#CATEGORY", v)) m.genre = v;
+            else if (text_header(up, org, "#SUBTITLE", v)) m.subtitle = v;
+            else if (text_header(up, org, "#ARTIST", v)) m.artist = v;
+            else if (text_header(up, org, "#SUBARTIST", v)) m.subartist = v;
+            else if (text_header(up, org, "#INFORMATION_A", v)) m.artist = v;
+            else if (text_header(up, org, "#INFORMATION_B", v)) m.subartist = v;
+            else if (text_header(up, org, "#STAGEFILE", v)) m.stagefile = v;
+            else if (text_header(up, org, "#BANNER", v)) m.banner = v;
+            else if (text_header(up, org, "#BACKBMP", v)) m.backbmp = v;
+            else if (int_header(up, "#PLAYLEVEL", m.playlevel)) {}
+            else if (int_header(up, "#MAXTRACKS", m.playlevel)) {}  // LR2 は #PLAYLEVEL を上書きする（songmanage:2969）
+            else if (int_header(up, "#DIFFICULTY", m.difficulty)) {}  // 推定と同じく、後に書いたほうが勝つ
         }
     }
 
-    // DP（2P側）とPMSはこのプレイヤーの対象外
+    // DP（2P側）とPMSはこのプレイヤーの対象外。2P 側の地雷（E1〜E9）は LR2 も鍵盤数の判定に数えない
+    // （songmanage:2996）ので、それだけなら SP の譜面として読み、地雷は捨てる
+    bool p2_mine = false;
     for (const Obj& o : objs) {
-        if ((o.op >= 20 && o.op <= 29) || (o.op >= 40 && o.op <= 49) || (o.op >= 60 && o.op <= 69) ||
-            (o.op >= 140 && o.op <= 149)) {
+        if ((o.op >= 20 && o.op <= 29) || (o.op >= 40 && o.op <= 49) || (o.op >= 60 && o.op <= 69)) {
             res.error = "2P側のノーツがある（DP譜面は非対応）";
             return res;
         }
+        if (o.op >= 140 && o.op <= 149) p2_mine = true;
     }
-    if (now_bpm <= 0.0) {
-        res.error = "#BPM が無い";
-        return res;
-    }
+    if (p2_mine) res.warnings.push_back("2P 側の地雷を捨てた");
 
     // 小節0の頭にノーツがあれば、全体を1小節後ろにずらす（LR2: bmsload:2581）
     bool shift = false;
@@ -220,6 +291,8 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
         for (Obj& o : objs) o.pos += 1.0;
         std::map<int, double> shifted;
         for (auto& [m, l] : measure_len) shifted[m + 1] = l;
+        // 頭に足した空の小節の長さは、元の小節 0 の長さ（#00002）になる（LR2: bmsload:2589）
+        if (auto it = measure_len.find(0); it != measure_len.end()) shifted[0] = it->second;
         measure_len = std::move(shifted);
     }
 
@@ -241,8 +314,9 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
         return a.op < b.op;
     });
 
-    // 時刻とスクロール位置を求める（LR2: bmsload:2670-2935）
-    chart.initial_bpm = now_bpm;
+    // 時刻とスクロール位置を求める（LR2: bmsload:2670-2935）。
+    // #BPM が無くても読む（LR2 は開始 BPM 0 のまま進める）。小節 0 の頭の 03/08 で BPM が決まれば普通に遊べる
+    const double header_bpm = now_bpm;
     double real_ms = 0.0, beat = 0.0, prev_pos = 0.0, mea_len = 1.0;
     int pending_stop = 0;
     auto push_seg = [&](double t_ms, double b, double bpm, bool stopped) {
@@ -269,6 +343,11 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
                 push_seg(real_ms, beat, now_bpm, false);
                 pending_stop = 0;
             }
+            if (now_bpm <= 0.0) {
+                // LR2 は時刻が無限大に飛んで遊べなくなる
+                res.error = "#BPM が無い（曲の頭で BPM も決めていない）";
+                return res;
+            }
             double d = o.pos - prev_pos;
             real_ms += 240.0 / now_bpm * mea_len * d * 1000.0;
             beat += 4.0 * mea_len * d;
@@ -276,6 +355,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
         }
         o.real_ms = real_ms;
         o.beat = beat;
+        o.bpm = now_bpm;  // 同じ位置の BPM の変更は先に処理してある
         if (o.op == 2) {
             mea_len = o.val;
             BarLine bl;
@@ -301,6 +381,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
             pending_stop = (id >= 0 && id < kSlots) ? stop_slot[id] : -1;  // 同じ位置のSTOPは最後のものだけ
         }
     }
+    chart.initial_bpm = header_bpm > 0.0 ? header_bpm : chart.scroll.front().bpm;
 
     // LNの組み立て。時刻順に見て、5x/6xは始点と終点を交互に、#LNOBJは直前のノーツの終点にする（LR2: bmsload:2755）
     std::stable_sort(objs.begin(), objs.end(), [](const Obj& a, const Obj& b) {
@@ -348,6 +429,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     std::vector<Note> lane_notes;
     auto to_us = [](double ms) { return static_cast<int64_t>(std::llround(ms * 1000.0)); };
     bool has_scratch = false;
+    std::map<double, int> per_bpm;  // 主 BPM 用。重なりで捨てるノーツも数える（LR2: bmsload:2899）
     for (const Obj& o : objs) {
         if (o.op == 1) {
             chart.bgm.push_back({to_us(o.real_ms), static_cast<uint16_t>(o.val)});
@@ -372,6 +454,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
             continue;
         }
         if (o.op < 10 || o.op > 17) continue;
+        per_bpm[o.bpm]++;
         int lane = o.op - 10;
         Note n;
         n.time_us = to_us(o.real_ms);
@@ -397,7 +480,8 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
                 if (n.time_us != p.time_us) {
                     last_in_lane[lane] = static_cast<int>(lane_notes.size());
                     lane_notes.push_back(n);
-                } else if (n.kind == NoteKind::Long) {
+                } else if (n.kind == NoteKind::Long && n.end_us > n.time_us) {
+                    // 長さ 0 の LN は上書きしない（LR2: bmsload:3678）
                     p = n;
                 } else {
                     res.warnings.push_back("同じ時刻に重なったノーツを捨てた");
@@ -416,9 +500,6 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     chart.layout = has_scratch ? KeyLayout::K7S : KeyLayout::K7;
 
     // 主BPM：ノーツが一番多いBPM（LR2: bmsload:3315）
-    std::map<double, int> per_bpm;
-    for (const Note& n : chart.notes)
-        if (n.kind != NoteKind::Invisible) per_bpm[chart.bpm_at(n.time_us)]++;
     chart.main_bpm = now_bpm;
     int best = 0;
     for (auto& [bpm, cnt] : per_bpm)
@@ -436,9 +517,10 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     chart.total = total;
     chart.judge_rank = rank;
 
-    // 曲の終わり：最後のノーツ（LNなら終点）+2秒と、最後のBGMの遅いほう（LR2: bmsload:3499）
+    // 曲の終わり：最後のノーツ（LNなら終点）+2秒と、最後のBGMの遅いほう。不可視ノーツは数えない（LR2: bmsload:3499, 3649）
     int64_t end = 0;
-    for (const Note& n : chart.notes) end = std::max(end, std::max(n.time_us, n.end_us) + 2000000);
+    for (const Note& n : chart.notes)
+        if (n.kind != NoteKind::Invisible) end = std::max(end, std::max(n.time_us, n.end_us) + 2000000);
     for (const BgmEvent& b : chart.bgm) end = std::max(end, b.time_us);
     chart.end_us = end;
     res.rng = rng;
