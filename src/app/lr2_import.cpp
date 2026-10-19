@@ -101,14 +101,18 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     if (xml.empty()) return res.error = "LR2 の設定が見つからない（" + (root / "Config").string() + "）", res;
     xml = to_utf8_auto(xml);
     // 曲フォルダ（LR2 のカスタムフォルダの置き場は除く）
-    std::vector<std::string> dirs;
+    std::vector<std::string> dirs, custom_dirs;
     static const std::regex path_re("<path>([^<]*)</path>");
     for (auto it = std::sregex_iterator(xml.begin(), xml.end(), path_re); it != std::sregex_iterator(); ++it) {
         std::string p = (*it)[1].str();
         std::string low = p;
         for (char& c : low) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (low.find("lr2files") != std::string::npos) continue;
         while (p.size() > 3 && (p.back() == '\\' || p.back() == '/')) p.pop_back();
+        // LR2files の下はカスタムフォルダの置き場（曲フォルダではない）
+        if (low.find("lr2files") != std::string::npos) {
+            custom_dirs.push_back(p);
+            continue;
+        }
         dirs.push_back(p);
     }
     std::smatch m;
@@ -116,6 +120,7 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     if (std::regex_search(xml, m, id_re)) res.player = m[1].str();
     if (dirs.empty()) return res.error = "LR2 の設定に曲フォルダが無い", res;
     cfg.song_dirs = dirs;
+    cfg.custom_folder_dirs = custom_dirs;
     res.song_dirs = static_cast<int>(dirs.size());
 
     // 難易度表（すでに登録してあるものは足さない）

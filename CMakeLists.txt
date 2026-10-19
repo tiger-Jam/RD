@@ -58,6 +58,7 @@ add_library(bmj_core STATIC
     src/util/hash.cpp
     src/db/song_db.cpp
     src/db/difficulty_table.cpp
+    src/db/custom_folder.cpp
     src/audio/dsp.cpp
 )
 target_include_directories(bmj_core PUBLIC src)

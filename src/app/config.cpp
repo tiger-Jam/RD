@@ -76,6 +76,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "sound_set") sound_set = val;
         else if (key == "skin_res") skin_res = val;
         else if (key == "song_dir") song_dirs.push_back(val);
+        else if (key == "custom_folder_dir") custom_folder_dirs.push_back(val);
         else if (key == "table") tables.push_back(val);
         else if (key == "hi_speed") hi_speed = iv;
         else if (key == "judge_timing") judge_timing = iv;
@@ -180,6 +181,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "sound_set = " << sound_set << "\n";
     f << "skin_res = " << skin_res << "\n";
     for (const std::string& d : song_dirs) f << "song_dir = " << d << "\n";
+    for (const std::string& d : custom_folder_dirs) f << "custom_folder_dir = " << d << "\n";
     for (const std::string& t : tables) f << "table = " << t << "\n";
     f << "hi_speed = " << hi_speed << "\n";
     f << "judge_timing = " << judge_timing << "\n";

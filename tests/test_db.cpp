@@ -4,6 +4,7 @@
 #include <fstream>
 #include <thread>
 
+#include "db/custom_folder.h"
 #include "db/song_db.h"
 #include "test.h"
 #include "util/hash.h"
@@ -261,4 +262,43 @@ TEST(song_db_lamp_only) {
     CHECK_EQ(r.playcount, 3);
     db.close();
     fs::remove_all(dir);
+}
+
+// LR2 のカスタムフォルダの #COMMAND を、LR2 と同じ形の表で動かす（LR2: songmanage:725）
+TEST(custom_folder_query) {
+    std::vector<ChartRecord> charts(4);
+    for (int i = 0; i < 4; ++i) {
+        charts[i].md5 = "m" + std::to_string(i);
+        charts[i].sha256 = "s" + std::to_string(i);
+        charts[i].title = "T" + std::to_string(i);
+        charts[i].playlevel = 3 + i * 3;  // 3, 6, 9, 12
+        charts[i].keys = i == 3 ? 5 : 7;
+        charts[i].notes = 100;
+    }
+    std::unordered_map<std::string, ScoreRecord> scores;
+    scores["s0"].clear = 6;  // PERFECT は LR2 の FULL COMBO（5）として見える
+    scores["s0"].playcount = 4;
+    scores["s1"].clear = 3;
+    scores["s1"].playcount = 9;
+    std::unordered_map<std::string, int> favs{{"m2", 2}};
+    CustomFolderQuery q;
+    CHECK(q.build(charts, scores, favs));
+    CustomFolderDef d;
+    d.command = "clear = 5";
+    CHECK(q.run(d) == std::vector<std::string>{"m0"});
+    d.command = "playcount != 0 ORDER BY playcount DESC";
+    CHECK(q.run(d) == (std::vector<std::string>{"m1", "m0"}));
+    d.command = "level >= 5";  // IGNORE（m2）は出さない
+    CHECK(q.run(d) == (std::vector<std::string>{"m1", "m3"}));
+    d.command = "mode = 5";
+    CHECK(q.run(d) == std::vector<std::string>{"m3"});
+    d.command = "favorite = 2";  // IGNORE を集めるフォルダには出す
+    CHECK(q.run(d) == std::vector<std::string>{"m2"});
+    d.command = "level >= 0";
+    d.max_tracks = 1;  // 1 曲を無作為に
+    CHECK(q.run(d).size() == 1);
+    std::string err;
+    d.command = "no_such_column = 1";
+    d.max_tracks = 0;
+    CHECK(q.run(d, &err).empty() && !err.empty());
 }

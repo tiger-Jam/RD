@@ -29,6 +29,7 @@ struct AppConfig {
     std::string skin_res;          // "", "sd", "hd", "fhd"
     std::map<std::string, std::vector<SkinCustomChoice>> skin_custom;  // スキンのパス → カスタマイズの選択（項目の順）
     std::vector<std::string> song_dirs;  // 曲フォルダ
+    std::vector<std::string> custom_folder_dirs;  // カスタムフォルダ（.lr2folder）の置き場（LR2 の LR2files/CustomFolder など）
     std::vector<std::string> tables;     // 難易度表のURL（アプリには同梱しない。ユーザーが登録する）
     int hi_speed = 100;            // LR2のハイスピ（100=1.00倍）
     int judge_timing = 0;          // LR2の判定タイミング（描画だけをずらす）

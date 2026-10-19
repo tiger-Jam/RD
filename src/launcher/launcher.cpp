@@ -382,7 +382,7 @@ int main(int, char**) {
         std::string status;
         bool running = false, done = false;
         Lr2ImportResult res;
-        std::vector<std::string> song_dirs, tables;
+        std::vector<std::string> song_dirs, tables, custom_folder_dirs;
         decltype(AppConfig::skin_custom) skin_custom;
         ~ImportJob() {
             if (th.joinable()) th.join();
@@ -602,6 +602,7 @@ int main(int, char**) {
                         std::lock_guard<std::mutex> lock(job.mu);
                         job.res = r;
                         job.song_dirs = c.song_dirs;
+                        job.custom_folder_dirs = c.custom_folder_dirs;
                         job.tables = c.tables;
                         job.skin_custom = c.skin_custom;
                         job.done = true;
@@ -692,6 +693,7 @@ int main(int, char**) {
                 job.running = false;
                 if (job.res.ok) {
                     cfg.song_dirs = job.song_dirs;
+                    cfg.custom_folder_dirs = job.custom_folder_dirs;
                     cfg.tables = job.tables;
                     cfg.skin_custom = job.skin_custom;
                     message = "LR2 から引き継ぎました（曲フォルダ " + std::to_string(job.res.song_dirs) + "、譜面 " +

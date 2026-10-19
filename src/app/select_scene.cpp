@@ -27,6 +27,7 @@
 #include "app/skin_select_scene.h"
 #include "util/text.h"
 #include "audio/system_sound.h"
+#include "db/custom_folder.h"
 #include "db/difficulty_table.h"
 #include "game/gauge.h"
 #include "input/input.h"
@@ -64,6 +65,7 @@ struct Entry {
     std::shared_ptr<Course> course;  // コースのとき
     bool course_folder = false;      // コースを集めたフォルダ（バーの種類 6）
     bool fs_folder = false;          // 曲フォルダの階層（中の譜面に LR2 の難易度の絞り込みをかける）
+    const CustomFolderDef* custom_random = nullptr;  // 開くたびに 1 曲を選び直すカスタムフォルダ（#MAXTRACKS 1）
     std::string dir;                 // 曲フォルダの階層のとき、そのフォルダのパス（F8 の読み直し）
     std::vector<Entry> children;
     int owned = 0, total = 0;  // フォルダの中で持っている譜面の数
@@ -75,7 +77,25 @@ struct Library {
     std::vector<ChartRecord> charts;
     std::vector<DifficultyTable> tables;
     std::unordered_map<std::string, ScoreRecord> scores;  // sha256 → スコア
+    // カスタムフォルダ（.lr2folder）。中身は曲と記録から作った LR2 の形の表で集める
+    std::vector<CustomFolderNode> custom_nodes;
+    std::shared_ptr<CustomFolderQuery> custom_query;
 };
+
+// カスタムフォルダを読み、中身を集める表を作り直す（曲・記録・お気に入りが変わったとき）
+void load_custom(Library& lib, const AppConfig& cfg, const std::unordered_map<std::string, int>& favs) {
+    lib.custom_nodes.clear();
+    for (const std::string& d : cfg.custom_folder_dirs) {
+        std::vector<CustomFolderNode> n = load_custom_folders(d);
+        lib.custom_nodes.insert(lib.custom_nodes.end(), n.begin(), n.end());
+    }
+    if (lib.custom_nodes.empty()) {
+        lib.custom_query.reset();
+        return;
+    }
+    auto q = std::make_shared<CustomFolderQuery>();
+    if (q->build(lib.charts, lib.scores, favs)) lib.custom_query = q;
+}
 
 // 音の設定のスライダー（EQ 10〜16、音量 17〜19、エフェクタ 20〜25、ピッチ 26）
 bool is_sound_slider(int ty) { return ty >= 10 && ty <= 26; }
@@ -276,7 +296,35 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
         fill(f, d);
         song_roots.push_back(std::move(f));
     }
-    // 並び：難易度表 → 登録した曲フォルダ → NEW SONG → COURSE / 段位認定（LR2 のルートと同じく、コースのフォルダは後ろ）
+    // カスタムフォルダ（LR2: 登録した曲フォルダの次）。#COMMAND の結果を並べる（難易度の絞り込みはかけない）
+    auto custom_entry = [&](const CustomFolderDef& d) {
+        Entry f;
+        f.label = d.title;
+        if (d.max_tracks == 1) f.custom_random = &d;
+        if (lib.custom_query)
+            for (const std::string& md5 : lib.custom_query->run(d)) {
+                auto it = by_md5.find(md5);
+                if (it == by_md5.end()) continue;
+                f.children.push_back(chart_entry(it->second, std::to_string(it->second->playlevel)));
+                f.owned++, f.total++;
+            }
+        return f;
+    };
+    for (const CustomFolderNode& n : lib.custom_nodes) {
+        if (!n.group) {
+            song_roots.push_back(custom_entry(n.defs.front()));
+            continue;
+        }
+        Entry g;
+        g.label = n.title;
+        for (const CustomFolderDef& d : n.defs) {
+            Entry f = custom_entry(d);
+            g.owned += f.owned, g.total += f.total;
+            g.children.push_back(std::move(f));
+        }
+        song_roots.push_back(std::move(g));
+    }
+    // 並び：難易度表 → 登録した曲フォルダ → カスタムフォルダ → NEW SONG → COURSE / 段位認定（LR2 のルートと同じく、コースのフォルダは後ろ）
     std::vector<Entry> courses(std::make_move_iterator(root.end() - 2), std::make_move_iterator(root.end()));
     root.erase(root.end() - 2, root.end());
     for (Entry& f : song_roots) root.push_back(std::move(f));
@@ -297,8 +345,15 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
             for (const ChartRecord* c : fresh) f.children.push_back(chart_entry(c, std::to_string(c->playlevel))), f.owned++, f.total++;
             root.push_back(std::move(f));
         }
-        // FAVORITE / IGNORE（LR2 の既定のカスタムフォルダ favorite・ignore。印を付けた譜面があるときだけ出す）
+        // FAVORITE / IGNORE（LR2 の既定のカスタムフォルダ favorite・ignore。印を付けた譜面があるときだけ出す）。
+        // 同じものを集めるカスタムフォルダ（favorite = 1 / 2）を置いていれば、そちらに任せる
+        bool custom_fav[3] = {};
+        for (const CustomFolderNode& n : lib.custom_nodes)
+            for (const CustomFolderDef& d : n.defs)
+                for (int v : {1, 2})
+                    if (d.command.find("favorite = " + std::to_string(v)) != std::string::npos) custom_fav[v] = true;
         for (int v : {1, 2}) {
+            if (custom_fav[v]) continue;
             std::vector<const ChartRecord*> list;
             std::set<std::string> seen2;
             for (const ChartRecord& c : lib.charts)
@@ -430,6 +485,7 @@ void run_select(App& app) {
     }
     for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
     std::unordered_map<std::string, int> favs = app.db.favorites();
+    load_custom(*lib, app.cfg, favs);
     std::vector<Entry> root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
     // フォルダランプ（LR2: folderlamp）。フォルダの中の譜面のランプの一番低いもの。記録か一覧が変わったら数え直す
     std::unordered_map<const Entry*, int> folder_lamps;
@@ -890,6 +946,23 @@ void run_select(App& app) {
         const Entry* e = current();
         if (!e) return;
         if (e->kind == Entry::Kind::Folder) {
+            if (e->custom_random && lib->custom_query) {
+                // 1 曲を無作為に選ぶフォルダは、開くたびに選び直す（LR2: songmanage:2091）
+                Entry& m = const_cast<Entry&>(*e);
+                m.children.clear();
+                for (const std::string& md5 : lib->custom_query->run(*e->custom_random))
+                    for (const ChartRecord& c : lib->charts)
+                        if (c.md5 == md5) {
+                            Entry x;
+                            x.kind = Entry::Kind::Chart;
+                            x.chart = &c;
+                            x.label = c.title + (c.subtitle.empty() ? "" : " " + c.subtitle);
+                            x.sub = c.artist;
+                            x.badge = std::to_string(c.playlevel);
+                            m.children.push_back(std::move(x));
+                            break;
+                        }
+            }
             if (e->children.empty()) return;  // 空のフォルダには入らない（LR2 と同じ）
             stack.push_back(make_level(&e->children, 0, e->label, e->fs_folder, e->dir));
             snap();
@@ -948,6 +1021,11 @@ void run_select(App& app) {
             } else {
                 for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
                 folder_lamps.clear();
+                // 記録で集めるカスタムフォルダ（クリアやランク）を作り直す
+                if (!lib->custom_nodes.empty()) {
+                    load_custom(*lib, app.cfg, favs);
+                    rebuild();
+                }
             }
             sctx.player = app.db.player_stats();
             if (ex == PlayExit::Quit) quit = true;
@@ -1416,6 +1494,7 @@ void run_select(App& app) {
                             v = (v + (dir > 0 ? 1 : 2)) % 3;
                             app.db.set_favorite(cur->chart->md5, v);
                             app.mixer.play_system(kSysOptionChange);
+                            if (!lib->custom_nodes.empty()) load_custom(*lib, app.cfg, favs);
                             rebuild();
                         }
                     }
@@ -1656,6 +1735,7 @@ void run_select(App& app) {
             if (pending) {
                 lib = pending;
                 pending.reset();
+                load_custom(*lib, app.cfg, favs);
                 folder_charts.clear();
                 rebuild();
             }
