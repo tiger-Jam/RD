@@ -195,6 +195,11 @@ int PlayContext::number_raw(int id) const {
     case 13: return 90;  // defaulttarget
     case 14: case 15: return lane_cover;
     case 20: return fps;
+    case 50: case 51: case 52: case 53: case 54: case 55: case 56: return sound_fx ? sound_fx->eq[id - 50] : 0;
+    case 60: case 61: case 62: case 63: case 64: case 65:
+        if (!sound_fx) return 0;
+        return id % 2 == 0 ? sound_fx->fx[(id - 60) / 2].p1 : sound_fx->fx[(id - 60) / 2].p2;
+    case 66: return sound_fx ? sound_fx->pitch : 0;
     case 312: return visible_ms;
     case 313: return green_number;
     case 314: case 421: case 422: return lift;  // 421・422 は OpenLR2 の LIFT
@@ -352,6 +357,16 @@ bool PlayContext::slider(int type, int& val, int& lo, int& hi) const {
     case 2: val = hi_speed, lo = 10, hi = 990; return true;
     case 4: val = lane_cover_on ? lane_cover : 0, lo = 0, hi = 100; return true;
     case 27: case 28: val = lift, lo = 0, hi = 100; return true;  // LIFT（OpenLR2 の拡張）
+    // イコライザ（10〜16）、エフェクタのパラメータ（20〜25）、ピッチ（26）
+    case 10: case 11: case 12: case 13: case 14: case 15: case 16:
+        val = sound_fx ? sound_fx->eq[type - 10] : 0, lo = -12, hi = 12;
+        return true;
+    case 20: case 21: case 22: case 23: case 24: case 25: {
+        const FxSlot* f = sound_fx ? &sound_fx->fx[(type - 20) / 2] : nullptr;
+        val = f ? (type % 2 == 0 ? f->p1 : f->p2) : 0, lo = 0, hi = 100;
+        return true;
+    }
+    case 26: val = sound_fx ? sound_fx->pitch : 0, lo = -12, hi = 12; return true;
     case 6:
         if (song_ms >= 0 && chart) val = static_cast<int>(song_ms), lo = 0, hi = static_cast<int>(chart->end_us / 1000);
         else val = 0, lo = 0, hi = 1;
@@ -387,7 +402,13 @@ int PlayContext::bp_now() const {
 int PlayContext::button(int type) const {
     switch (type) {
     case 40: return judge ? judge->gauge_type() : gauge_type;  // ゲージの種類
-    case 20: return 0;  // エフェクトの種類（エフェクト無し）
+    // エフェクタの種類・オンオフ・掛け先、イコライザ、ピッチ・方式
+    case 20: case 21: case 22: return sound_fx ? sound_fx->fx[type - 20].type : 0;
+    case 23: case 24: case 25: return sound_fx && sound_fx->fx[type - 23].on ? 1 : 0;
+    case 26: case 27: case 28: return sound_fx ? sound_fx->fx[type - 26].target : 0;
+    case 29: return sound_fx && sound_fx->eq_on ? 1 : 0;
+    case 32: return sound_fx && sound_fx->pitch_on ? 1 : 0;
+    case 33: return sound_fx ? sound_fx->pitch_type : 0;
     case 55: return hs_fix;  // ハイスピ固定の種類
     default: return 0;
     }

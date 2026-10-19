@@ -90,6 +90,7 @@ bool App::init(const char* argv0) {
         return false;
     }
     apply_volume();
+    apply_sound_fx();
     load_sound_set();
     frame_hooks_install([this] { mixer.play_system(kSysScreenshot); });
     if (!db.open(song_db_path())) std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());

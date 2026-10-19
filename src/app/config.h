@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "audio/dsp.h"
 #include "skin/skin_adjust.h"
 
 namespace bmj {
@@ -71,6 +72,11 @@ struct AppConfig {
     // 音量（LR2: volumeflag / master / key / bgm）。volume_on が false なら全部 100 として鳴らす
     bool volume_on = true;
     int vol_master = 100, vol_key = 100, vol_bgm = 100;
+    // イコライザ・ピッチ・エフェクタ（LR2: eqflag / eqp0〜6 / pitchflag / pitchp / pitchtype / fxflag・fxtype・fxtarget・fxp1・fxp2 の _0〜_2）。
+    // 既定は全部 0（オフ）
+    SoundFx sound_fx;
+    // ピッチで曲の速さが変わる（FREQ か SPEED で 0 以外。LR2 ではスコアを保存しない）
+    bool pitch_changes_speed() const { return sound_fx.changes_speed(); }
     // 選曲の絞り込みとソート（LR2: select.difficulty など）。0=ALL / OFF
     int select_difficulty = 0, select_mode = 0, select_sort = 0;
     bool no_right_click_exit = false;

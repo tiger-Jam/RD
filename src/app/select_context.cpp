@@ -193,6 +193,16 @@ int SelectContext::number(int id) const {
     case 32: return player.fail;
     case 33: case 34: case 35: case 36: case 37: return static_cast<int>(player.judge[id - 33]);
     case 38: case 39: return 0;  // ランニングコンボ（記録していない）
+    // イコライザ（50〜56）、音量（57〜59）、エフェクタのパラメータ（60〜65）、ピッチ（66）
+    case 50: case 51: case 52: case 53: case 54: case 55: case 56: return cfg->sound_fx.eq[id - 50];
+    case 57: return cfg->vol_master;
+    case 58: return cfg->vol_key;
+    case 59: return cfg->vol_bgm;
+    case 60: case 61: case 62: case 63: case 64: case 65: {
+        const FxSlot& f = cfg->sound_fx.fx[(id - 60) / 2];
+        return id % 2 == 0 ? f.p1 : f.p2;
+    }
+    case 66: return cfg->sound_fx.pitch;
     case 90: return song && chart->bpm_max > 0 ? static_cast<int>(chart->bpm_max) : -1;
     case 91: return song && chart->bpm_min > 0 ? static_cast<int>(chart->bpm_min) : -1;
     default: return -1;
@@ -283,6 +293,15 @@ int SelectContext::button(int t) const {
         static const int lr2[] = {0, 2, 0, 0, 0, 1, 3, 4, 0};
         return sort_mode >= 0 && sort_mode < 9 ? lr2[sort_mode] : 0;
     }
+    // エフェクタの種類（20〜22）・オンオフ（23〜25）・掛け先（26〜28）、イコライザ（29）、
+    // イコライザのプリセット（30。無いので 0）、音量（31）、ピッチ（32）・方式（33）
+    case 20: case 21: case 22: return cfg->sound_fx.fx[t - 20].type;
+    case 23: case 24: case 25: return cfg->sound_fx.fx[t - 23].on ? 1 : 0;
+    case 26: case 27: case 28: return cfg->sound_fx.fx[t - 26].target;
+    case 29: return cfg->sound_fx.eq_on ? 1 : 0;
+    case 31: return cfg->volume_on ? 1 : 0;
+    case 32: return cfg->sound_fx.pitch_on ? 1 : 0;
+    case 33: return cfg->sound_fx.pitch_type;
     case 40: return cfg->gauge;
     case 41: return 0;
     case 46: return cfg->lane_cover ? 1 : 0;
@@ -314,6 +333,14 @@ bool SelectContext::slider(int t, int& val, int& lo, int& hi) const {
     case 17: val = cfg->vol_master, lo = 0, hi = 100; return true;  // 音量 MASTER / KEY / BGM
     case 18: val = cfg->vol_key, lo = 0, hi = 100; return true;
     case 19: val = cfg->vol_bgm, lo = 0, hi = 100; return true;
+    // イコライザ（10〜16。-12〜12 dB）、エフェクタのパラメータ（20〜25。0〜100）、ピッチ（26。-12〜12 半音）
+    case 10: case 11: case 12: case 13: case 14: case 15: case 16: val = cfg->sound_fx.eq[t - 10], lo = -12, hi = 12; return true;
+    case 20: case 21: case 22: case 23: case 24: case 25: {
+        const FxSlot& f = cfg->sound_fx.fx[(t - 20) / 2];
+        val = t % 2 == 0 ? f.p1 : f.p2, lo = 0, hi = 100;
+        return true;
+    }
+    case 26: val = cfg->sound_fx.pitch, lo = -12, hi = 12; return true;
     case 4: case 5: val = cfg->lane_cover_v, lo = 0, hi = 100; return true;
     case 7: val = catalog ? catalog->scroll() : 0, lo = 0, hi = catalog ? std::max(1, catalog->scroll_max(*cfg)) : 1; return true;
     default: val = 0, lo = 0, hi = 1; return true;
