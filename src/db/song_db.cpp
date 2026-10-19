@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS score(
     pg INTEGER DEFAULT 0, gr INTEGER DEFAULT 0, gd INTEGER DEFAULT 0, bd INTEGER DEFAULT 0, pr INTEGER DEFAULT 0,
     op_history INTEGER DEFAULT 0, rseed INTEGER DEFAULT -1, op_best INTEGER DEFAULT 0, ghost TEXT,
     PRIMARY KEY(sha256, ln_mode, judge_profile));
+CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER);
 CREATE TABLE IF NOT EXISTS player(
     id INTEGER PRIMARY KEY, playcount INTEGER, clear INTEGER, fail INTEGER,
     pg INTEGER, gr INTEGER, gd INTEGER, bd INTEGER, pr INTEGER);
@@ -251,6 +252,18 @@ bool SongDb::open(const std::string& path) {
             if (info.col_text(1) == "ln_free") has_ln_free = true;
         if (!has_ln_free && has_banner)
             sqlite3_exec(db_, "ALTER TABLE chart ADD COLUMN ln_free INTEGER DEFAULT 0; UPDATE chart SET mtime = 0;", nullptr, nullptr, nullptr);
+    }
+    // 譜面の読み方を変えたら kParserVersion を上げる。古い版で読んだ譜面は、次の読み直しで全部読み直させる
+    {
+        constexpr int kParserVersion = 2;  // 2: 題名と副題の分け方・#GENRE の難易度・曲データベースの #IF 1（2026-10-19）
+        int64_t v = 0;
+        Stmt get(db_, "SELECT value FROM meta WHERE key = 'parser_version'");
+        if (get.step()) v = get.col_i64(0);
+        if (v < kParserVersion) {
+            sqlite3_exec(db_, "UPDATE chart SET mtime = 0; DELETE FROM skipped;", nullptr, nullptr, nullptr);
+            Stmt put(db_, "INSERT OR REPLACE INTO meta(key, value) VALUES('parser_version', ?)");
+            put.i64(1, kParserVersion).run();
+        }
     }
     if (!has_banner) {
         sqlite3_exec(db_,

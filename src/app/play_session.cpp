@@ -51,14 +51,8 @@ std::vector<std::string> resolve_chart_sounds(const Chart& chart, std::vector<st
     std::vector<std::string> paths(chart.wav.size());
     for (size_t i = 0; i < chart.wav.size(); ++i) {
         if (chart.wav[i].empty()) continue;
-        std::string p = dir.resolve(chart.wav[i], {".ogg", ".wav"});
-        if (p.empty()) {
-            std::string up = join_path(chart.base_dir, "../" + chart.wav[i]);
-            if (std::FILE* f = std::fopen(up.c_str(), "rb")) {
-                std::fclose(f);
-                p = up;
-            }
-        }
+        // LR2: FindAltSound（書かれた名前 → ogg・wav・flac・mp3 → 1 つ上のフォルダで同じ手順）
+        std::string p = dir.find_sound(chart.wav[i]);
         if (p.empty()) missing.push_back(chart.wav[i]);
         paths[i] = p;
     }
@@ -73,15 +67,7 @@ std::vector<std::string> resolve_images(const Chart& chart) {
     std::vector<std::string> paths(chart.bmp.size());
     for (size_t i = 0; i < chart.bmp.size(); ++i) {
         if (chart.bmp[i].empty()) continue;
-        std::string p = dir.resolve(chart.bmp[i], {".png", ".jpg", ".bmp"});
-        if (p.empty()) {
-            std::string up = join_path(chart.base_dir, "../" + chart.bmp[i]);
-            if (std::FILE* f = std::fopen(up.c_str(), "rb")) {
-                std::fclose(f);
-                p = up;
-            }
-        }
-        paths[i] = p;
+        paths[i] = dir.find_image(chart.bmp[i]);
     }
     return paths;
 }
