@@ -48,6 +48,7 @@ struct PlayContext {
     int hs_fix = 0;              // ハイスピード固定（ボタン55）
     int ghost_pos = 0;           // ゴーストの位置（op 34〜37。0=OFF）
     bool score_graph = false;    // スコアグラフ（op 38 / 39）
+    int bga_size = 0;            // BGA の大きさ（op 30 / 31）
     bool silent = false;         // 判定タイミングの自動調整の SILENT（ゴーストを出さない）
     bool replay = false;         // リプレイを再生している（op 84）
     bool replay_rec = false;     // リプレイに残すために入力を記録している（op 83）

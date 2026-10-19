@@ -93,6 +93,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "target_percent") target_percent = std::clamp(iv, 50, 100);
         else if (key == "ghost") ghost = std::clamp(iv, 0, 3);
         else if (key == "score_graph") score_graph = iv != 0;
+        else if (key == "bga_size") bga_size = std::clamp(iv, 0, 1);
         else if (key == "replay_save") replay_save = std::clamp(iv, 0, 4);
         else if (key == "no_right_click_exit") no_right_click_exit = iv != 0;
         else if (key == "folder_lamp") folder_lamp = iv != 0;
@@ -179,6 +180,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "target = " << target << "  # ターゲット 0=既定 1=自己ベスト 2=AAA 3=AA 4=A 5=割合\n";
     f << "target_percent = " << target_percent << "  # 既定のターゲットの割合（50〜100）\n";
     f << "ghost = " << ghost << "  # ゴーストの位置 0=OFF 1=TYPE A 2=TYPE B 3=TYPE C\n";
+    f << "bga_size = " << bga_size << "  # BGA の大きさ 0=NORMAL 1=EXTEND\n";
     f << "score_graph = " << (score_graph ? 1 : 0) << "  # スコアグラフ 0=OFF 1=ON\n";
     f << "replay_save = " << replay_save << "  # リプレイの保存 0=OFF 1=ALWAYS 2=HISCORE 3=CLEAR 4=FULLCOMBO\n";
     f << "volume_on = " << (volume_on ? 1 : 0) << "  # 音量の設定を使う 0/1\n";

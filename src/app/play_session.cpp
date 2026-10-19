@@ -405,6 +405,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         }
         ctx.ghost_pos = cfg.ghost;
         ctx.score_graph = cfg.score_graph;
+        ctx.bga_size = cfg.bga_size;
         ctx.silent = silent;
         ctx.replay = opt.replay;
         ctx.replay_rec = !opt.replay && !opt.autoplay && !course && cfg.replay_save > 0;

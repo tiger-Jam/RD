@@ -45,8 +45,8 @@ bool PlayContext::option_raw(int option) const {
     auto rank_of = [](int ex, int notes) { return notes > 0 ? ex * 9 / (notes * 2) : 0; };
     switch (option) {
     case 0: return true;
-    case 30: return ret;              // BGAは通常サイズ
-    case 31: return !ret;
+    case 30: return bga_size == 0 ? ret : !ret;  // BGA の大きさ NORMAL / EXTEND
+    case 31: return bga_size == 1 ? ret : !ret;
     case 32: return autoplay ? !ret : ret;
     case 33: return autoplay ? ret : !ret;
     // ゴーストの位置（SILENT のときは出さない）

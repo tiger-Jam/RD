@@ -1377,6 +1377,7 @@ void run_select(App& app) {
                         loop(v, 0, 1);
                         app.cfg.score_graph = v != 0;
                     } else if (ty == 71) loop(app.cfg.ghost, 0, 3);
+                    else if (ty == 73) loop(app.cfg.bga_size, 0, 1);
                     else if (ty == 76) loop(app.cfg.target_percent, 50, 100);
                     else if (ty == 77) loop(app.cfg.target, 0, 5);  // ターゲット（IR の 6〜8 は無いので飛ばす）
                     else if (ty == 83) loop(app.cfg.replay_save, 0, 4);

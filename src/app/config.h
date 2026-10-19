@@ -65,6 +65,7 @@ struct AppConfig {
     int target_percent = 90;  // 既定のターゲットの割合（LR2: defaulttarget。50〜100）
     int ghost = 0;            // ゴーストの位置（LR2: ghost）。0=OFF 1=TYPE A 2=TYPE B 3=TYPE C
     bool score_graph = false; // スコアグラフ（LR2: scoregraph）
+    int bga_size = 0;         // BGA の大きさ（LR2: bgasize）。0=NORMAL 1=EXTEND（スキンの op 30 / 31 で描き分ける）
     // リプレイの保存（LR2: replaysave）。0=OFF 1=ALWAYS 2=HISCORE（EX がベスト以上） 3=CLEAR 4=FULLCOMBO
     int replay_save = 0;
     // 音量（LR2: volumeflag / master / key / bgm）。volume_on が false なら全部 100 として鳴らす

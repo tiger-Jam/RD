@@ -255,7 +255,7 @@ std::string SelectContext::text(int id) const {
     case 72: return opt("GHOST", cfg->ghost);
     case 73: return opt("LANECOVER", cfg->lane_cover ? 1 : 0);
     case 74: return cfg->hs_fix == 5 ? "MAINBPM" : opt("HSFIX", cfg->hs_fix);
-    case 75: return opt("BGASIZE", 0);
+    case 75: return opt("BGASIZE", cfg->bga_size);
     case 76: return opt("BGADRAW", cfg->bga);
     case 78: return opt("VSYNC", cfg->vsync ? 1 : 0);
     case 79: return opt("SCREEN", windowed ? 1 : 0);
@@ -298,6 +298,7 @@ int SelectContext::button(int t) const {
     case 75: return cfg->auto_adjust;
     case 76: return cfg->target_percent;
     case 77: return cfg->target;
+    case 73: return cfg->bga_size;
     case 83: return cfg->replay_save;
     case 90: return favorite;
     case 80: return windowed ? 1 : 0;
