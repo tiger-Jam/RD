@@ -1,5 +1,7 @@
 #include "input/win_rawhid.h"
 
+#include "input/input.h"
+
 #if defined(_WIN32)
 
 #define WIN32_LEAN_AND_MEAN
@@ -127,6 +129,7 @@ struct RawHid::Impl {
         if (d.buttons == 0 && d.axes == 0) return nullptr;
         d.preparsed = std::move(pp);
         d.id = next_id++;
+        pad_number(d.id);  // 見つけた順にパッドの番号を振る（キーコンフィグで機器を区別するため）
         d.button_state.assign(d.buttons, false);
         d.axis_state.assign(d.axes, 0);
         // 製品名
@@ -225,7 +228,11 @@ struct RawHid::Impl {
             self->on_input(reinterpret_cast<HRAWINPUT>(lp), SDL_GetTicksNS());
         } else if (msg == WM_INPUT_DEVICE_CHANGE && self && wp == GIDC_REMOVAL) {
             std::lock_guard<std::mutex> lock(self->mu);
-            self->devices.erase(reinterpret_cast<HANDLE>(lp));
+            auto it = self->devices.find(reinterpret_cast<HANDLE>(lp));
+            if (it != self->devices.end()) {
+                if (!it->second.preparsed.empty()) pad_forget(it->second.id);  // パッドの番号を空ける
+                self->devices.erase(it);
+            }
         }
         return DefWindowProcW(h, msg, wp, lp);
     }

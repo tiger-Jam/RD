@@ -1,9 +1,10 @@
-// キーコンフィグ。ボタンごとに、キーボードのキーやジョイスティックの入力を複数割り当てられる。
+// キーコンフィグ。ボタンごとに、キーボードのキー・ジョイスティック・MIDI の入力を複数割り当てられる。
 // 既定値はLR2と同じ（LR2files/Config/keyconfig_def.xml）
 #pragma once
 
 #include <array>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace bmj {
@@ -13,11 +14,20 @@ enum Button : int {
     kKey1 = 0, kKey7 = 6, kScratchA = 7, kScratchB = 8, kStart = 9, kSelect = 10, kButtonCount = 11
 };
 
+// MIDI の入力元の番号（Binding::Type::Midi の index）。0〜127 はノート番号
+enum MidiSource : int { kMidiBendMinus = 128, kMidiBendPlus = 129, kMidiPedal = 130, kMidiSourceCount = 131 };
+
 struct Binding {
-    enum class Type { Key, JoyButton, JoyAxis, JoyHat } type = Type::Key;
-    int index = 0;  // キーならSDLのスキャンコード、ジョイスティックならボタン・軸・ハットの番号
+    enum class Type { Key, JoyButton, JoyAxis, JoyHat, Midi } type = Type::Key;
+    int index = 0;  // キーならSDLのスキャンコード、ジョイスティックならボタン・軸・ハットの番号、MIDI なら MidiSource
     int dir = 0;    // 軸なら +1 / -1、ハットなら SDL_HAT_UP などのビット
-    bool operator==(const Binding& o) const { return type == o.type && index == o.index && dir == o.dir; }
+    // ジョイスティックの機器の番号（1 から。input.h の pad_number）。0 ならどのパッドでもよい。
+    // MIDI は機器・チャンネルを区別しない（LR2 と同じ）
+    int device = 0;
+    bool operator==(const Binding& o) const {
+        return type == o.type && index == o.index && dir == o.dir && device == o.device;
+    }
+    bool joystick() const { return type == Type::JoyButton || type == Type::JoyAxis || type == Type::JoyHat; }
 };
 
 struct KeyConfig {
@@ -42,11 +52,15 @@ void set_slot(KeyConfig& cfg, int button, int slot, const Binding& b);
 void clear_slot(KeyConfig& cfg, int button, int slot);
 // 鍵盤・皿・START・SELECT の割り当てを全部消す（アナログ皿の設定は残す）
 void clear_bindings(KeyConfig& cfg);
-// キーコンフィグ画面に出す入力の名前（キー名は大文字、パッドは JOY:BUTTON1 など。番号は 1 から）
+// キーコンフィグ画面に出す入力の名前（キー名は大文字、パッドは JOY:BUTTON1 など。番号は 1 から）。
+// 機器を決めたパッドは JOY2:BUTTON4 のように機器の番号を付ける。MIDI は MIDI NOTE:C5（オクターブはノート番号 / 12）、
+// MIDI BEND:- / MIDI BEND:+、MIDI PEDAL
 std::string binding_label(const Binding& b);
 
 const char* button_name(int button);
+// 設定ファイルの書き方（key:Z、joy:button 3、joy2:axis 1+、midi:note 60 など）。parse_binding で読み戻せる
 std::string describe(const Binding& b);
+bool parse_binding(std::string_view s, Binding& b);
 // 設定ファイルの置き場所（macOS なら ~/Library/Application Support/BMjoy/keyconfig.txt）
 std::string keyconfig_path();
 

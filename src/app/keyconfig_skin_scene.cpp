@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <map>
 
 #include "app/keyconfig_editor.h"
 #include "audio/system_sound.h"
+#include "input/input.h"
 #include "input/joystick_init.h"
 #include "render/frame_hooks.h"
 #include "render/keyconfig_scene.h"
@@ -65,8 +65,8 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
     bool skin_cursor = skin.mousecursor.src.valid && !skin.mousecursor.dst.empty();
     if (skin_cursor) SDL_HideCursor();
     else SDL_ShowCursor();
-    // 軸は、中央付近から端まで倒したときだけ割り当てる（機器・軸ごとの前の値）
-    std::map<std::pair<uint32_t, int>, int16_t> axis_prev;
+    // パッドと MIDI の入力を割り当てに変える（軸は中央付近から端まで倒したときだけ）
+    BindingCapture capture;
     auto option_of = [&](int o) {
         bool neg = o < 0;
         int a = neg ? -o : o;
@@ -106,20 +106,9 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
                 else if (sc == SDL_SCANCODE_F2) clear();
                 else if (sc == SDL_SCANCODE_DELETE) erase();
                 else if (!keyconfig_reserved(sc)) assign({Binding::Type::Key, sc, 0});
-            } else if (e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) {
-                assign({Binding::Type::JoyButton, e.jbutton.button, 0});
-            } else if (e.type == SDL_EVENT_JOYSTICK_HAT_MOTION && e.jhat.value) {
-                int v = e.jhat.value;
-                int dir = v & SDL_HAT_UP ? SDL_HAT_UP : v & SDL_HAT_DOWN ? SDL_HAT_DOWN : v & SDL_HAT_LEFT ? SDL_HAT_LEFT : SDL_HAT_RIGHT;
-                assign({Binding::Type::JoyHat, e.jhat.hat, dir});
-            } else if (e.type == SDL_EVENT_JOYSTICK_AXIS_MOTION) {
-                int a = e.jaxis.axis;
-                auto [it, first] = axis_prev.try_emplace({e.jaxis.which, a}, static_cast<int16_t>(0));
-                int16_t prev = it->second;
-                it->second = e.jaxis.value;
-                // アナログ皿に使っている軸は方向として割り当てない
-                if (a != app.keycfg.analog_axis && std::abs(e.jaxis.value) > 24000 && std::abs(prev) < 16000 && !first)
-                    assign({Binding::Type::JoyAxis, a, e.jaxis.value > 0 ? 1 : -1});
+            } else if (Binding b; capture.take(e, b, app.keycfg.analog_axis)) {
+                // パッド（ボタン・ハット・軸）と MIDI。アナログ皿に使っている軸は方向として割り当てない
+                assign(b);
             } else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
                 float mx = e.button.x, my = e.button.y;
                 // スキンのボタン。後に書かれたものが上に描かれるので、後ろから探す

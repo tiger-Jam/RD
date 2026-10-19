@@ -40,6 +40,7 @@
 #include "db/song_db.h"
 #include "game/judge.h"
 #include "input/joystick_init.h"
+#include "input/midi.h"
 #include "input/win_rawhid.h"
 #include "render/frame_hooks.h"
 #include "render/keyconfig_scene.h"
@@ -410,6 +411,7 @@ int main(int argc, char** argv) {
         joystick_init().start(c.joystick_directinput);
         raw_hid().start();
         if (!app.init(argv[0])) return 1;
+        midi_input().start();  // SDL のイベントで送るので、SDL の準備の後に開く
         if (!opt.import_lr2_dir.empty()) {
             auto t0 = std::chrono::steady_clock::now();
             Lr2ImportResult r = import_from_lr2(opt.import_lr2_dir, c, app.db, [](const std::string& s) { std::printf("%s\n", s.c_str()); },
@@ -465,6 +467,7 @@ int main(int argc, char** argv) {
         if (!opt.no_skin) app.save_config();
     }
     raw_hid().stop();
+    midi_input().stop();
     if (!joystick_init().ready()) {
         // 準備中（Windows の DirectInput の列挙中）なら、待たずにそのまま終わる。設定やスコアは保存済み
         std::fflush(stdout);

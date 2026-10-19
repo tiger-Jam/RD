@@ -10,6 +10,7 @@
 
 #include "input/input.h"
 #include "input/joystick_init.h"
+#include "input/midi.h"
 #include "input/win_rawhid.h"
 #include "render/frame_hooks.h"
 
@@ -44,6 +45,8 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
     bool capturing = false;
     std::string message = "ENTER: ADD  BACKSPACE: CLEAR ROW  ESC: SAVE & QUIT";
     auto mapper = std::make_unique<InputMapper>(cfg);
+    BindingCapture capture;
+    capture.wait_center = false;
     std::map<SDL_JoystickID, SDL_Joystick*> joys;
     // 割り当ての取り込み中に、軸がどれだけ動いたか（アナログ皿の軸を見つけるため）
     std::array<int64_t, 16> axis_travel{};
@@ -78,8 +81,14 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
             }
             // 生の入力の表示
             char buf[96] = "";
-            if (e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) std::snprintf(buf, sizeof(buf), "JOY BUTTON %d DOWN", e.jbutton.button);
-            if (e.type == SDL_EVENT_JOYSTICK_HAT_MOTION) std::snprintf(buf, sizeof(buf), "JOY HAT %d = %d", e.jhat.hat, e.jhat.value);
+            if (e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN)
+                std::snprintf(buf, sizeof(buf), "JOY%d BUTTON %d DOWN", pad_number(e.jbutton.which), e.jbutton.button);
+            if (e.type == SDL_EVENT_JOYSTICK_HAT_MOTION)
+                std::snprintf(buf, sizeof(buf), "JOY%d HAT %d = %d", pad_number(e.jhat.which), e.jhat.hat, e.jhat.value);
+            int src = 0;
+            bool dn = false;
+            if (read_midi_event(e, src, dn))
+                std::snprintf(buf, sizeof(buf), "%s %s", binding_label({Binding::Type::Midi, src, 0}).c_str(), dn ? "ON" : "OFF");
             if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) std::snprintf(buf, sizeof(buf), "KEY %s", SDL_GetScancodeName(e.key.scancode));
             if (buf[0]) last_raw = buf;
             if (e.type == SDL_EVENT_JOYSTICK_AXIS_MOTION && e.jaxis.axis < 16) {
@@ -102,15 +111,8 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
                     } else if (row < kButtonCount) {
                         add_binding({Binding::Type::Key, e.key.scancode, 0});
                     }
-                } else if (row < kButtonCount && e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) {
-                    add_binding({Binding::Type::JoyButton, e.jbutton.button, 0});
-                } else if (row < kButtonCount && e.type == SDL_EVENT_JOYSTICK_HAT_MOTION && e.jhat.value) {
-                    int v = e.jhat.value;
-                    int dir = v & SDL_HAT_UP ? SDL_HAT_UP : v & SDL_HAT_DOWN ? SDL_HAT_DOWN : v & SDL_HAT_LEFT ? SDL_HAT_LEFT : SDL_HAT_RIGHT;
-                    add_binding({Binding::Type::JoyHat, e.jhat.hat, dir});
-                } else if (row < kButtonCount && e.type == SDL_EVENT_JOYSTICK_AXIS_MOTION &&
-                           std::abs(e.jaxis.value) > 24000 && e.jaxis.axis != cfg.analog_axis) {
-                    add_binding({Binding::Type::JoyAxis, e.jaxis.axis, e.jaxis.value > 0 ? 1 : -1});
+                } else if (Binding b; row < kButtonCount && capture.take(e, b, cfg.analog_axis)) {
+                    add_binding(b);
                 } else if (row == kRowAnalog && e.type == SDL_EVENT_JOYSTICK_AXIS_MOTION) {
                     // 一番大きく動いた軸をアナログ皿にする（1周の1/4くらい回したら決める）
                     int best = -1;
@@ -231,10 +233,9 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
         std::snprintf(b, sizeof(b), "SCRATCH PRESSES %d  LAST DOWN %.0f  UP %.0f", scratch_presses, scratch_down_ms, scratch_up_ms);
         text(r, 300, y + 6, dim, b);
         y += 30;
-        int ji = 0;
         for (auto& [id, j] : joys) {
             const char* name = SDL_GetJoystickName(j);
-            std::snprintf(b, sizeof(b), "JOY %d: %s  (%d BUTTONS, %d AXES, %d HATS)", ji++, name ? name : "?",
+            std::snprintf(b, sizeof(b), "JOY%d: %s  (%d BUTTONS, %d AXES, %d HATS)", pad_number(id), name ? name : "?",
                           SDL_GetNumJoystickButtons(j), SDL_GetNumJoystickAxes(j), SDL_GetNumJoystickHats(j));
             text(r, 16, y, dim, b);
             y += 12;
@@ -251,7 +252,8 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
         }
         // Windows：Raw Input で直接読んでいる機器
         for (const RawHidDevice& d : raw_hid().devices()) {
-            std::snprintf(b, sizeof(b), "JOY (RAW): %s  (%d BUTTONS, %d AXES, %d HATS)", d.name.c_str(), d.buttons, d.axes, d.hats);
+            std::snprintf(b, sizeof(b), "JOY%d (RAW): %s  (%d BUTTONS, %d AXES, %d HATS)", pad_number(d.id), d.name.c_str(), d.buttons,
+                          d.axes, d.hats);
             text(r, 16, y, dim, b);
             y += 12;
             for (int a = 0; a < std::min<int>(8, static_cast<int>(d.axis_values.size())); ++a) {
@@ -264,6 +266,7 @@ void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const st
             }
             y += ((std::min<int>(8, static_cast<int>(d.axis_values.size())) + 3) / 4) * 14.0f + 4;
         }
+        for (const std::string& name : midi_input().devices()) text(r, 16, y, dim, "MIDI: " + name), y += 12;
         if (!joystick_init().ready()) text(r, 16, y, hi, "PREPARING CONTROLLERS..."), y += 12;
         else if (joys.empty() && raw_hid().devices().empty()) text(r, 16, y, dim, "NO JOYSTICK CONNECTED"), y += 12;
         text(r, 16, y + 4, dim, "LAST: " + last_raw);
@@ -292,15 +295,17 @@ namespace bmj {
 namespace {
 
 bool is_key(const Binding& b) { return b.type == Binding::Type::Key; }
+// 入力の種類（キーボード／パッド／MIDI）
+int kind(const Binding& b) { return is_key(b) ? 0 : b.type == Binding::Type::Midi ? 2 : 1; }
 
-// 割り当てを入れ替える：同じ種類（キーボード／コントローラー）の割り当てを消してから足し、ほかのボタンからは外す
+// 割り当てを入れ替える：同じ種類（キーボード／パッド／MIDI）の割り当てを消してから足し、ほかのボタンからは外す
 void assign(KeyConfig& cfg, int button, const Binding& b) {
     for (int i = 0; i < kButtonCount; ++i) {
         auto& v = cfg.buttons[i];
         v.erase(std::remove(v.begin(), v.end(), b), v.end());
     }
     auto& v = cfg.buttons[button];
-    v.erase(std::remove_if(v.begin(), v.end(), [&](const Binding& x) { return is_key(x) == is_key(b); }), v.end());
+    v.erase(std::remove_if(v.begin(), v.end(), [&](const Binding& x) { return kind(x) == kind(b); }), v.end());
     v.push_back(b);
 }
 
@@ -355,6 +360,9 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
         }
     };
 
+    BindingCapture capture;  // パッドのボタン・ハットと MIDI（軸はこの画面で別に見る）
+    int midi_src = 0;
+    bool midi_down = false;
     bool done = false, canceled = false;
     while (!done && !canceled) {
         SDL_Event e;
@@ -377,13 +385,14 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
                 } else if (!settle && step <= 8) {
                     bind_digital({Binding::Type::Key, e.key.scancode, 0});
                 }
-            } else if (e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN && !settle) {
+            } else if ((e.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN || read_midi_event(e, midi_src, midi_down)) && !settle) {
+                // パッドのボタンと MIDI。確認の手順なら決定
+                Binding b;
+                if (!capture.take(e, b)) continue;
                 if (step == 9) done = true;
-                else bind_digital({Binding::Type::JoyButton, e.jbutton.button, 0});
+                else bind_digital(b);
             } else if (e.type == SDL_EVENT_JOYSTICK_HAT_MOTION && e.jhat.value && !settle && step <= 8) {
-                int v = e.jhat.value;
-                int dir = v & SDL_HAT_UP ? SDL_HAT_UP : v & SDL_HAT_DOWN ? SDL_HAT_DOWN : v & SDL_HAT_LEFT ? SDL_HAT_LEFT : SDL_HAT_RIGHT;
-                bind_digital({Binding::Type::JoyHat, e.jhat.hat, dir});
+                if (Binding b; capture.take(e, b)) bind_digital(b);
             } else if (e.type == SDL_EVENT_JOYSTICK_AXIS_MOTION && e.jaxis.axis < 16) {
                 // 軸は皿の手順でだけ見る（専用コントローラーの皿はアナログの軸として来ることが多く、鍵盤の手順で拾うと誤る）
                 int a = e.jaxis.axis;
@@ -408,7 +417,7 @@ bool run_key_wizard(SDL_Renderer* r, TextCache& text, KeyConfig& cfg_in, const s
                 }
                 t.prev = e.jaxis.value;
                 if ((step == 7 || (step == 8 && scratch_by_button)) && !settle && t.pulses >= 2 && t.small_steps == 0) {
-                    bind_digital({Binding::Type::JoyAxis, a, e.jaxis.value > 0 ? 1 : -1});
+                    bind_digital({Binding::Type::JoyAxis, a, e.jaxis.value > 0 ? 1 : -1, capture_device(e.jaxis.which)});
                     continue;
                 }
                 // 位置を返す皿（少しずつ動く）だけをアナログとして扱う

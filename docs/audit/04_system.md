@@ -147,7 +147,7 @@ BMjoy 側の略記：`ks` = src/app/keyconfig_skin_scene.cpp、`ke` = src/app/ke
 | 2P 側 | 7 鍵モードに 2P のキーも含む（22 項目） | 1P だけ（ボタン 140 も 1P の 11 項目と「無し」だけを送る） | 意図した違い[?] | O Scene06_Keyconfig.cpp:684-733 |
 | 割り当てる項目 | 鍵盤・皿の上下・START・SELECT | 同じ | 直した | O LR2_configsave.cpp:67-90 / B ke `keyconfig_item_button` |
 | 操作の流れ | 項目を選ぶ→スロットを選ぶ→押す。一つのキーに 8 スロット。割り当てた後もスロットは選んだまま | 同じ。スロットは割り当ての並びの n 番目。空きは詰めて持つので、空いたスロットに入れると一番前の空きに入る。同じ項目のほかのスロットにある入力を入れると、そちらから移る | 直した（空きを詰める点だけ違う） | O Scene06_Keyconfig.cpp:54-70 / H help/5.html / B kc `set_slot` |
-| 割り当てできる機器 | キーボード、パッド（ボタンと軸の上下左右、複数台）、MIDI（ノート・ベンド・ペダル） | キーボード、パッド（ボタン・軸・ハット。全部のパッドを 1 つにまとめる）。アナログ皿はスキンの画面では設定しない（ウィザードと `--keyconfig` の一覧で設定する） | MIDI が BMjoyに無い／アナログ皿は LR2に無い | O Scene06_Keyconfig.cpp:638-678 / B ks |
+| 割り当てできる機器 | キーボード、パッド（ボタンと軸の上下左右、複数台）、MIDI（ノート・ベンド・ペダル）。名前は `1P:BUTTON4`・`MIDI NOTE:F3`・`MIDI BEND:-`・`MIDI PEDAL` | キーボード、パッド（ボタン・軸・ハット）、MIDI（ノート・ベンド・ペダル）。パッドが 2 台以上つながっていれば押した台に決めて割り当て（`JOY2:BUTTON4`）、1 台なら台を決めない（`JOY:BUTTON4`）。MIDI の名前は LR2 と同じ。アナログ皿はスキンの画面では設定しない（ウィザードと `--keyconfig` の一覧で設定する） | 直した（台の名前が `1P:` でなく `JOY1:`、1 台のときは台を決めない点が違う）／アナログ皿は LR2に無い | O Scene06_Keyconfig.cpp:638-678 / B ks, src/input/input.cpp `BindingCapture`, keyconfig.cpp `binding_label` |
 | 割り当てられないキー | ESC・Enter・矢印・F1〜F12（help はテンキーでない数字キーも禁止と書くが、OpenLR2 の一覧には無い[?]） | ESC・Enter・矢印・F1〜F12（数字キーは割り当てられる） | 直した | O Scene06_Keyconfig.cpp:20-43 / H help/5.html / B ke `keyconfig_reserved` |
 | 1 スロットを消す | Delete | 同じ（オプションの音も鳴らして保存する） | 直した | O Scene06_Keyconfig.cpp:57 / B ks |
 | 全部を消す・既定に戻す | OpenLR2 は F1 が既定に戻して保存、F2 が全部消す（保存しない）。help は「F1 で全スロットの割り当てを解除」、スキンの絵は「F1:リセット　F2:初期設定に戻す」で、OpenLR2 と逆に読める[?] | OpenLR2 と同じ（F1 既定、F2 全部消す）。F2 も保存する。アナログ皿の設定はどちらでも残す | 直した（F2 を保存するのは違う。LR2 は保存しないので、選曲に戻ると読み直して元に戻る） | O Scene06_Keyconfig.cpp:72-93 / B ke, ks |
@@ -447,12 +447,12 @@ BMjoy 側の略記：`ks` = src/app/keyconfig_skin_scene.cpp、`ke` = src/app/ke
 
 | 項目 | LR2 | BMjoy | 判定 | 出典 |
 |---|---|---|---|---|
-| キーコンフィグのファイル | `LR2files/Config/keyconfig.xml`（CP932 XML。`<keyNN><id>番号</id>…`）。5 鍵は `_5`、9 ボタンは `_p` | 設定フォルダの `keyconfig.txt`（`key1 = key:Z \| joy:button 3`）。LR2 の XML は読まない | 違う | O LR2_configsave.cpp:59-90, LR2_skinobject.cpp:3645-3651 / B src/input/keyconfig.cpp:104-160 |
-| 入力元の番号 | 0〜255 = キーボード（DIK）、256〜 = パッド（32 ずつ）、0x200〜 = MIDI ノート、0x300/0x301 = ピッチベンド −/+、0x302 = ペダル | SDL スキャンコード、ボタン 64、軸 8、ハット 4 | 違う | O En_input.cpp:100-131,266-333 / B src/input/input.h:40-48 |
+| キーコンフィグのファイル | `LR2files/Config/keyconfig.xml`（CP932 XML。`<keyNN><id>番号</id>…`）。5 鍵は `_5`、9 ボタンは `_p` | 設定フォルダの `keyconfig.txt`（`key1 = key:Z \| joy:button 3 \| joy2:button 3 \| midi:note 41`）。`joyN:` は N 台目のパッドだけ、`joy:` はどの台でも。MIDI は `midi:note 番号`・`midi:bend -`／`+`・`midi:pedal`。前の形式のファイルはそのまま読める。LR2 の XML は読まない | 違う | O LR2_configsave.cpp:59-90, LR2_skinobject.cpp:3645-3651 / B src/input/keyconfig.cpp:104-160 |
+| 入力元の番号 | 0〜255 = キーボード（DIK）、256〜 = パッド（32 ずつ）、0x200〜 = MIDI ノート、0x300/0x301 = ピッチベンド −/+、0x302 = ペダル | SDL スキャンコード、パッドはボタン 64・軸 8・ハット 4 を「どの台でも」の分と台 1〜8 の分、MIDI ノート 128・ベンド −/+・ペダル | 違う（番号の振り方だけ。区別できるものは同じ） | O En_input.cpp:100-131,266-333 / B src/input/input.h:40-48 |
 | 割り当てられるボタン | 1P/2P の鍵盤 7・皿 2 方向・START・SELECT（key01-13, 21-33）と 9 ボタン用 | 1P の 11 個だけ（キーコンフィグの画面で START・SELECT も割り当てられる） | 意図した違い（DP・9K は対象外） | O LR2_configsave.cpp:67-90 / B keyconfig.h:12-14, 仕様書:34,52 |
 | 1 ボタンに割り当てられる数 | 8 個（help）。OpenLR2 は 16 [EXT] | キーコンフィグの画面からは 8 個（スロット）。ファイルと一覧画面では制限なし（9 個目以降は文字 48-55 に出るが選べない） | 直した（画面）／LR2に無い（ファイル） | H help/5.html / B kc `kKeySlots` |
-| 既定の割り当て | Z S X D C F V、皿は LCtrl/Space と LShift、Q/W。パッドは B4 B7 B3 B8 B2 B5 と左、皿は下/上、B9/B10 | 同じ | 同じ | Config/keyconfig_def.xml / B keyconfig.cpp:78-102 |
-| ジョイスティック | DirectInput。軸はしきい値で方向ボタン扱い。台ごとに番号を分ける | SDL と Windows Raw Input。軸のしきい値 16384 [?]。**全部のパッドを 1 つにまとめる** | 違う | O En_input.cpp:266-271 / B input.cpp:57-84, win_rawhid.h |
+| 既定の割り当て | Z S X D C F V、皿は LCtrl/Space と LShift、Q/W。パッドは B4 B7 B3 B8 B2 B5 と左、皿は下/上、B9/B10。MIDI は鍵盤 41〜47・53〜59、皿 36/38/48/50/ベンド− と 40/52/ベンド+、START 39/51、SELECT 37/49 | 同じ（パッドの既定は台を決めない。並びはキーボード・パッド・MIDI の順） | 直した（MIDI の既定を足した） | Config/keyconfig_def.xml / B keyconfig.cpp:78-102 |
+| ジョイスティック | DirectInput。軸はしきい値で方向ボタン扱い。台ごとに番号を分ける（keyconfig_def.xml の 1P は 0x100〜、2P は 0x120〜。OpenLR2 は 1 台目を 0x120 に入れていて実物と合わない [?]） | SDL と Windows Raw Input。軸のしきい値 16384 [?]。台に番号（1〜8）を振り、台を決めた割り当てはその台だけに効く。台を決めない割り当て（`joy:`）は前と同じく全部の台をまとめる。番号は見つけた順（起動時は OS の並び）で空いている一番小さいもの。抜くと空く | 直した（番号の付け方は OS の並び任せ。台を決めない割り当ても残している） | O En_input.cpp:264-271, Scene06_Keyconfig.cpp:639-664 / H keyconfig_def.xml / B input.cpp `pad_number`, win_rawhid.cpp |
 | アナログ皿 | 無い（help/8.html：止めても回転信号が続くのはソフトで対処できない） | `analog_axis`。止まって `analog_release_ms`（100ms）で離す | LR2に無い（BMjoy の拡張） | H help/8.html / B keyconfig.h:25-28, input.cpp:89-107,157-162 |
 | 皿の 2 方向をまとめる規則 | どちらかが新しく入れば押下、両方離したら離す | 同じ | 同じ | O En_input.cpp:444-465 / B input.cpp:148-153 |
 | 最低連打間隔 | 16ms。すぐ離した分はその時間まで押したまま | 同じ | 同じ | O En_input.cpp:274-286 / B input.cpp:109-135 |
@@ -460,7 +460,7 @@ BMjoy 側の略記：`ks` = src/app/keyconfig_skin_scene.cpp、`ke` = src/app/ke
 | 入力の時刻 | メインループで状態を読んだ時刻 | イベントの ns 時刻 | 意図した違い | O En_input.cpp:170-333 / 仕様書:172-175 |
 | 選曲の送り | 押した瞬間 300ms、押し続けると 70ms ずつ。key10 で上、key11 で下、↑↓も同じ | 同じ | 同じ | O Scene02_Songselect.cpp:2024-2066 / B select_scene.cpp:1369-1381 |
 | 鍵盤で選曲する設定（buttonselect / control） | 2・4 鍵または 5・7 鍵で送る | 無い | BMjoyに無い（低） | O LR2_configsave.cpp:1002-1003, Scene02_Songselect.cpp:2024-2036 |
-| MIDI 鍵盤・ツマミ | 鍵盤はキー、ピッチベンドは皿、CC はスライダー | 無い | BMjoyに無い | O En_input.cpp:95-131,467-497 |
+| MIDI 鍵盤・ツマミ | 入力機器を全部（15 台まで）開き、機器もチャンネルも区別しない。ノートオン（ベロシティ 0 はオフ）／オフ、ピッチベンドは上位 7 ビットが 64 未満で −・超で +・64 で両方離す、CC 64（ペダル）は 64 未満で離す・超で押す。CC はスライダーにも使う（midi.xml） | 鍵盤・ベンド・ペダルは同じ読み方（台数の上限は無い。macOS は CoreMIDI でつないだ・抜いたも追う、Windows は winmm で 2 秒ごとに台数を見て開き直す）。時刻は届いた瞬間（macOS は CoreMIDI の時刻）。LR2 はフレームごとに状態を読むので 1 フレーム内の押して離すを落とすが、BMjoy は落とさない。CC→スライダーは無い | 直した（CC のスライダーは BMjoyに無い） | O En_input.cpp:94-131,314-339,467-484 / H keyconfig_def.xml / B src/input/midi.cpp |
 | 選曲画面のファンクションキー | F1 説明、F2 変態オプション、F3 レベル、F4 ウインドウ、F5 IR、F6 スクショ、F7 FPS、F8 再読み込み | F1 キーコンフィグ、F2 オート、F4 ウインドウ、F5 更新、**F6 レーンカバー** | 違う | H help/3.html:134-140, O Main.cpp:2210 / B select_scene.cpp:1283-1304 |
 
 ### 4.7 スクリーンショット
@@ -626,9 +626,9 @@ BMjoy 側の略記：`ks` = src/app/keyconfig_skin_scene.cpp、`ke` = src/app/ke
 | folderlamp・buttonselect・disablesubtitle（SELECT タブから項目も抜けている）・difficultychangetype・ignorekey*・titleflash と NEW SONG | 3.2-3.4 |
 | スキンの #IMAGE の動画（無音ループ）、`#FONT` の type（縁取り・AA）、SkinCustomize の調整値（移動・拡大・判定位置・ノーツの大きさ・dark）とプレイ中の 1〜4 キー | 5.4, 5.5, 5.7 |
 | F7 の FPS 表示 | 4.5 |
-| パッドを台ごとに区別すること（いまは全部 1P にまとまる） | 4.6 |
+| ~~パッドを台ごとに区別すること（いまは全部 1P にまとまる）~~ 直した（`joy2:` のように台を決めた割り当て） | 4.6 |
 | LR2 の keyconfig.xml の取り込み | 2.2, 4.6 |
-| MIDI の入力（鍵盤・ピッチベンドの皿・CC のスライダー） | 2.2, 4.6 |
+| MIDI の入力（~~鍵盤・ピッチベンドの皿・ペダル~~ 直した。CC のスライダーはまだ） | 2.2, 4.6 |
 
 ### 低
 
