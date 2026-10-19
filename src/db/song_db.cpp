@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS chart(
 CREATE INDEX IF NOT EXISTS chart_md5 ON chart(md5);
 CREATE INDEX IF NOT EXISTS chart_sha256 ON chart(sha256);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
+CREATE TABLE IF NOT EXISTS chart_added(path TEXT PRIMARY KEY, added INTEGER);
+CREATE TABLE IF NOT EXISTS favorite(md5 TEXT PRIMARY KEY, value INTEGER);
 CREATE TABLE IF NOT EXISTS lr2_score(
     md5 TEXT PRIMARY KEY, clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     playcount INTEGER, clearcount INTEGER,
@@ -424,6 +426,8 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
         Stmt del(db_, "DELETE FROM chart WHERE path = ?");
         Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
         Stmt unskip(db_, "DELETE FROM skipped WHERE path = ?");
+        Stmt added(db_, "INSERT OR IGNORE INTO chart_added(path, added) VALUES(?, ?)");
+        const int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         for (size_t i = 0; i < records.size(); ++i) {
             if (!ok[i]) {
                 // 読めない譜面（DPなど）は一覧に出さない
@@ -435,8 +439,10 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
             }
             unskip.text(1, to_parse[i]).run();
             put_chart(ins, records[i]);
+            if (!in_db.count(to_parse[i])) added.text(1, to_parse[i]).i64(2, now).run();
         }
-        for (const std::string& p : to_remove) del.text(1, p).run(), unskip.text(1, p).run();
+        Stmt unadd(db_, "DELETE FROM chart_added WHERE path = ?");
+        for (const std::string& p : to_remove) del.text(1, p).run(), unskip.text(1, p).run(), unadd.text(1, p).run();
     }
     sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
     stats.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -446,10 +452,41 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
 std::vector<ChartRecord> SongDb::all_charts() const {
     std::vector<ChartRecord> out;
     if (!db_) return out;
-    std::string sql = std::string("SELECT ") + kChartColumns + " FROM chart";
+    // 初めて見つけた日時（NEW SONG）は別の表に持つ（譜面を読み直しても変わらない）
+    std::string cols = kChartColumns;
+    std::string sql = "SELECT ";
+    for (size_t i = 0, j; i < cols.size(); i = j + 1) {
+        j = cols.find(',', i);
+        if (j == std::string::npos) j = cols.size();
+        std::string c(trim(std::string_view(cols).substr(i, j - i)));
+        sql += (i ? ", chart." : "chart.") + c;
+    }
+    sql += ", COALESCE(a.added, 0) FROM chart LEFT JOIN chart_added a ON a.path = chart.path";
     Stmt st(db_, sql.c_str());
-    while (st.step()) out.push_back(read_chart_row(st));
+    while (st.step()) {
+        out.push_back(read_chart_row(st));
+        out.back().added = st.col_i64(27);
+    }
     return out;
+}
+
+std::unordered_map<std::string, int> SongDb::favorites() const {
+    std::unordered_map<std::string, int> out;
+    if (!db_) return out;
+    Stmt st(db_, "SELECT md5, value FROM favorite WHERE value > 0");
+    while (st.step()) out[st.col_text(0)] = static_cast<int>(st.col_i64(1));
+    return out;
+}
+
+void SongDb::set_favorite(const std::string& md5, int value) {
+    if (!db_) return;
+    if (value <= 0) {
+        Stmt st(db_, "DELETE FROM favorite WHERE md5 = ?");
+        st.text(1, md5).run();
+        return;
+    }
+    Stmt st(db_, "INSERT OR REPLACE INTO favorite(md5, value) VALUES(?, ?)");
+    st.text(1, md5).i64(2, value).run();
 }
 
 bool SongDb::find_by_md5(const std::string& md5, ChartRecord& out) const {
@@ -708,7 +745,7 @@ int SongDb::import_lr2_songs(const std::string& lr2_song_db, std::string* error,
     std::vector<Row> rows;
     {
         Stmt st(src, "SELECT path, hash, title, subtitle, genre, artist, subartist, level, difficulty, maxbpm, minbpm, mode, "
-                     "judge, longnote, karinotes, stagefile, banner, backbmp FROM song");
+                     "judge, longnote, karinotes, stagefile, banner, backbmp, adddate FROM song");
         if (!st.s) {
             if (error) *error = "LR2 の曲データベースではない: " + lr2_song_db;
             sqlite3_close(src);
@@ -735,6 +772,8 @@ int SongDb::import_lr2_songs(const std::string& lr2_song_db, std::string* error,
             r.ln_free = r.ln;  // LR2 の譜面は種類を決めていない LN として扱う（読み直せば正しい数になる）
             r.notes = static_cast<int>(st.col_i64(14));
             r.stagefile = text(15), r.banner = text(16), r.backbmp = text(17);
+            r.added = st.col_i64(18);
+            r.keys = w.mode == 5 ? 5 : 7;
             rows.push_back(std::move(w));
         }
     }
@@ -772,10 +811,11 @@ int SongDb::import_lr2_songs(const std::string& lr2_song_db, std::string* error,
         Stmt ins(db_, sql.c_str());
         Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
         Stmt has(db_, "SELECT 1 FROM chart WHERE path = ? AND sha256 NOT LIKE 'md5:%'");
+        Stmt add(db_, "INSERT OR IGNORE INTO chart_added(path, added) VALUES(?, ?)");  // LR2 の追加日時（adddate）
         for (const Row& w : rows) {
             if (!w.exists) continue;
-            if (w.mode != 7) {
-                // 7 鍵以外（BMjoy では遊べない譜面）は、読み直さないように覚えておく
+            if (w.mode != 7 && w.mode != 5) {
+                // 7 鍵・5 鍵以外（BMjoy では遊べない譜面）は、読み直さないように覚えておく
                 skip.text(1, w.r.path).i64(2, w.r.mtime).i64(3, w.r.size).run();
                 continue;
             }
@@ -785,6 +825,7 @@ int SongDb::import_lr2_songs(const std::string& lr2_song_db, std::string* error,
             has.reset();
             if (already) continue;
             put_chart(ins, w.r);
+            add.text(1, w.r.path).i64(2, w.r.added).run();
             imported++;
         }
     }

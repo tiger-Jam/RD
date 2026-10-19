@@ -6,6 +6,7 @@
 #include <functional>
 #include <array>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct sqlite3;
@@ -22,6 +23,7 @@ struct ChartRecord {
     double bpm_min = 0, bpm_max = 0, bpm_main = 0;
     int length_ms = 0;
     bool scratch = true;
+    int64_t added = 0;  // 初めて見つけた日時（UNIX 秒。0 は不明。NEW SONG と新曲の色に使う）
     int keys = 7;  // 鍵盤数（5 か 7。6・7 鍵にノーツが無ければ 5。LR2: songmanage:3003）
     std::string banner, stagefile, backbmp;  // 譜面に書かれた画像のファイル名（譜面のフォルダからの相対）
     int64_t mtime = 0, size = 0;
@@ -86,6 +88,9 @@ public:
     // ln_mode：LN の種類（種類を決めていない LN のある譜面だけ、その種類の記録を読む）
     std::vector<ScoreRecord> all_scores(int ln_mode = 0) const;
     bool find_by_md5(const std::string& md5, ChartRecord& out) const;
+    // お気に入り（LR2: favorite）。md5 → 1 = FAVORITE 2 = IGNORE（0 は書かない）
+    std::unordered_map<std::string, int> favorites() const;
+    void set_favorite(const std::string& md5, int value);
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）
     void save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo);
     void save_score(const std::string& sha256, const PlayRecord& r);

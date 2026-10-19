@@ -77,6 +77,12 @@ struct Library {
     std::unordered_map<std::string, ScoreRecord> scores;  // sha256 → スコア
 };
 
+// 新曲とみなす境の時刻（LR2: titleflash 時間より後に見つけた譜面）
+int64_t new_song_since(int hours) {
+    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    return now - static_cast<int64_t>(hours) * 3600;
+}
+
 SDL_Color lamp_color(int lamp) {
     switch (lamp) {
     case 1: return {150, 30, 30, 255};    // FAILED
@@ -95,7 +101,13 @@ const char* lamp_name(int lamp) {
 }
 
 // 一覧の木を作る：難易度表（レベル別）と曲フォルダ
-std::vector<Entry> build_tree(const Library& lib) {
+// new_since：この時刻より後に見つけた譜面を NEW SONG に集める。favs：md5 → 1 = FAVORITE 2 = IGNORE。
+// IGNORE の譜面は IGNORE のフォルダ以外には出さない（LR2: songmanage:821）
+std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::unordered_map<std::string, int>& favs) {
+    auto fav_of = [&](const std::string& md5) {
+        auto it = favs.find(md5);
+        return it != favs.end() ? it->second : 0;
+    };
     std::unordered_map<std::string, const ChartRecord*> by_md5, by_sha256;
     for (const ChartRecord& c : lib.charts) by_md5.emplace(c.md5, &c), by_sha256.emplace(c.sha256, &c);
     auto chart_entry = [&](const ChartRecord* c, const std::string& badge) {
@@ -121,6 +133,7 @@ std::vector<Entry> build_tree(const Library& lib) {
                 if (tc.level != lv) continue;
                 if (!tc.md5.empty() && !seen.insert(tc.md5).second) continue;
                 auto it = by_md5.find(tc.md5);
+                if (it != by_md5.end() && fav_of(tc.md5) == 2) continue;
                 if (it != by_md5.end()) {
                     lf.children.push_back(chart_entry(it->second, lf.badge));
                     lf.owned++;
@@ -195,6 +208,7 @@ std::vector<Entry> build_tree(const Library& lib) {
     std::set<std::string> roots;
     for (const std::string& r : lib.roots) roots.insert(upper(norm(r)));
     for (const ChartRecord& c : lib.charts) {
+        if (fav_of(c.md5) == 2) continue;
         std::string f = norm(c.folder);
         charts_in[f].push_back(&c);
         // 登録した曲フォルダまで上がって、親子をつなぐ（どの曲フォルダの下でもなければ出さない）
@@ -259,10 +273,41 @@ std::vector<Entry> build_tree(const Library& lib) {
         fill(f, d);
         song_roots.push_back(std::move(f));
     }
-    // 並び：難易度表 → 登録した曲フォルダ → COURSE / 段位認定（LR2 のルートと同じく、コースのフォルダは後ろ）
+    // 並び：難易度表 → 登録した曲フォルダ → NEW SONG → COURSE / 段位認定（LR2 のルートと同じく、コースのフォルダは後ろ）
     std::vector<Entry> courses(std::make_move_iterator(root.end() - 2), std::make_move_iterator(root.end()));
     root.erase(root.end() - 2, root.end());
     for (Entry& f : song_roots) root.push_back(std::move(f));
+    {
+        // NEW SONG（LR2: __NEWSONG__）。新しく見つけた譜面があるときだけ出す。曲フォルダと同じ並び
+        std::vector<const ChartRecord*> fresh;
+        std::set<std::string> seen;
+        for (const ChartRecord& c : lib.charts)
+            if (c.added > 0 && c.added > new_since && fav_of(c.md5) != 2 && seen.insert(c.md5).second) fresh.push_back(&c);
+        if (!fresh.empty()) {
+            std::stable_sort(fresh.begin(), fresh.end(), [&](const ChartRecord* a, const ChartRecord* b) {
+                if (a->folder != b->folder) return by_path(a->folder, b->folder);
+                return a->playlevel < b->playlevel;
+            });
+            Entry f;
+            f.label = "NEW SONG";
+            f.fs_folder = true;
+            for (const ChartRecord* c : fresh) f.children.push_back(chart_entry(c, std::to_string(c->playlevel))), f.owned++, f.total++;
+            root.push_back(std::move(f));
+        }
+        // FAVORITE / IGNORE（LR2 の既定のカスタムフォルダ favorite・ignore。印を付けた譜面があるときだけ出す）
+        for (int v : {1, 2}) {
+            std::vector<const ChartRecord*> list;
+            std::set<std::string> seen2;
+            for (const ChartRecord& c : lib.charts)
+                if (fav_of(c.md5) == v && seen2.insert(c.md5).second) list.push_back(&c);
+            if (list.empty()) continue;
+            std::stable_sort(list.begin(), list.end(), [&](const ChartRecord* a, const ChartRecord* b) { return by_path(a->folder, b->folder); });
+            Entry f;
+            f.label = v == 1 ? "FAVORITE" : "IGNORE";
+            for (const ChartRecord* c : list) f.children.push_back(chart_entry(c, std::to_string(c->playlevel))), f.owned++, f.total++;
+            root.push_back(std::move(f));
+        }
+    }
     for (Entry& f : courses) root.push_back(std::move(f));
     return root;
 }
@@ -292,7 +337,7 @@ void load_charts(Library& lib, const SongDb& db, const AppConfig& cfg) {
 
 // プレイオプションのパネルを開いている間の鍵盤（LR2: Songselect.cpp:1350 SetPlayOption）。
 //   1=鍵盤数の絞り込み 2=RANDOM 3=BATTLE 4=GAUGE 5=HS- 7=HS+ 6=ASSIST 6+7=HIDDEN/SUDDEN 5+7=HS-FIX
-// BMjoy にまだ無いもの（鍵盤数の絞り込み・BATTLE）は何もしない。変えたら true
+// BMjoy にまだ無いもの（BATTLE）は何もしない。変えたら true
 bool play_option_keys(AppConfig& cfg, const InputMapper& input, const std::vector<ButtonInput>& buttons) {
     bool pressed[8] = {};
     for (const ButtonInput& b : buttons)
@@ -306,6 +351,7 @@ bool play_option_keys(AppConfig& cfg, const InputMapper& input, const std::vecto
         else if (v < lo) v = hi;
     };
     bool changed = false;
+    if (pressed[1]) loop(0, 7, 1, cfg.select_mode), changed = true;  // 鍵盤数の絞り込み
     if (pressed[4]) loop(kGroove, kGAttack, 1, cfg.gauge), changed = true;
     if (pressed[2]) loop(0, 5, 1, cfg.random), changed = true;  // RANDOM
     if (pressed[6] && !down(7)) cfg.assist = !cfg.assist, changed = true;  // ASSIST（皿の自動演奏）
@@ -380,7 +426,10 @@ void run_select(App& app) {
         lib->tables.push_back(std::move(t));
     }
     for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
-    std::vector<Entry> root = build_tree(*lib);
+    std::unordered_map<std::string, int> favs = app.db.favorites();
+    std::vector<Entry> root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
+    // フォルダランプ（LR2: folderlamp）。フォルダの中の譜面のランプの一番低いもの。記録か一覧が変わったら数え直す
+    std::unordered_map<const Entry*, int> folder_lamps;
 
     std::mutex mu;
     std::shared_ptr<Library> pending;
@@ -802,7 +851,8 @@ void run_select(App& app) {
             keys.push_back(n ? entry_key((*lv.list)[std::clamp(lv.cursor, 0, n - 1)]) : "");
         }
         const int old_cursor = stack.back().cursor;
-        root = build_tree(*lib);
+        root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
+        folder_lamps.clear();
         auto place = [&](Level& lv, size_t i) {
             const std::vector<Entry>& list = *lv.list;
             for (size_t k = 0; k < list.size(); ++k)
@@ -894,6 +944,7 @@ void run_select(App& app) {
                 pending = lib2;
             } else {
                 for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode)) lib->scores[s.sha256] = s;
+                folder_lamps.clear();
             }
             sctx.player = app.db.player_stats();
             if (ex == PlayExit::Quit) quit = true;
@@ -1038,6 +1089,7 @@ void run_select(App& app) {
                      lower(c.artist).find(lq) != std::string::npos || lower(c.subartist).find(lq) != std::string::npos ||
                      lower(c.genre).find(lq) != std::string::npos;
             if (!ok || !seen.insert(c.md5).second) continue;
+            if (auto f = favs.find(c.md5); f != favs.end() && f->second == 2) continue;  // IGNORE は出さない
             Entry e;
             e.kind = Entry::Kind::Chart;
             e.chart = &c;
@@ -1298,6 +1350,17 @@ void run_select(App& app) {
                     else if (ty == 76) loop(app.cfg.target_percent, 50, 100);
                     else if (ty == 77) loop(app.cfg.target, 0, 5);  // ターゲット（IR の 6〜8 は無いので飛ばす）
                     else if (ty == 83) loop(app.cfg.replay_save, 0, 4);
+                    else if (ty == 90) {
+                        // お気に入り：なし → FAVORITE → IGNORE（LR2: favorite 0〜2）。一覧を作り直す
+                        const Entry* cur = current();
+                        if (cur && cur->kind == Entry::Kind::Chart) {
+                            int& v = favs[cur->chart->md5];
+                            v = (v + (dir > 0 ? 1 : 2)) % 3;
+                            app.db.set_favorite(cur->chart->md5, v);
+                            app.mixer.play_system(kSysOptionChange);
+                            rebuild();
+                        }
+                    }
                     else if (ty == 19) {
                         // リプレイで遊ぶ
                         const Entry* cur = current();
@@ -1439,7 +1502,9 @@ void run_select(App& app) {
         start_was_held = start_held;
         if (panel == 1) {
             // 開いている間は、鍵盤はオプションの変更に使う
+            const int old_mode = mode_filter;
             if (play_option_keys(app.cfg, input, buttons)) app.mixer.play_system(kSysOptionChange);
+            if (mode_filter != old_mode) reapply_view(false);
             buttons.clear();
         }
         bool accept = sctx.timers.on(1) && !readme_open && !editing;
@@ -1680,6 +1745,8 @@ void run_select(App& app) {
             sctx.mode_name = kModeNames[mode_filter];
             sctx.sort_name = kSortNames[sort_mode];
             sctx.autoplay = autoplay;
+            if (auto f = sctx.type == 0 && sctx.chart ? favs.find(sctx.chart->md5) : favs.end(); f != favs.end()) sctx.favorite = f->second;
+            else sctx.favorite = 0;
             {
                 // カーソルの譜面にリプレイがあるか（譜面が変わったときだけファイルを見る）
                 const ChartRecord* c = sctx.type == 0 ? sctx.chart : nullptr;
@@ -1706,12 +1773,30 @@ void run_select(App& app) {
             ss.readme = &readme_lines;
             ss.readme_open = readme_open;
             ss.readme_x = readme_x, ss.readme_y = readme_y;
+            const int64_t new_since_now = new_song_since(app.cfg.title_flash);
             ss.bar = [&](int i) {
                 SelectBar b;
                 const Entry& en = list[i];
                 if (en.kind == Entry::Kind::Folder) {
                     b.type = en.course_folder ? 6 : 1;
                     b.title = en.label;
+                    if (app.cfg.folder_lamp && !en.course_folder) {
+                        // 持っている譜面だけを見る（鍵盤数の絞り込みは効かせる）。PERFECT から始めて一番低いランプ
+                        auto [it, fresh] = folder_lamps.try_emplace(&en, -1);
+                        if (fresh) {
+                            int lamp = 7;
+                            std::function<void(const Entry&)> walk = [&](const Entry& x) {
+                                if (x.kind == Entry::Kind::Chart && x.chart && mode_shows(mode_filter, x.chart->keys)) {
+                                    auto sc = lib->scores.find(x.chart->sha256);
+                                    lamp = std::min(lamp, sc != lib->scores.end() ? sc->second.clear : 0);
+                                }
+                                for (const Entry& c : x.children) walk(c);
+                            };
+                            walk(en);
+                            it->second = lamp == 7 ? 0 : std::min(lamp, 6);
+                        }
+                        b.lamp = it->second;
+                    }
                 } else if (en.kind == Entry::Kind::Course) {
                     // コースのバーはレベルを出さず、ランプはコースの記録
                     b.type = 8;
@@ -1722,6 +1807,7 @@ void run_select(App& app) {
                     b.type = 0;
                     b.title = en.label;
                     if (en.kind == Entry::Kind::Chart) {
+                        b.is_new = en.chart->added > 0 && en.chart->added > new_since_now;  // 新曲の色（LR2: adddate）
                         int df = en.chart->difficulty;
                         b.level_index = df >= 1 && df <= 5 ? df : 0;
                         b.level = en.chart->playlevel;

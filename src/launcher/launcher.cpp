@@ -499,9 +499,9 @@ int main(int, char**) {
             g.label(X + 28, Y + 292, "検索最大ヒット数");
             g.edit_int(cfg.search_max, X + 128, Y + 286, 80, 22, true, 0, 100000);
             g.label(X + 220, Y + 292, "(0:無制限)");
-            g.label(X + 28, Y + 332, "タイトルのフラッシュ", false);
-            g.edit_int(d_flash, X + 128, Y + 326, 80, 22, false);
-            g.label(X + 220, Y + 330, "時間以内に追加した曲", false);
+            g.label(X + 28, Y + 332, "タイトルのフラッシュ");
+            g.edit_int(cfg.title_flash, X + 128, Y + 326, 80, 22, true, 0, 100000);
+            g.label(X + 220, Y + 330, "時間以内に追加した曲");
         } else if (tab == 3) {
             g.label(X + 28, Y + 28, "HI SPEED");
             g.label(X + 138, Y + 28, "MIN");
@@ -533,7 +533,7 @@ int main(int, char**) {
             g.edit_str(d_font, X + 326, Y + 186, 116, 22, false);
             g.button(X + 452, Y + 186, 74, 22, "SELECT", false);
             g.check(X + 28, Y + 224, "選曲にポプコンを使う", d_false, false);
-            g.check(X + 236, Y + 224, "フォルダランプ(曲が多いと非常に重くなります)", d_false, false);
+            g.check(X + 236, Y + 224, "フォルダランプ(曲が多いと非常に重くなります)", cfg.folder_lamp);
             g.check(X + 28, Y + 252, "1/3キーを選曲に割り当てる", d_false, false);
             g.check(X + 236, Y + 252, "システムキー(windowsキー等)の無効化", d_false, false);
             g.check(X + 28, Y + 280, "システムログの出力(重くなります)", d_false, false);

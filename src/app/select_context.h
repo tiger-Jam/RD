@@ -43,6 +43,7 @@ struct SelectContext {
     const SkinCatalog* catalog = nullptr;  // スキンセレクト（文字列 50/51/100〜114、ボタン 170〜188、スライダー7）
     bool autoplay = false;
     bool windowed = true;
+    int favorite = 0;            // カーソルの譜面のお気に入り（ボタン 90。0 / 1 = FAVORITE / 2 = IGNORE）
     bool replay_exists = false;  // カーソルの譜面のリプレイがある（op 196 / 197）
     // レベルバーの最大値（LR2: levelbarflash_5 / _7）。5 鍵の譜面は 5 鍵の値
     int levelbar_max() const { return chart && chart->keys == 5 ? cfg->levelbar_5 : cfg->levelbar_7; }

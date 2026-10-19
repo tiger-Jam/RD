@@ -94,6 +94,8 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "score_graph") score_graph = iv != 0;
         else if (key == "replay_save") replay_save = std::clamp(iv, 0, 4);
         else if (key == "no_right_click_exit") no_right_click_exit = iv != 0;
+        else if (key == "folder_lamp") folder_lamp = iv != 0;
+        else if (key == "title_flash") title_flash = std::max(0, iv);
         else if (key == "volume_on") volume_on = iv != 0;
         else if (key == "vol_master") vol_master = std::clamp(iv, 0, 100);
         else if (key == "vol_key") vol_key = std::clamp(iv, 0, 100);
@@ -175,6 +177,8 @@ bool AppConfig::save(const std::string& path) const {
     f << "select_difficulty = " << select_difficulty << "  # 選曲の難易度の絞り込み 0=ALL 1〜5\n";
     f << "select_mode = " << select_mode << "  # 選曲の鍵盤数の絞り込み 0=ALL 1=7KEY 2=14KEY 3=9KEY 4=5KEY 5=10KEY 6=SINGLE 7=DOUBLE\n";
     f << "select_sort = " << select_sort << "  # 選曲のソート 0=OFF 1=TITLE 2=ARTIST 3=BPM 4=LENGTH 5=LEVEL 6=CLEAR 7=SCORE 8=MISSCOUNT\n";
+    f << "title_flash = " << title_flash << "  # 新曲とみなす時間（時間）\n";
+    f << "folder_lamp = " << (folder_lamp ? 1 : 0) << "  # 1=フォルダのバーにランプを付ける\n";
     f << "no_right_click_exit = " << (no_right_click_exit ? 1 : 0) << "  # 1=演奏中の右クリックで曲を終えない\n";
     f << "bga = " << bga << "  # BGA 0=OFF 1=ON 2=オートプレイのときだけ 3=NO MISS\n";
     f << "hs_mode = " << hs_mode << "  # ハイスピ 0=クラシック 1=フローティング\n";

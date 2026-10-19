@@ -285,6 +285,7 @@ int SelectContext::button(int t) const {
     case 76: return cfg->target_percent;
     case 77: return cfg->target;
     case 83: return cfg->replay_save;
+    case 90: return favorite;
     case 80: return windowed ? 1 : 0;
     case 82: return cfg->vsync ? 1 : 0;
     default: return 0;
