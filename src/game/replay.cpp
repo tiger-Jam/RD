@@ -22,6 +22,9 @@ bool save_replay(const std::string& path, const Replay& r) {
         f << "BMJREPLAY " << Replay::kVersion << "\n";
         f << "sha256 = " << r.sha256 << "\n";
         f << "seed = " << r.seed << "\n";
+        f << "random_version = " << r.random_version << "\n";
+        f << "judge_timing = " << r.judge_timing << "\n";
+        f << "played_at = " << r.played_at << "\n";
         f << "random = " << r.random << "\n";
         f << "gauge = " << r.gauge << "\n";
         f << "ln_mode = " << r.ln_mode << "\n";
@@ -68,6 +71,9 @@ bool load_replay(const std::string& path, Replay& r) {
         if (k == "sha256") r.sha256 = v;
         else if (k == "seed") r.seed = static_cast<uint32_t>(std::strtoul(v.c_str(), nullptr, 10));
         else if (k == "random") r.random = iv;
+        else if (k == "random_version") r.random_version = iv;
+        else if (k == "judge_timing") r.judge_timing = iv;
+        else if (k == "played_at") r.played_at = std::atoll(v.c_str());
         else if (k == "gauge") r.gauge = iv;
         else if (k == "ln_mode") r.ln_mode = iv;
         else if (k == "hs_fix") r.hs_fix = iv;

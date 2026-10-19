@@ -1,6 +1,7 @@
 #include "app/play_session.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <atomic>
@@ -187,7 +188,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     bool feed_input = false;
     if (const char* f = dev_env("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) feed_input = load_replay(f, replay);
     if (opt.replay) {
-        if (!load_replay(replay_path(sha256), replay) || replay.sha256 != sha256) {
+        // 配置の作り方の版が違う記録は、同じ譜面を作れないので再生しない（古い版の作り方を残したら、ここで選ぶ）
+        if (!load_replay(replay_path(sha256), replay) || replay.sha256 != sha256 || replay.random_version != kRandomAlgorithmVersion) {
             std::fprintf(stderr, "リプレイが無い: %s\n", chart_path.c_str());
             opt.replay = false;
             return PlayExit::Back;
@@ -507,19 +509,26 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             }
             // リプレイの保存（LR2: replaysave。Main.cpp:1796）。ALWAYS は毎回、HISCORE は EX が自己ベスト以上、
             // CLEAR はクリア、FULLCOMBO はフルコンボのとき（どれも EX が 0 なら残さない）。コースのステージは残さない
+            // 入力の記録（仕様書6章「リプレイ（入力ログ）」）。オートとリプレイの再生以外は、全部のプレーで 1 つずつ残す
+            if (!recorded && !opt.autoplay && !opt.replay && started) {
+                record.sha256 = sha256;
+                record.seed = popt.random_seed;
+                record.random_version = kRandomAlgorithmVersion;
+                record.judge_timing = cfg.judge_timing;
+                record.played_at = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                record.random = cfg.random, record.gauge = cfg.gauge, record.ln_mode = cfg.ln_mode, record.hs_fix = cfg.hs_fix;
+                record.effect = cfg.effect, record.assist = cfg.assist, record.gas = cfg.gas, record.hi_speed = cfg.hi_speed;
+                record.lane_cover = cfg.lane_cover, record.lane_cover_v = cfg.lane_cover_v;
+                if (!save_replay(input_log_path(sha256, record.played_at), record)) std::fprintf(stderr, "入力の記録を保存できない\n");
+            }
+            // リプレイの保存（LR2: replaysave。Main.cpp:1796）。ALWAYS は毎回、HISCORE は EX が自己ベスト以上、
+            // CLEAR はクリア、FULLCOMBO はフルコンボのとき（どれも EX が 0 なら残さない）。コースのステージは残さない
             if (!recorded && opt.save_score && !opt.autoplay && started && !course && cfg.replay_save > 0) {
                 const int ex = ps.exscore();
                 bool keep = cfg.replay_save == 1 || (ex > 0 && ((cfg.replay_save == 2 && ex >= ctx.old_exscore) ||
                                                               (cfg.replay_save == 3 && ctx.result_clear >= 2) ||
                                                               (cfg.replay_save == 4 && ctx.result_clear >= 5)));
-                if (keep) {
-                    record.sha256 = sha256;
-                    record.seed = popt.random_seed;
-                    record.random = cfg.random, record.gauge = cfg.gauge, record.ln_mode = cfg.ln_mode, record.hs_fix = cfg.hs_fix;
-                    record.effect = cfg.effect, record.assist = cfg.assist, record.gas = cfg.gas, record.hi_speed = cfg.hi_speed;
-                    record.lane_cover = cfg.lane_cover, record.lane_cover_v = cfg.lane_cover_v;
-                    if (!save_replay(replay_path(sha256), record)) std::fprintf(stderr, "リプレイを保存できない\n");
-                }
+                if (keep && !save_replay(replay_path(sha256), record)) std::fprintf(stderr, "リプレイを保存できない\n");
             }
             recorded = true;
             // クリア・失敗の音（LR2: ProcS_Result）

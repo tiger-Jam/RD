@@ -281,6 +281,13 @@ std::string replay_path(const std::string& sha256) {
     return p;
 }
 
+std::string input_log_path(const std::string& sha256, int64_t played_at) {
+    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
+    std::string p = (dir ? std::string(dir) : std::string()) + "inputlog/" + sha256 + "/" + std::to_string(played_at) + ".bjr";
+    SDL_free(dir);
+    return p;
+}
+
 std::string table_cache_dir() {
     char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
     std::string p = dir ? std::string(dir) + "tables" : "tables";

@@ -18,6 +18,9 @@ struct Replay {
     static constexpr int kVersion = 1;  // 書き方を変えたら上げる（古い版も読めるようにしておく）
     std::string sha256;
     uint32_t seed = 0;  // 譜面の #RANDOM とレーンの並べ替えの乱数の種
+    int random_version = 1;  // 配置の作り方の版（kRandomAlgorithmVersion。古い記録には無いので 1）
+    int judge_timing = 0;    // 判定タイミングの設定（ms。描画だけをずらすので判定には効かないが、残しておく）
+    int64_t played_at = 0;   // 遊んだ日時（UNIX 秒）
     // 譜面と判定に効くオプション（再生のときはこれに合わせ、終わったら元に戻す）
     int random = 0, gauge = 0, ln_mode = 0, hs_fix = 0, effect = 0;
     bool assist = false, gas = false;

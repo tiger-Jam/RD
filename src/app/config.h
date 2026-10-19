@@ -130,5 +130,7 @@ std::string song_db_path();
 std::string table_cache_dir();
 // 譜面のリプレイのファイル（設定フォルダの replay/<sha256>.bjr）
 std::string replay_path(const std::string& sha256);
+// 全プレーの入力の記録（設定フォルダの inputlog/<sha256>/<日時>.bjr）
+std::string input_log_path(const std::string& sha256, int64_t played_at);
 
 }  // namespace bmj
