@@ -505,16 +505,9 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     for (auto& [bpm, cnt] : per_bpm)
         if (cnt > best) best = cnt, chart.main_bpm = bpm;
 
-    // TOTAL：未定義（1未満）ならLR2の既定式で補う（LR2: bmsload:3790）
-    int notes = chart.judgeable_notes();
-    if (total < 1) {
-        double t;
-        if (notes < 400) t = notes / 5.0 + 200.0;
-        else if (notes < 600) t = (notes - 400) / 2.5 + 280.0;
-        else t = (notes - 600) / 5.0 + 360.0;
-        total = static_cast<int>(t * 0.8);
-    }
-    chart.total = total;
+    // TOTAL：未定義（1未満）ならLR2の既定式で補う（LR2: bmsload:3790）。配置のオプションでノーツが減ったら、遊ぶ前に数え直す
+    chart.total_defined = total >= 1;
+    chart.total = total >= 1 ? total : lr2_default_total(chart.judgeable_notes());
     chart.judge_rank = rank;
 
     // 曲の終わり：最後のノーツ（LNなら終点）+2秒と、最後のBGMの遅いほう。不可視ノーツは数えない（LR2: bmsload:3499, 3649）

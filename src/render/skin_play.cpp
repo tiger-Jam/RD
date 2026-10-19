@@ -302,7 +302,8 @@ int PlayContext::number_raw(int id) const {
     case 210: return last_fast_slow;
     case 212: return st.fast;
     case 214: return st.slow;
-    case 216: return st.judge_count[kBad] + st.judge_count[kPoor];
+    // コンボが切れた数（OpenLR2 の拡張）：BAD と見逃しの POOR（空POOR と地雷は入らない。地雷は judge_count[0] に数えてある）
+    case 216: return st.judge_count[kBad] + st.judge_count[kPoor] - st.empty_poor - st.judge_count[kEmptyPoor];
     case 217: return n;
     case 218: return st.note_current;
     default: return -1;

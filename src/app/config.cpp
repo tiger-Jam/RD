@@ -50,6 +50,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "ghost") ghost = std::clamp(iv, 0, 3);
         else if (key == "score_graph") score_graph = iv != 0;
         else if (key == "replay_save") replay_save = std::clamp(iv, 0, 4);
+        else if (key == "no_right_click_exit") no_right_click_exit = iv != 0;
         else if (key == "ln_mode") ln_mode = iv;
         else if (key == "fhs_green") fhs_green = iv;
         else if (key == "fhs_base") fhs_base = iv;
@@ -123,6 +124,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "ghost = " << ghost << "  # ゴーストの位置 0=OFF 1=TYPE A 2=TYPE B 3=TYPE C\n";
     f << "score_graph = " << (score_graph ? 1 : 0) << "  # スコアグラフ 0=OFF 1=ON\n";
     f << "replay_save = " << replay_save << "  # リプレイの保存 0=OFF 1=ALWAYS 2=HISCORE 3=CLEAR 4=FULLCOMBO\n";
+    f << "no_right_click_exit = " << (no_right_click_exit ? 1 : 0) << "  # 1=演奏中の右クリックで曲を終えない\n";
     f << "bga = " << bga << "  # BGA 0=OFF 1=ON 2=オートプレイのときだけ 3=NO MISS\n";
     f << "hs_mode = " << hs_mode << "  # ハイスピ 0=クラシック 1=フローティング\n";
     f << "fhs_green = " << fhs_green << "  # フローティングの緑数字（1/600 秒）\n";

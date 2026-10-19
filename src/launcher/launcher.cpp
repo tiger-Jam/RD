@@ -540,7 +540,7 @@ int main(int, char**) {
             g.check(X + 236, Y + 280, "スキンセレクトでプレビューを表示しない", d_false, false);
             g.check(X + 28, Y + 308, "暗転中に曲のロードを行う", d_false, false);
             g.check(X + 236, Y + 308, "瞬殺された/escを押したスコアもIR登録する", d_false, false);
-            g.check(X + 28, Y + 338, "右クリックで曲を終了させない", d_false, false);
+            g.check(X + 28, Y + 338, "右クリックで曲を終了させない", cfg.no_right_click_exit);
             g.check(X + 236, Y + 338, "上下キーを速度変更に割り当てる", d_true, false);
         } else if (tab == 4) {
             g.label(X + 28, Y + 28, "これらのオプションはジュークボックスの構成によっては不具合を起こす可能性があります");

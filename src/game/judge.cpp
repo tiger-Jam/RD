@@ -70,10 +70,15 @@ void JudgeEngine::apply_judge(int judge, double mul) {
     if (cfg_.gas) gauge_type_ = gas_select(gauge_, cfg_.gauge_type);
 }
 
-void JudgeEngine::apply_mine(int damage) {
+void JudgeEngine::apply_mine(int damage, int lane, int64_t t_us) {
     // LR2はここで POOR と空POOR の数を両方増やしている（BPにも入る）
     stats_.judge_count[kPoor]++;
     stats_.judge_count[kEmptyPoor]++;
+    JudgeEvent e;
+    e.time_us = t_us;
+    e.lane = static_cast<uint8_t>(lane);
+    e.mine = true;
+    events_.push_back(e);
     gauge_.apply_mine(damage);
     if (cfg_.gas) gauge_type_ = gas_select(gauge_, cfg_.gauge_type);
 }
@@ -233,12 +238,12 @@ void JudgeEngine::proc_single(int lane, int keypress, int timing, int64_t t_us) 
     if (note.kind == NoteKind::Mine) {
         // 押した瞬間がGREATの早い側より後なら爆発。通り過ぎた時点で押していても爆発
         if (keypress == 1 && real - timing < win_.great) {
-            apply_mine(note.damage);
+            apply_mine(note.damage, lane, t_us);
             play_.push_back(!chart_.wav.empty() && !chart_.wav[0].empty() ? 0 : kMineSystemSound);
         } else if (timing <= real) {
             return;
         } else if (keypress == 1 || keypress == 2) {
-            apply_mine(note.damage);
+            apply_mine(note.damage, lane, t_us);
             play_.push_back(!chart_.wav.empty() && !chart_.wav[0].empty() ? 0 : kMineSystemSound);
         }
         done_[idx] = true;
@@ -359,6 +364,7 @@ void JudgeEngine::proc_long(int lane, int keypress, int timing, int64_t t_us) {
             judge_to_score(kBad, lane, t_us, 0, false);
         } else {
             judge_to_score(active_[idx], lane, t_us, 0, false);
+            events_.back().ln_release = true;
         }
         active_[idx] = -1;
         done_[idx] = true;

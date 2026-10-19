@@ -198,6 +198,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     }
     // 配置のオプション（LR2: bmsload:3354）。#RANDOM を評価した乱数の続きで並べ替える
     apply_random_option(parsed.chart, cfg.random, parsed.rng);
+    // TOTAL の既定式は、並べ替えで重なったノーツを捨てたあとの数で（LR2: bmsload:3789）
+    if (!parsed.chart.total_defined) parsed.chart.total = lr2_default_total(parsed.chart.judgeable_notes());
     // CONVERGE のときは皿の自動演奏を切る（LR2: bmsload:2102）
     const bool assist = cfg.assist && cfg.random != kConverge;
     // HS-FIX の CONSTANT：一定の速さで流す
@@ -701,6 +703,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) {
                     dragging = nullptr;
                 }
+                // 演奏中の右クリックで曲を終える（LR2 と同じ。設定で止められる）
+                if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT && phase == Phase::Play &&
+                    !cfg.no_right_click_exit)
+                    quit_with_fade();
                 switch (e.type) {
                 case SDL_EVENT_QUIT: quit = true, done = true, exit = PlayExit::Quit; break;
                 case SDL_EVENT_JOYSTICK_ADDED: SDL_OpenJoystick(e.jdevice.which); break;
@@ -716,7 +722,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     if (e.key.key == SDLK_ESCAPE) {
                         if (phase == Phase::Result) result_input();
                         else if (phase == Phase::Play) quit_with_fade();
-                        else if (phase != Phase::Fadeout) enter_result(judge.stats().note_current < judge.stats().total_notes);
+                        // フェードアウト中と閉店中は効かない（LR2: 終わりの操作は演奏中だけ）
                     } else if (e.key.key == SDLK_RETURN && phase == Phase::Result) {
                         result_input();
                     } else if (e.key.key == SDLK_F5 && phase == Phase::Result && !course && !opt.replay) {
@@ -843,7 +849,16 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             int playstart = skin ? skin->playstart : 1000;
             if (!ctx.timers.on(1) && now_ms >= startinput) ctx.timers.set(1, now_ms);
             if (!ctx.timers.on(40) && loader_joined && now_ms >= load_wait) ctx.timers.set(40, now_ms);
-            if (ctx.timers.on(40) && !started && ctx.timers.lapse(40, now_ms) >= playstart) {
+            // 曲は #PLAYSTART が過ぎ、START・SELECT と数字キー（1〜8・0）が離されてから始める（LR2: Play.cpp:1755）
+            auto start_blocked = [&] {
+                if (input.button_held(kStart) || input.button_held(kSelect)) return true;
+                const bool* ks = SDL_GetKeyboardState(nullptr);
+                for (SDL_Scancode sc : {SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4, SDL_SCANCODE_5, SDL_SCANCODE_6,
+                                        SDL_SCANCODE_7, SDL_SCANCODE_8, SDL_SCANCODE_0})
+                    if (ks[sc]) return true;
+                return false;
+            };
+            if (ctx.timers.on(40) && !started && ctx.timers.lapse(40, now_ms) >= playstart && !start_blocked()) {
                 std::vector<ScheduledSound> schedule;
                 uint32_t rate = mixer.sample_rate();
                 auto frame_of = [&](int64_t us) { return us * static_cast<int64_t>(rate) / 1000000; };
@@ -915,6 +930,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 judge.sounds_to_stop().clear();
                 judge.sounds_to_play().clear();
                 for (const JudgeEvent& je : judge.events()) {
+                    if (je.mine) {
+                        // 地雷：前の判定の絵をもう一度出す
+                        ctx.timers.set(46, scene_ms_of(je.time_us));
+                        continue;
+                    }
                     if (cfg.auto_adjust > 0 && !opt.autoplay && !opt.replay && je.has_offset && !je.ln_end && je.judge >= kBad && je.judge <= kPGreat) {
                         adjust_sum += je.offset_ms;
                         if (++adjust_count > 9) {
@@ -931,7 +951,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     } else {
                         // CN・HCN の始点は、ここで数えるのと同時に、押さえている間の演出（タイマー70）も始める
                         if (je.ln_start && j >= kGood) ctx.timers.set(70 + je.lane, at);
-                        if (j >= kGreat) ctx.timers.set(50 + je.lane, at);  // ボム
+                        if (j >= kGreat && !je.ln_release) ctx.timers.set(50 + je.lane, at);  // ボム（LN を手前で離したときは出さない）
                         if (j >= kPoor) ctx.on_judged();
                         if (j >= kEmptyPoor && j <= kPGreat) ghost_log.push_back(static_cast<int8_t>(j));
                         // OpenLR2の拡張：直前の FAST/SLOW とずれ（ms）
@@ -1018,8 +1038,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     ctx.timers.set(2, now_ms);
                 }
             }
-            // START と SELECT を同時に押してもやめる（LR2 と同じ）
-            if (phase == Phase::Play && input.button_held(kStart) && input.button_held(kSelect)) quit_with_fade();
+            // START と SELECT を同時に押してもやめる。全部のノーツを処理したあとは、どちらか片方でも終わる（LR2: Play.cpp:1197）
+            if (phase == Phase::Play) {
+                const PlayStats& s = judge.stats();
+                bool start = input.button_held(kStart), select = input.button_held(kSelect);
+                if ((start && select) || (s.note_current >= s.total_notes && (start || select))) quit_with_fade();
+            }
             if (phase == Phase::Fadeout && ctx.timers.lapse(2, now_ms) >= (skin ? skin->fadeout : 0)) {
                 enter_result(fade_quit);
             } else if (phase == Phase::Failed && ctx.timers.lapse(3, now_ms) >= (skin ? skin->close : 2050)) {

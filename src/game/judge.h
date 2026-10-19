@@ -29,6 +29,8 @@ struct JudgeEvent {
     bool has_offset = false;
     bool ln_start = false;  // CN・HCN の始点（押さえている間の演出を始める）
     bool ln_end = false;    // CN・HCN の終点（離した時刻で判定したもの）
+    bool ln_release = false;  // LN を終点の手前で離して、始点の判定で確定したもの（ボムは出さない。LR2: Play.cpp:1108）
+    bool mine = false;      // 地雷を踏んだ（判定には数えない。前の判定の絵をもう一度出す。LR2: Play.cpp:298）
 };
 
 struct PlayStats {
@@ -123,7 +125,7 @@ private:
     void hcn_tick(int64_t t_us);
     void judge_to_score(int judge, int lane, int64_t t_us, int offset_ms, bool has_offset);
     void apply_judge(int judge, double mul = 1.0);
-    void apply_mine(int damage);
+    void apply_mine(int damage, int lane, int64_t t_us);
 
     const Chart& chart_;
     JudgeConfig cfg_;

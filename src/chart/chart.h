@@ -69,6 +69,15 @@ struct ChartMeta {
     int difficulty = 0;
 };
 
+// #TOTAL の無い譜面の TOTAL（LR2: bmsload:3790）。notes は判定するノーツの数（LN 1 本 = 1）
+inline int lr2_default_total(int notes) {
+    double t;
+    if (notes < 400) t = notes / 5.0 + 200.0;
+    else if (notes < 600) t = (notes - 400) / 2.5 + 280.0;
+    else t = (notes - 600) / 5.0 + 360.0;
+    return static_cast<int>(t * 0.8);
+}
+
 struct Chart {
     ChartMeta meta;
     std::vector<Note> notes;  // time_us 昇順
@@ -83,6 +92,7 @@ struct Chart {
     LnHint ln_hint = LnHint::None;
     KeyLayout layout = KeyLayout::K7S;
     double total = 0.0;  // 0なら未定義（既定式で補う）
+    bool total_defined = true;  // BMS の #TOTAL が書かれていた（false なら total は既定式で補ったもの）
     double initial_bpm = 130.0;
     double main_bpm = 130.0;
     int judge_rank = 2;  // LR2の#RANK。0=VERY HARD, 1=HARD, 2=NORMAL, 3=EASY
