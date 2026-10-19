@@ -220,6 +220,12 @@ bool SongDb::clear_charts() {
     return sqlite3_exec(db_, "DELETE FROM chart; DELETE FROM skipped;", nullptr, nullptr, nullptr) == SQLITE_OK;
 }
 
+void SongDb::set_chart_tag(const std::string& path, int difficulty, int playlevel) {
+    if (!db_) return;
+    Stmt st(db_, "UPDATE chart SET difficulty = ?, playlevel = ? WHERE path = ?");
+    st.i64(1, difficulty).i64(2, playlevel).text(3, path).run();
+}
+
 bool SongDb::open(const std::string& path) {
     close();
     if (sqlite3_open(path.c_str(), &db_) != SQLITE_OK) return false;
@@ -292,7 +298,7 @@ std::string insert_chart_sql() {
 }  // namespace
 
 ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
-                       const std::function<void(int, int, const std::string&)>& progress) {
+                       const std::function<void(int, int, const std::string&)>& progress, const std::string& only_under) {
     auto t0 = std::chrono::steady_clock::now();
     ScanStats stats;
     if (!db_) return stats;
@@ -300,7 +306,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
     // 1. 曲フォルダを列挙して path → (mtime, size) を作る。トップのフォルダごとに並列に回る
     std::vector<fs::path> roots;
     std::error_code ec;
-    for (const std::string& d : dirs) {
+    for (const std::string& d : only_under.empty() ? dirs : std::vector<std::string>{only_under}) {
         for (auto& e : fs::directory_iterator(d, ec)) {
             if (e.is_directory(ec)) roots.push_back(e.path());
             else if (is_chart_file(e.path())) roots.push_back(e.path());
@@ -348,6 +354,18 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
         // 読めなかった譜面（DPなど）も覚えておき、変わっていなければ読み直さない
         Stmt sk(db_, "SELECT path, mtime, size FROM skipped");
         while (sk.step()) in_db.emplace(sk.col_text(0), FileInfo{sk.col_i64(1), sk.col_i64(2)});
+    }
+    if (!only_under.empty()) {
+        // そのフォルダの下の譜面だけを比べる（区切りと大文字小文字の違いは無視する）
+        auto key = [](const std::string& p) {
+            std::string k = fs::path(p).lexically_normal().generic_string();
+            for (char& c : k) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return k;
+        };
+        std::string prefix = key(only_under);
+        if (prefix.empty() || prefix.back() != '/') prefix += '/';
+        for (auto it = in_db.begin(); it != in_db.end();)
+            it = key(it->first).rfind(prefix, 0) == 0 ? std::next(it) : in_db.erase(it);
     }
     std::vector<std::string> to_parse, to_remove;
     for (auto& [p, fi] : on_disk) {

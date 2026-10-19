@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "audio/system_sound.h"
+#include "render/frame_hooks.h"
 #include <filesystem>
 #include <vector>
 
@@ -88,6 +89,7 @@ bool App::init(const char* argv0) {
         return false;
     }
     load_sound_set();
+    frame_hooks_install([this] { mixer.play_system(kSysScreenshot); });
     if (!db.open(song_db_path())) std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
     double estimate = mixer.output_latency_us() / 1000.0;
     // 実際の遅延を測って、曲の時計（判定とノーツの位置）に使う（Windows のみ）

@@ -204,3 +204,28 @@ TEST(song_db_import_lr2_songs) {
     CHECK(charts.size() == 1 && charts[0].sha256 == sha256_hex(seven) && charts[0].title == "S");
     CHECK_EQ(sdb.provisional_count(), 0);
 }
+
+// 選曲の F8：そのフォルダの下だけを読み直し、ほかのフォルダの変化には触らない。F3 の書き換えも残る
+TEST(song_db_scan_only_under) {
+    fs::path dir = fs::temp_directory_path() / "bmj_test_songs_f8";
+    fs::remove_all(dir);
+    write(dir / "x" / "a" / "a.bme", "#TITLE A\n#BPM 120\n#00111:01\n");
+    write(dir / "y" / "b" / "b.bme", "#TITLE B\n#BPM 120\n#00111:01\n");
+    SongDb db;
+    CHECK(db.open((dir / "songs.db").string()));
+    CHECK_EQ(db.scan({dir.string()}, 2).added, 2);
+    write(dir / "x" / "a" / "a2.bme", "#TITLE A2\n#BPM 120\n#00111:01\n");
+    fs::remove(dir / "y" / "b" / "b.bme");
+    ScanStats s = db.scan({dir.string()}, 2, nullptr, (dir / "x").string());
+    CHECK_EQ(s.added, 1);
+    CHECK_EQ(s.removed, 0);  // y の下は見ない
+    CHECK_EQ(db.all_charts().size(), size_t(3));
+    db.set_chart_tag((dir / "x" / "a" / "a.bme").string(), 5, 12);
+    bool tagged = false;
+    for (const ChartRecord& c : db.all_charts())
+        if (c.title == "A") tagged = c.difficulty == 5 && c.playlevel == 12;
+    CHECK(tagged);
+    CHECK_EQ(db.scan({dir.string()}, 2).removed, 1);
+    db.close();
+    fs::remove_all(dir);
+}

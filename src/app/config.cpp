@@ -130,7 +130,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "window_scale = " << window_scale << "  # ウィンドウの大きさ（%）。0 はスキンに合わせる\n";
     f << "window_w = " << window_w << "\n";
     f << "window_h = " << window_h << "  # ウインドウサイズ。両方 1 以上なら解像度・拡大率より優先\n";
-    f << "db_update = " << db_update << "  # 0=起動時に曲フォルダを読み直す 1=手動（選曲画面の F5）\n";
+    f << "db_update = " << db_update << "  # 0=起動時に曲フォルダを読み直す 1=手動（選曲画面の F8 で今のフォルダだけ）\n";
     f << "select_speed_first = " << select_speed_first << "\n";
     f << "preview = " << (preview ? 1 : 0) << "  # 選曲中に曲を鳴らす\n";
     f << "base_speed = " << base_speed << "\n";

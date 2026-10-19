@@ -91,6 +91,7 @@ add_executable(BMjoybody WIN32
     src/input/keyconfig.cpp
     src/input/win_rawhid.cpp
     src/render/keyconfig_scene.cpp
+    src/render/frame_hooks.cpp
     src/render/play_scene.cpp
     src/render/skin_play.cpp
     src/skin/skin_renderer.cpp

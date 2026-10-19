@@ -63,13 +63,17 @@ public:
     bool open(const std::string& path);
     void close();
 
-    // 曲フォルダを読み直す。変わったファイルだけを並列にパースし、1トランザクションで書く（仕様書8章「リロード処理」）
+    // 曲フォルダを読み直す。変わったファイルだけを並列にパースし、1トランザクションで書く（仕様書8章「リロード処理」）。
+    // only_under を渡すと、そのフォルダの下だけを読み直す（選曲の F8。dirs は使わない）
     ScanStats scan(const std::vector<std::string>& dirs, int threads,
-                   const std::function<void(int done, int total, const std::string& path)>& progress = nullptr);
+                   const std::function<void(int done, int total, const std::string& path)>& progress = nullptr,
+                   const std::string& only_under = {});
 
     std::vector<ChartRecord> all_charts() const;
     // 曲の一覧を消す（スコアは残す）。次の読み直しで全部登録し直す（LR2: 曲データベースの再作成）
     bool clear_charts();
+    // 譜面の難易度（1〜5）とレベルを書き換える（選曲の F3。譜面ファイルが変わって読み直すと元に戻る）
+    void set_chart_tag(const std::string& path, int difficulty, int playlevel);
     // ln_mode：LN の種類（種類を決めていない LN のある譜面だけ、その種類の記録を読む）
     std::vector<ScoreRecord> all_scores(int ln_mode = 0) const;
     bool find_by_md5(const std::string& md5, ChartRecord& out) const;

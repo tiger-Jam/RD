@@ -25,6 +25,7 @@
 #include "game/lane_option.h"
 #include "input/input.h"
 #include "input/joystick_init.h"
+#include "render/frame_hooks.h"
 #include "render/play_scene.h"
 #include "render/skin_play.h"
 #include "util/hash.h"
@@ -1098,6 +1099,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             }
             {
                 uint64_t d0 = SDL_GetTicksNS();
+                frame_hooks_before_present(renderer);
                 SDL_RenderPresent(renderer);
                 app.last_draw_ms = (SDL_GetTicksNS() - now_ns) / 1e6;
                 app.last_present_ms = (SDL_GetTicksNS() - d0) / 1e6;
@@ -1270,6 +1272,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             rtimers.set(2, t);
         }
+        frame_hooks_before_present(app.renderer);
         SDL_RenderPresent(app.renderer);
     }
     for (int id : {kSysCourseClear, kSysCourseFail}) mixer.stop_system(id);

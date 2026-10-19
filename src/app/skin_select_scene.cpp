@@ -6,6 +6,7 @@
 #include "app/select_context.h"
 #include "audio/system_sound.h"
 #include "render/skin_play.h"
+#include "render/frame_hooks.h"
 
 namespace bmj {
 
@@ -245,6 +246,7 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             done = true;
         }
+        frame_hooks_before_present(app.renderer);
         SDL_RenderPresent(app.renderer);
         SDL_DelayPrecise(2'000'000);
     }

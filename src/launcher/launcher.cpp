@@ -471,7 +471,7 @@ int main(int, char**) {
             g.label(X + 333, Y + 137, "Y");
             g.edit_int(cfg.window_h, X + 351, Y + 121, 59, 22, true, 0, 4320);
             g.label(X + 17, Y + 164, "データベース自動更新");
-            if (g.radio(X + 136, Y + 164, "手動のみ(F5で現在選択中のフォルダの更新を行えます)", cfg.db_update == 1)) cfg.db_update = 1;
+            if (g.radio(X + 136, Y + 164, "手動のみ(F8で現在選択中のフォルダの更新を行えます)", cfg.db_update == 1)) cfg.db_update = 1;
             g.radio(X + 136, Y + 184, "開いたフォルダに対して自動で行う (フォルダ読み込み時間が少し長くなります)", false, false);
             if (g.radio(X + 136, Y + 203, "起動時に全フォルダに対して行う (起動時間が長くなります)", cfg.db_update == 0)) cfg.db_update = 0;
             g.check(X + 19, Y + 242, "インターネットランキングに参加する", d_false, false);

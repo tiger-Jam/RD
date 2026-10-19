@@ -4,6 +4,7 @@
 
 #include "audio/system_sound.h"
 #include "input/input.h"
+#include "render/frame_hooks.h"
 
 namespace fs = std::filesystem;
 
@@ -112,6 +113,7 @@ DecideResult run_decide(App& app, const SelectContext& base) {
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             result = DecideResult::Back, done = true;
         }
+        frame_hooks_before_present(app.renderer);
         SDL_RenderPresent(app.renderer);
         SDL_DelayPrecise(2'000'000);
     }

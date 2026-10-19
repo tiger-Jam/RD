@@ -59,7 +59,7 @@ struct AppConfig {
     int window_scale = 0;
     // ウインドウサイズ（LR2: windowsize_x / windowsize_y）。両方 1 以上なら、解像度や拡大率より優先する
     int window_w = 0, window_h = 0;
-    // 曲データベースを起動時に更新するか（LR2: autoreload）。0=起動時 1=手動（選曲画面の F5）
+    // 曲データベースを起動時に更新するか（LR2: autoreload）。0=起動時 1=手動（選曲画面の F8 で今のフォルダだけ）
     int db_update = 0;
     // LR2 の設定ツールの OPTION / JUKEBOX2 / SELECT の数値
     int base_speed = 100;      // 基本スクロールスピード（LR2: basespeed。%）

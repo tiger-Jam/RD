@@ -32,6 +32,7 @@
 #include "input/input.h"
 #include "input/joystick_init.h"
 #include "input/win_rawhid.h"
+#include "render/frame_hooks.h"
 #include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
 
@@ -55,6 +56,7 @@ struct Entry {
     std::shared_ptr<Course> course;  // コースのとき
     bool course_folder = false;      // コースを集めたフォルダ（バーの種類 6）
     bool fs_folder = false;          // 曲フォルダの階層（中の譜面に LR2 の難易度の絞り込みをかける）
+    std::string dir;                 // 曲フォルダの階層のとき、そのフォルダのパス（F8 の読み直し）
     std::vector<Entry> children;
     int owned = 0, total = 0;  // フォルダの中で持っている譜面の数
 };
@@ -226,6 +228,7 @@ std::vector<Entry> build_tree(const Library& lib) {
         for (const std::string& k : kids) {
             Entry f;
             f.fs_folder = true;
+            f.dir = k;
             f.label = fs::path(k).filename().string();
             fill(f, k);
             if (f.children.empty()) continue;
@@ -240,6 +243,7 @@ std::vector<Entry> build_tree(const Library& lib) {
         Entry f;
         f.fs_folder = true;
         std::string d = norm(r);
+        f.dir = d;
         f.label = fs::path(d).filename().string();
         if (f.label.empty()) f.label = d;
         fill(f, d);
@@ -374,23 +378,29 @@ void run_select(App& app) {
     std::atomic<bool> stop_worker{false};  // 選曲画面を抜けるときに、裏の読み込みを止める
     std::string status = "";
     std::thread worker;
-    // scan_songs：曲フォルダも読み直すか（false なら難易度表だけ取りに行く）
-    auto refresh = [&](bool scan_songs = true) {
+    // scan_songs：曲フォルダも読み直すか（false なら難易度表だけ取りに行く）。
+    // only_under：そのフォルダの下だけを読み直す（F8。難易度表は取りに行かない）
+    auto refresh = [&](bool scan_songs = true, std::string only_under = {}) {
         if (busy) return;
         if (worker.joinable()) worker.join();
         busy = true;
-        worker = std::thread([&, scan_songs, dirs = app.cfg.song_dirs, urls = app.cfg.tables, ln_mode = app.cfg.ln_mode] {
+        std::vector<DifficultyTable> keep_tables;
+        if (!only_under.empty()) keep_tables = lib->tables;
+        worker = std::thread([&, scan_songs, only_under, keep_tables = std::move(keep_tables), dirs = app.cfg.song_dirs,
+                              urls = app.cfg.tables, ln_mode = app.cfg.ln_mode] {
             // 曲データベースは別の接続で書く（書き込みはこのスレッドだけ）
             SongDb wdb;
             ScanStats st;
             if (wdb.open(song_db_path()) && scan_songs)
-                st = wdb.scan(dirs, static_cast<int>(std::max(2u, std::thread::hardware_concurrency())));
+                st = wdb.scan(dirs, static_cast<int>(std::max(2u, std::thread::hardware_concurrency())), nullptr, only_under);
             auto next = std::make_shared<Library>();
             next->roots = dirs;
             next->charts = wdb.all_charts();
             fill_difficulties(next->charts);
             for (const ScoreRecord& s : wdb.all_scores(ln_mode)) next->scores[s.sha256] = s;
-            for (const std::string& u : urls) next->tables.push_back(update_table(table_cache_dir(), u));
+            if (!only_under.empty()) next->tables = keep_tables;
+            else
+                for (const std::string& u : urls) next->tables.push_back(update_table(table_cache_dir(), u));
             char buf[160];
             std::snprintf(buf, sizeof(buf), "%d 譜面（追加 %d／変更 %d／削除 %d）%.1f 秒", st.found, st.added, st.updated,
                           st.removed, st.seconds);
@@ -427,7 +437,7 @@ void run_select(App& app) {
             busy = false;
         });
     };
-    // 起動時に曲フォルダと難易度表を読み直す（設定で「手動」なら F5 のときだけ）
+    // 起動時に曲フォルダと難易度表を読み直す（設定で「手動」なら読み直さない。F8 で今のフォルダだけ）
     // 起動の画面で読み直し済みなら、ここでは読み直さない
     if (app.cfg.db_update == 0 && !app.updated_at_start) refresh();
 
@@ -449,9 +459,11 @@ void run_select(App& app) {
         std::shared_ptr<std::vector<Entry>> view;  // 絞り込んだ一覧（絞り込んでいなければ空）
         const std::vector<Entry>* list;  // 見せている一覧
         bool lr2_filter = false;         // 曲フォルダの一覧（LR2 の難易度の絞り込みをかける。難易度表などは常に ALL）
+        std::string dir;                 // 曲フォルダの一覧なら、そのフォルダのパス
     };
-    auto make_level = [&](const std::vector<Entry>* full, int cursor, const std::string& name, bool lr2_filter = false) {
-        Level lv{full, cursor, name, nullptr, full, lr2_filter};
+    auto make_level = [&](const std::vector<Entry>* full, int cursor, const std::string& name, bool lr2_filter = false,
+                          std::string dir = {}) {
+        Level lv{full, cursor, name, nullptr, full, lr2_filter, std::move(dir)};
         // 難易度の絞り込み（LR2: songmanage:2034）。曲フォルダ（同じフォルダの差分）ごとに、選んだ難易度以下で一番上の譜面を出す。
         // 以下が無ければ一番下の譜面。曲は消えない。選んだ難易度の譜面が一覧に 1 つも無ければ、難易度を自動で進める
         bool use_diff = lr2_filter && difficulty_filter != 0;
@@ -780,7 +792,7 @@ void run_select(App& app) {
             const std::vector<Entry>& list = *stack.back().list;
             auto it = std::find_if(list.begin(), list.end(), [&](const Entry& e) { return e.label == path[i]; });
             if (it == list.end()) break;
-            stack.push_back(make_level(&it->children, cursors[i + 1], path[i], it->fs_folder));
+            stack.push_back(make_level(&it->children, cursors[i + 1], path[i], it->fs_folder, it->dir));
             place(stack.back(), i + 1);
         }
         if (stack.size() == path.size() + 1) {
@@ -796,7 +808,7 @@ void run_select(App& app) {
         if (!e) return;
         if (e->kind == Entry::Kind::Folder) {
             if (e->children.empty()) return;  // 空のフォルダには入らない（LR2 と同じ）
-            stack.push_back(make_level(&e->children, 0, e->label, e->fs_folder));
+            stack.push_back(make_level(&e->children, 0, e->label, e->fs_folder, e->dir));
             snap();
             app.mixer.play_system(kSysFolderOpen);
         } else if (e->kind == Entry::Kind::Chart || (e->kind == Entry::Kind::Course && e->course->playable())) {
@@ -889,7 +901,7 @@ void run_select(App& app) {
         }
         difficulty_filter = to;
         Level& lv = stack.back();
-        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter);
+        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir);
         // 移った先の譜面にカーソルを合わせる。見えていなければ、同じ曲フォルダの譜面に（カーソルは同じ曲に留まる）
         int same_folder = -1;
         for (size_t i = 0; i < lv.list->size(); ++i) {
@@ -912,7 +924,7 @@ void run_select(App& app) {
         std::string label = e ? e->label : "";
         const ChartRecord* chart = e && e->kind == Entry::Kind::Chart ? e->chart : nullptr;
         Level& lv = stack.back();
-        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter);
+        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir);
         for (size_t i = 0; i < lv.list->size(); ++i) {
             const Entry& x = (*lv.list)[i];
             if ((chart && x.kind == Entry::Kind::Chart && x.chart == chart) || (!chart && x.label == label)) {
@@ -922,6 +934,33 @@ void run_select(App& app) {
         }
         snap();
         app.mixer.play_system(kSysOptionChange);
+    };
+    // F3 + 矢印（LR2 と同じ）：↑↓ で難易度を 1〜5 の輪で、←→ でレベルを 0〜99 の輪で変えて、曲データベースに書く。
+    // 難易度で絞り込んでいれば、絞り込みも新しい難易度にする
+    auto edit_tag = [&](SDL_Keycode key) {
+        const Entry* e = current();
+        if (!e || e->kind != Entry::Kind::Chart || !e->chart) return;
+        ChartRecord& c = const_cast<ChartRecord&>(*e->chart);  // lib->charts の要素
+        if (key == SDLK_UP || key == SDLK_DOWN) {
+            c.difficulty += key == SDLK_UP ? -1 : 1;
+            if (c.difficulty < 1) c.difficulty = 5;
+            if (c.difficulty > 5) c.difficulty = 1;
+            if (difficulty_filter != 0) difficulty_filter = c.difficulty;
+        } else {
+            c.playlevel += key == SDLK_LEFT ? -1 : 1;
+            if (c.playlevel < 0) c.playlevel = 99;
+            if (c.playlevel > 99) c.playlevel = 0;
+        }
+        app.db.set_chart_tag(c.path, c.difficulty, c.playlevel);
+        // 曲フォルダの一覧のバーのレベル表示を直す（難易度表のバーは表のレベルのまま）
+        std::function<void(std::vector<Entry>&, bool)> retag = [&](std::vector<Entry>& list, bool in_fs) {
+            for (Entry& x : list) {
+                if (in_fs && x.kind == Entry::Kind::Chart && x.chart == &c) x.badge = std::to_string(c.playlevel);
+                retag(x.children, x.fs_folder);
+            }
+        };
+        retag(root, false);
+        reapply_view();
     };
     auto back = [&] {
         if (stack.size() > 1) {
@@ -1257,6 +1296,12 @@ void run_select(App& app) {
             }
             if (e.type == SDL_EVENT_KEY_UP && e.key.scancode == SDL_SCANCODE_UP) up_held = false;
             if (e.type == SDL_EVENT_KEY_UP && e.key.scancode == SDL_SCANCODE_DOWN) down_held = false;
+            // F3 を押しながら矢印：カーソルの譜面の難易度（↑↓）とレベル（←→）を書き換える（LR2 と同じ。カーソルは動かない）
+            if (e.type == SDL_EVENT_KEY_DOWN && SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F3] &&
+                (e.key.key == SDLK_UP || e.key.key == SDLK_DOWN || e.key.key == SDLK_LEFT || e.key.key == SDLK_RIGHT)) {
+                if (!e.key.repeat) edit_tag(e.key.key);
+                continue;
+            }
             if (e.type == SDL_EVENT_KEY_DOWN) {
                 switch (e.key.key) {
                 case SDLK_UP: up_held = true; break;
@@ -1275,27 +1320,14 @@ void run_select(App& app) {
                 case SDLK_LEFT:
                 case SDLK_BACKSPACE: back(); break;
                 case SDLK_ESCAPE:
-                    if (e.key.repeat) break;
-                    if (stack.size() > 1) back();
-                    else quit = true;
+                    // どの階層にいても終わる（LR2 と同じ）
+                    if (!e.key.repeat) quit = true;
                     break;
-                case SDLK_F5: refresh(); break;
-                case SDLK_F1:
-                    if (e.key.repeat) break;
-                    // キーコンフィグ（押した入力を順に1〜7鍵・皿に割り当てる）
-                    if (run_key_wizard(r, text, app.keycfg, keyconfig_path())) app.mixer.play_system(kSysDecide);
-                    input = InputMapper(app.keycfg), input.set_min_hold_ms(app.cfg.input_interval);
-                    break;
-                case SDLK_F2:
-                    autoplay = !autoplay;
-                    app.mixer.play_system(kSysOptionChange);
+                case SDLK_F8:
+                    // いま開いている曲フォルダの下だけを読み直す（LR2 と同じく、難易度表やルートでは何もしない）
+                    if (!e.key.repeat && !stack.back().dir.empty()) refresh(true, stack.back().dir);
                     break;
                 case SDLK_SPACE: space_held = true; break;
-                case SDLK_F6:
-                    // レーンカバー（SUDDEN+）を使うか
-                    app.cfg.lane_cover = !app.cfg.lane_cover;
-                    app.mixer.play_system(kSysOptionChange);
-                    break;
                 case SDLK_F4:
                     app.toggle_fullscreen();
                     break;
@@ -1722,7 +1754,7 @@ void run_select(App& app) {
         if (!(SDL_GetWindowFlags(app.window) & SDL_WINDOW_INPUT_FOCUS)) joy_text = "ウィンドウをクリックすると操作できます";
         text.draw(px, 600, 14, joystick_init().ready() ? dim : accent, joy_text, 0, 420);
         text.draw(24, 690, 14, dim,
-                  "↑↓ 選ぶ　Enter/→ 決定　Esc/← 戻る　START/Space オプション　F2 オート　F6 カバー　F1 キーコンフィグ　F5 更新　（コントローラ：白鍵 決定／黒鍵 戻る／皿 選ぶ）");
+                  "↑↓ 選ぶ　Enter/→ 決定　← 戻る　Esc 終了　START/Space オプション　F1 キーの説明　（コントローラ：白鍵 決定／黒鍵 戻る／皿 選ぶ）");
         if (std::getenv("BMJ_DEBUG_LOOP")) {
             // 開発用：選曲画面の1秒あたりの描画回数と、1回にかかった時間
             static uint64_t t = SDL_GetTicksNS();
@@ -1738,6 +1770,24 @@ void run_select(App& app) {
         }
         if (panel == 1) draw_play_option_panel(r, text, app.cfg, (now - panel_open_ns) / 1e6);
         }  // 仮の画面
+        // F1 を押している間は F キーの説明（LR2 と同じ）。BMjoy に無い操作は灰色
+        if (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1]) {
+            const SDL_Color on{255, 255, 255, 255}, off{110, 110, 110, 255};
+            const Entry* cur = current();
+            bool course = cur && cur->kind == Entry::Kind::Course;
+            SDL_SetRenderDrawColor(r, 0, 0, 0, 180);
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_FRect bg{0, 0, 330, 76};
+            SDL_RenderFillRect(r, &bg);
+            float x = 4;
+            x = 4 + text.draw(x, 2, 14, off, "F2 マニアックオプション　");
+            text.draw(x, 2, 14, course ? off : on, course ? "F3 コースのソート変更" : "F3 レベルの変更");
+            x = 4 + text.draw(4, 20, 14, on, "F4 ウインドウモード切り替え　");
+            text.draw(x, 20, 14, off, "F5 IRに接続");
+            x = 4 + text.draw(4, 38, 14, on, "F6 スクリーンショット　");
+            text.draw(x, 38, 14, on, "F7 FPS表示");
+            text.draw(4, 56, 14, on, "F8 フォルダのリロード");
+        }
         bool settled;
         {
             std::lock_guard<std::mutex> lock(mu);
@@ -1772,11 +1822,18 @@ void run_select(App& app) {
                 else if (k == 'o') sort_mode = (sort_mode + 1) % kSortCount, reapply_view();
                 else if (k == 'a') autoplay = !autoplay;
                 else if (k == '_') SDL_Delay(10);  // 待つだけ
+                else if (k == '6') {
+                    // F6（スクリーンショット）を押したことにする
+                    SDL_Event ev{};
+                    ev.type = SDL_EVENT_KEY_DOWN, ev.key.key = SDLK_F6, ev.key.down = true;
+                    SDL_PushEvent(&ev);
+                }
             } else {
                 if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
                 quit = true;
             }
         }
+        frame_hooks_before_present(r);
         SDL_RenderPresent(r);
         SDL_DelayPrecise(4'000'000);
     }

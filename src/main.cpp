@@ -40,6 +40,7 @@
 #include "game/judge.h"
 #include "input/joystick_init.h"
 #include "input/win_rawhid.h"
+#include "render/frame_hooks.h"
 #include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
 #include "skin/lr2_skin.h"
@@ -253,6 +254,7 @@ bool startup_screen(App& app, bool update) {
         }
         if (startup_shot)
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, startup_shot), SDL_DestroySurface(sf);
+        frame_hooks_before_present(app.renderer);
         SDL_RenderPresent(app.renderer);
     };
     draw({});
