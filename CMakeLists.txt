@@ -118,7 +118,7 @@ endif()
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
     tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp src/input/input.cpp src/input/keyconfig.cpp
-    src/app/config.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp)
+    src/app/config.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/audio/sound_bank.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 if(WIN32)

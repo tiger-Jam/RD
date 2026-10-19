@@ -14,6 +14,9 @@
 #define DR_MP3_IMPLEMENTATION
 #include "dr_mp3.h"
 
+#define DR_FLAC_IMPLEMENTATION
+#include "dr_flac.h"
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_BMP

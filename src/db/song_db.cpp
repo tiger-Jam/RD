@@ -137,42 +137,6 @@ const char* kChartColumns =
 
 }  // namespace
 
-namespace {
-// #DIFFICULTY の無い譜面の難易度を、#TITLE から推定する（LR2: fileutil:287）。分からなければ 0
-int difficulty_from_title(const std::string& title) {
-    std::string up = title;
-    for (char& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    auto ends = [&](const std::string& t) { return up.size() >= t.size() && up.compare(up.size() - t.size(), t.size(), t) == 0; };
-    int d = 0;
-    if (ends("HARD")) d = 2;
-    if (ends("HYPER")) d = 3;
-    if (ends("ANOTHER")) d = 4;
-    if (ends("EASY")) d = 1;
-    if (ends("EX")) d = 4;
-    if (ends("MANIAC")) d = 4;
-    // 末尾の括弧の中の言葉
-    static const std::pair<const char*, const char*> kTokens[] = {
-        {"(", ")"}, {"[", "]"}, {"-", "-"}, {"\"", "\""}, {"<", ">"}, {"～", "～"}, {"【", "】"}};
-    for (auto [l, r] : kTokens) {
-        std::string rs = r;
-        if (!ends(rs) || up.size() <= rs.size()) continue;
-        size_t pos = up.rfind(l, up.size() - rs.size() - 1);
-        if (pos == std::string::npos || pos == 0) continue;
-        std::string in = up.substr(pos + std::strlen(l));
-        static const std::pair<const char*, int> kWords[] = {
-            {"BEG", 1}, {"HARD", 3}, {"HYPE", 3}, {"HD", 3}, {"5H", 3}, {"7H", 3}, {"10H", 3}, {"14H", 3}, {"9H", 3},
-            {"DIF", 3}, {"VERYHARD", 4}, {"EX", 4}, {"AN", 4}, {"SHD", 4}, {"5A", 4}, {"7A", 4}, {"10A", 4}, {"14A", 4},
-            {"9A", 4}, {"ULT", 4}, {"MANI", 4}, {"LUNA", 4}, {"AHO", 4}, {"AFO", 4}, {"ASDF", 4}, {"HELL", 4}};
-        for (auto [w, v] : kWords)
-            if (in.find(w) != std::string::npos) {
-                d = v;
-                break;
-            }
-        break;
-    }
-    return d;
-}
-}  // namespace
 
 bool make_chart_record(const std::string& path, ChartRecord& r) {
     std::ifstream f(path, std::ios::binary);
@@ -180,6 +144,7 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     BmsParseOptions opt;
     opt.random_seed = 1;
+    opt.select_meta = true;  // LR2 と同じく、#RANDOM はいつも 1 番の枝で数える
     BmsParseResult res = parse_chart_bytes(path, bytes, opt);
     if (!res.ok) return false;
     const Chart& c = res.chart;
@@ -193,8 +158,15 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     r.subartist = c.meta.subartist;
     r.genre = c.meta.genre;
     r.playlevel = c.meta.playlevel;
+    // BMS は読み込みで #DIFFICULTY と題名・ジャンルからの推定を済ませてある（後に書いたほうが勝つ。LR2 と同じ）。
+    // bmson・osu で難易度が分からなければ、題名から LR2 と同じ推定をする
     r.difficulty = c.meta.difficulty;
-    if (r.difficulty <= 0 || r.difficulty > 5) r.difficulty = difficulty_from_title(c.meta.title);
+    std::string ext = fs::path(path).extension().string();
+    for (char& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if ((ext == ".bmson" || ext == ".osu") && (r.difficulty <= 0 || r.difficulty > 5)) {
+        r.difficulty = 0;
+        guess_difficulty_lr2(c.meta.title, r.difficulty, nullptr, nullptr);
+    }
     r.notes = c.judgeable_notes(0);
     r.ln_free = c.free_ln_count();
     r.ln = static_cast<int>(std::count_if(c.notes.begin(), c.notes.end(), [](const Note& n) { return n.kind == NoteKind::Long; }));
