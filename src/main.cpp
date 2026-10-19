@@ -271,6 +271,23 @@ bool startup_screen(App& app, bool update) {
             });
             std::printf("曲データベースを更新した：%d 譜面（追加 %d／変更 %d／削除 %d／読めない %d）%.1f 秒\n", s.found,
                         s.added, s.updated, s.removed, s.failed, s.seconds);
+            // LR2 から引き継いだ仮の譜面（中身をまだ読んでいないもの）も、ここで全部読む（LR2 と同じく起動の画面で済ませる）
+            const int total = db.provisional_count();
+            if (total > 0) {
+                auto t0 = std::chrono::steady_clock::now();
+                const int fill_threads = std::max(2, threads / 2);
+                int done = 0;
+                while (!closed) {
+                    int n = db.fill_provisional(200, fill_threads);
+                    done += n;
+                    char buf[96];
+                    std::snprintf(buf, sizeof(buf), "%d / %d", std::min(done, total), total);
+                    draw({"Now Loading...", buf});
+                    if (n == 0 || done >= total) break;
+                }
+                double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+                std::printf("引き継いだ譜面を読んだ：%d / %d 譜面 %.1f 秒\n", done, total, sec);
+            }
         } else {
             std::printf("曲データベースを開けない: %s\n", song_db_path().c_str());
         }
