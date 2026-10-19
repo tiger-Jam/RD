@@ -111,3 +111,26 @@ TEST(lane_assist_scratch) {
     CHECK_EQ(j.stats().empty_poor, 0);
     CHECK(j.is_assist_lane(0));
 }
+
+// 5 鍵の譜面（6・7 鍵にノーツが無い）は、1〜5 鍵の中だけで並べ替える（LR2: bmsload:3369）
+TEST(lane_five_keys) {
+    Chart c;
+    for (int i = 0; i < 40; ++i) c.notes.push_back(note(1 + i % 5, 1000 + i * 50));
+    c.notes.push_back(note(6, 5000));
+    c.notes.back().kind = NoteKind::Mine;  // 地雷は鍵盤数に数えない
+    CHECK_EQ(key_count(c), 5);
+    for (int opt : {kMirror, kRandom, kSRandom, kScatter}) {
+        Chart d = c;
+        Lr2Random rng(3);
+        apply_random_option(d, opt, rng);
+        for (const Note& n : d.notes)
+            if (n.kind != NoteKind::Mine) CHECK(n.lane >= 1 && n.lane <= 5);
+    }
+    Chart m = c;
+    Lr2Random rng(1);
+    apply_random_option(m, kMirror, rng);
+    CHECK_EQ(m.notes[0].lane, 5);  // 1 鍵 → 5 鍵
+    c.notes.push_back(note(7, 6000));
+    c.notes.back().kind = NoteKind::Invisible;  // 見えないノーツは数える
+    CHECK_EQ(key_count(c), 7);
+}

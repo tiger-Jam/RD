@@ -1048,7 +1048,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.autoplay = opt.autoplay;
                 st.judge_draw = ctx.judge_draw;
                 st.show_judge = !silent;
-                st.combo_draw = judge.stats().combo;
+                // 判定の絵の横のコンボは、コースならコース通し（LR2: Play.cpp:237）
+                st.combo_draw = course ? judge.stats().course_combo : judge.stats().combo;
                 st.gauge_hp = ctx.hp_print >= 0 ? ctx.hp_print : judge.gauge().hp(judge.gauge_type());
                 st.gauge_survival = course || !(judge.gauge_type() == kGroove || judge.gauge_type() == kEasy);
                 st.scratch_angle = scratch_angle;

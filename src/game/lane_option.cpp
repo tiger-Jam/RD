@@ -9,17 +9,17 @@ namespace bmj {
 
 namespace {
 
-constexpr int kFirstKey = 1, kLastKey = 7;
+constexpr int kFirstKey = 1;
 
-// 鍵盤ごとの並び替えの表（MIRROR / RANDOM）。table[元のレーン] = 新しいレーン
-std::array<int, kLaneCount> lane_table(int option, Lr2Random& rng) {
+// 鍵盤ごとの並び替えの表（MIRROR / RANDOM）。table[元のレーン] = 新しいレーン。last_key は譜面の鍵盤数（5 か 7）
+std::array<int, kLaneCount> lane_table(int option, int last_key, Lr2Random& rng) {
     std::array<int, kLaneCount> t{};
     std::iota(t.begin(), t.end(), 0);
     if (option == kMirror) {
-        for (int k = kFirstKey; k <= kLastKey; ++k) t[k] = kFirstKey + kLastKey - k;
+        for (int k = kFirstKey; k <= last_key; ++k) t[k] = kFirstKey + last_key - k;
     } else if (option == kRandom) {
         // 前から順に、残りの中から1つを選んで入れ替える
-        for (int k = kFirstKey; k < kLastKey; ++k) std::swap(t[k], t[k + rng.get_rand(kLastKey - k)]);
+        for (int k = kFirstKey; k < last_key; ++k) std::swap(t[k], t[k + rng.get_rand(last_key - k)]);
     }
     return t;
 }
@@ -28,7 +28,7 @@ std::array<int, kLaneCount> lane_table(int option, Lr2Random& rng) {
 // 同じ時刻にすでに置いた鍵盤は避け（全部埋まっていたらあきらめて重ねる）、LN の途中や同じ時刻のノーツがある鍵盤には置かない。
 // SCATTER は、直前の時刻に使った鍵盤も「埋まっている」とみなす（同じ鍵盤の連打が来ない）。
 // CONVERGE は、まず皿に置けるか試す
-void shuffle_each(std::vector<Note>& notes, int option, Lr2Random& rng) {
+void shuffle_each(std::vector<Note>& notes, int option, int last_key, Lr2Random& rng) {
     struct Last {
         bool any = false;
         int64_t time = 0, end = -1;  // 最後に置いたノーツの時刻と、LN なら終点
@@ -45,18 +45,18 @@ void shuffle_each(std::vector<Note>& notes, int option, Lr2Random& rng) {
                 if (!last[l].any || last[l].end < n.time_us) recent[l] = false;
             }
         }
-        if (n.lane >= kFirstKey && n.lane <= kLastKey) {
+        if (n.lane >= kFirstKey && n.lane <= last_key) {
             bool converge = option == kConverge;
             int lane = n.lane;
             // 置ける鍵盤が無いときに止まらないよう、試す回数に上限を付ける
             for (int tries = 0; tries < 1000; ++tries) {
-                lane = kFirstKey + rng.get_rand(kLastKey - kFirstKey);
+                lane = kFirstKey + rng.get_rand(last_key - kFirstKey);
                 if (converge) lane = 0, converge = false;
                 const Last& p = last[lane];
                 if (p.any && (n.time_us <= p.end || n.time_us == p.time)) continue;
                 if (!taken[lane]) break;
                 bool full = true;
-                for (int l = kFirstKey; l <= kLastKey; ++l) full = full && taken[l];
+                for (int l = kFirstKey; l <= last_key; ++l) full = full && taken[l];
                 if (full) break;
             }
             taken[lane] = true;
@@ -95,14 +95,21 @@ void drop_overlaps(std::vector<Note>& notes) {
 
 }  // namespace
 
+int key_count(const Chart& chart) {
+    for (const Note& n : chart.notes)
+        if ((n.lane == 6 || n.lane == 7) && n.kind != NoteKind::Mine) return 7;
+    return 5;
+}
+
 void apply_random_option(Chart& chart, int option, Lr2Random& rng) {
     if (option <= kRandomOff || option > kConverge) return;
     std::vector<Note>& notes = chart.notes;
     std::stable_sort(notes.begin(), notes.end(), [](const Note& a, const Note& b) {
         return a.time_us != b.time_us ? a.time_us < b.time_us : a.lane < b.lane;
     });
-    std::array<int, kLaneCount> table = lane_table(option, rng);
-    if (option >= kSRandom) shuffle_each(notes, option, rng);
+    const int last_key = key_count(chart);
+    std::array<int, kLaneCount> table = lane_table(option, last_key, rng);
+    if (option >= kSRandom) shuffle_each(notes, option, last_key, rng);
     for (Note& n : notes)
         if (n.kind != NoteKind::Invisible) n.lane = static_cast<uint8_t>(table[n.lane]);
     drop_overlaps(notes);

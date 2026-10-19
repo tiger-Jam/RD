@@ -154,4 +154,10 @@ TEST(lr2_random_matches_dxlib) {
     for (int i = 0; i < 699; ++i) r2.next_u32();
     CHECK_EQ(r2.next_u32(), 3745491450u);  // 状態を作り直した後（625個目以降）も一致する
     CHECK_EQ(r2.get_rand(6), 0);
+    // 上限が負でも乱数を 1 つ使う（#RANDOM 0 の行で、その後の分岐がずれないように）
+    Lr2Random a(7), b(7);
+    CHECK_EQ(a.get_rand(-1), 0);
+    b.next_u32();
+    CHECK_EQ(a.next_u32(), b.next_u32());
+    CHECK(Lr2Random(7).get_rand(-2) <= 0);
 }

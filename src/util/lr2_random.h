@@ -32,10 +32,11 @@ public:
         return y;
     }
 
-    // DxLib の GetRand(rand_max)：0..rand_max を返す。rand_max<0 なら0
+    // DxLib の GetRand(rand_max)：0..rand_max を返す。rand_max が負でも乱数を 1 つ使う（#RANDOM 0 など）。
+    // 計算は符号付き 64 ビットのまま（rand_max = -1 なら 0、それより小さければ負の値になる）
     int get_rand(int rand_max) {
-        if (rand_max < 0) return 0;
-        return static_cast<int>((static_cast<uint64_t>(next_u32()) * (static_cast<uint64_t>(rand_max) + 1)) >> 32);
+        int64_t v = static_cast<int64_t>(next_u32()) * (static_cast<int64_t>(rand_max) + 1);
+        return static_cast<int>(v >> 32);
     }
 
 private:
