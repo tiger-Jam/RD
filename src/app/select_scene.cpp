@@ -291,7 +291,7 @@ void run_select(App& app) {
                 status = buf;
             }
             // LR2 から取り込んだ仮の譜面を、裏で少しずつ読んで本物の情報に置き換える。
-            // 20 秒ごと（と終わったとき）に一覧へ反映する
+            // 読み終えたときに一覧へ反映する
             const int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency() / 2));
             int total = wdb.provisional_count(), done = 0;
             auto last = std::chrono::steady_clock::now();
@@ -299,7 +299,8 @@ void run_select(App& app) {
                 int n = wdb.fill_provisional(200, threads);
                 done += n;
                 bool finished = n == 0 || done >= total;
-                if (finished || std::chrono::steady_clock::now() - last > std::chrono::seconds(20)) {
+                // 途中では一覧を作り直さない（作り直すと選曲の邪魔になる）。読み終えたときと、10 分ごとに反映する
+                if (finished || std::chrono::steady_clock::now() - last > std::chrono::minutes(10)) {
                     auto lib2 = std::make_shared<Library>();
                     lib2->charts = wdb.all_charts();
                     for (const ScoreRecord& s : wdb.all_scores(ln_mode)) lib2->scores[s.sha256] = s;
@@ -574,22 +575,51 @@ void run_select(App& app) {
         panel = p;
     };
     // 一覧を差し替えたあと、いま見ているフォルダの位置を名前でたどり直す
+    // 一覧を作り直す（曲の読み直しや記録の更新のあと）。カーソルは番号ではなく、同じ曲（譜面ファイル・コース・フォルダ）に残す。
+    // カーソルの曲が同じ位置のままなら、スクロールの動きも止めない
+    auto entry_key = [](const Entry& e) -> std::string {
+        if (e.kind == Entry::Kind::Chart) return "c:" + e.chart->path;
+        if (e.kind == Entry::Kind::Course) return "k:" + e.course->hash;
+        if (e.kind == Entry::Kind::Missing) return "m:" + e.missing.md5 + e.missing.sha256;
+        return "f:" + e.label;
+    };
     auto rebuild = [&] {
-        std::vector<std::string> path;
+        std::vector<std::string> path, keys;
         std::vector<int> cursors;
         for (size_t i = 1; i < stack.size(); ++i) path.push_back(stack[i].name);
-        for (const Level& lv : stack) cursors.push_back(lv.cursor);
+        for (const Level& lv : stack) {
+            cursors.push_back(lv.cursor);
+            int n = static_cast<int>(lv.list->size());
+            keys.push_back(n ? entry_key((*lv.list)[std::clamp(lv.cursor, 0, n - 1)]) : "");
+        }
+        const int old_cursor = stack.back().cursor;
         root = build_tree(*lib);
+        auto place = [&](Level& lv, size_t i) {
+            const std::vector<Entry>& list = *lv.list;
+            for (size_t k = 0; k < list.size(); ++k)
+                if (entry_key(list[k]) == keys[i]) {
+                    lv.cursor = static_cast<int>(k);
+                    return;
+                }
+            int n = static_cast<int>(list.size());
+            lv.cursor = n ? std::clamp(cursors[i], 0, n - 1) : 0;
+        };
         stack = {make_level(&root, cursors[0], "BMjoy")};
+        place(stack.back(), 0);
         for (size_t i = 0; i < path.size(); ++i) {
             const std::vector<Entry>& list = *stack.back().list;
             auto it = std::find_if(list.begin(), list.end(), [&](const Entry& e) { return e.label == path[i]; });
             if (it == list.end()) break;
             stack.push_back(make_level(&it->children, cursors[i + 1], path[i]));
+            place(stack.back(), i + 1);
         }
-        int n = static_cast<int>(stack.back().list->size());
-        stack.back().cursor = n ? std::clamp(stack.back().cursor, 0, n - 1) : 0;
-        snap();
+        if (stack.size() == path.size() + 1) {
+            // 同じ階層にいる：カーソルが動いた分だけスクロールの位置もずらして、動きはそのまま続ける
+            int64_t d = static_cast<int64_t>(stack.back().cursor - old_cursor) * 1000;
+            list_top += d, old_bar += d, now_bar += d;
+        } else {
+            snap();
+        }
     };
     auto decide = [&] {
         const Entry* e = current();

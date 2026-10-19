@@ -382,7 +382,7 @@ int main(int, char**) {
         std::string status;
         bool running = false, done = false;
         Lr2ImportResult res;
-        std::vector<std::string> song_dirs;
+        std::vector<std::string> song_dirs, tables;
         ~ImportJob() {
             if (th.joinable()) th.join();
         }
@@ -601,6 +601,7 @@ int main(int, char**) {
                         std::lock_guard<std::mutex> lock(job.mu);
                         job.res = r;
                         job.song_dirs = c.song_dirs;
+                        job.tables = c.tables;
                         job.done = true;
                     });
                 });
@@ -686,8 +687,10 @@ int main(int, char**) {
                 job.running = false;
                 if (job.res.ok) {
                     cfg.song_dirs = job.song_dirs;
+                    cfg.tables = job.tables;
                     message = "LR2 から引き継ぎました（曲フォルダ " + std::to_string(job.res.song_dirs) + "、譜面 " +
-                              std::to_string(job.res.charts) + "、スコア " + std::to_string(job.res.scores) + "）";
+                              std::to_string(job.res.charts) + "、スコア " + std::to_string(job.res.scores) + "、難易度表 " +
+                              std::to_string(job.res.tables) + "）";
                 } else {
                     message = job.res.error;
                 }

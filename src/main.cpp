@@ -414,8 +414,8 @@ int main(int argc, char** argv) {
                 std::printf("LR2 から引き継げない: %s\n", r.error.c_str());
                 return 1;
             }
-            std::printf("LR2 から引き継いだ：プレイヤー %s、曲フォルダ %d、7 鍵の譜面 %d、スコア %d（%.1f 秒）\n", r.player.c_str(),
-                        r.song_dirs, r.charts, r.scores, sec);
+            std::printf("LR2 から引き継いだ：プレイヤー %s、曲フォルダ %d、7 鍵の譜面 %d、スコア %d、難易度表 %d（%.1f 秒）\n",
+                        r.player.c_str(), r.song_dirs, r.charts, r.scores, r.tables, sec);
             for (const std::string& d : c.song_dirs) std::printf("  曲フォルダ: %s\n", d.c_str());
             app.save_config();
             return 0;

@@ -89,6 +89,8 @@ public:
     // 仮の記録の譜面を、最大 limit 件だけ実際に読んで置き換える。読んだ数を返す（0 なら残り無し）
     int fill_provisional(int limit, int threads);
     int provisional_count() const;
+    // LR2 の曲データベースに、難易度表の管理ツールが書いた難易度表の一覧（playlist 表）があれば、その URL を並び順に返す
+    static std::vector<std::string> lr2_table_urls(const std::string& lr2_song_db);
     // 1 つの譜面を読み直す（仮の記録の譜面を遊んだあとなど）
     bool refresh_chart(const std::string& path);
 

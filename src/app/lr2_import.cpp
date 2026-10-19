@@ -1,5 +1,6 @@
 #include "app/lr2_import.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <regex>
@@ -43,6 +44,9 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     cfg.song_dirs = dirs;
     res.song_dirs = static_cast<int>(dirs.size());
 
+    // 難易度表（すでに登録してあるものは足さない）
+    for (const std::string& u : SongDb::lr2_table_urls((root / "Database" / "song.db").string()))
+        if (std::find(cfg.tables.begin(), cfg.tables.end(), u) == cfg.tables.end()) cfg.tables.push_back(u), res.tables++;
     if (status) status("LR2 の曲の情報を取り込んでいます");
     std::string err;
     int n = db.import_lr2_songs((root / "Database" / "song.db").string(), &err);

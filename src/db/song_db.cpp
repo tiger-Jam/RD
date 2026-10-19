@@ -750,5 +750,15 @@ bool SongDb::refresh_chart(const std::string& path) {
     return true;
 }
 
-}  // namespace bmj
+std::vector<std::string> SongDb::lr2_table_urls(const std::string& lr2_song_db) {
+    std::vector<std::string> urls;
+    sqlite3* src = nullptr;
+    if (sqlite3_open_v2(lr2_song_db.c_str(), &src, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
+        Stmt st(src, "SELECT page_url FROM playlist WHERE page_url IS NOT NULL AND page_url != '' ORDER BY playlist_id");
+        while (st.s && st.step()) urls.push_back(st.col_text(0));
+    }
+    sqlite3_close(src);
+    return urls;
+}
 
+}  // namespace bmj
