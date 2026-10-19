@@ -322,6 +322,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         if (d >= 1 && d <= 5) ctx.diff_level[d - 1] = chart.meta.playlevel;
     }
     ctx.gauge_type = cfg.gauge;
+    // スキンの #IF は読み込むときに決まるので、設定で決まる条件（スコアグラフ・ゴーストの位置・BGA の大きさ・リプレイ）は先に入れる
+    ctx.ghost_pos = cfg.ghost;
+    ctx.score_graph = cfg.score_graph;
+    ctx.bga_size = cfg.bga_size;
+    ctx.silent = silent;
+    ctx.replay = opt.replay;
+    ctx.replay_rec = !opt.replay && !opt.autoplay && !course && cfg.replay_save > 0;
     app.load_play_skin(ctx.load_options());
     Lr2Skin* skin = app.play_skin.get();
     ctx.skin = skin;
