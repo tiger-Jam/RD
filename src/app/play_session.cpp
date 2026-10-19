@@ -455,6 +455,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.song_ms = -1;
         ctx.judge_draw = 0;
         ctx.last_miss_ms = -1e9;
+        // リトライ：リザルトで切り替えたものをプレーの状態に戻す（戻さないと、スキンは読み込み中の絵を出し続ける）
+        ctx.in_result = false, ctx.quit_early = false, ctx.result_clear = 0, ctx.result_flip = false;
+        ctx.skin = skin;
         // 自己ベストとターゲットのゴースト（LR2: Scene04_Play.cpp:1969）。リトライでは、記録し直した自己ベストを読み直す
         if (retried) has_best = app.db.get_score(sha256, best_score, score_ln_mode, profile);
         const int total_notes = judge.stats().total_notes;
@@ -930,6 +933,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                                      input.button_held(kKey1 + 6);
                         bool black = input.button_held(kKey1 + 1) || input.button_held(kKey1 + 3) || input.button_held(kKey1 + 5);
                         if (white && black && !course && !opt.replay) retry = true;
+                        // 開発用：BMJ_RETRY_ONCE があれば、1 回目のリザルトを抜けるときにクイックリトライしたことにする
+                        if (!retried && dev_env("BMJ_RETRY_ONCE") && !course && !opt.replay) retry = true;
                         done = true;
                     }
                 }
