@@ -447,6 +447,7 @@ int main(int argc, char** argv) {
         }
         // LR2 と同じ起動の画面。曲データベースと難易度表の更新もここで行う（設定で「手動」なら選曲画面の F5 だけ）
         if (opt.chart_path.empty() && !opt.keyconfig) {
+            if (c.watch_folders) app.watcher.start(c.song_dirs);
             bool update = c.db_update == 0;
             if (!startup_screen(app, update)) return 0;
             app.updated_at_start = update;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -29,6 +30,7 @@
 #include "audio/system_sound.h"
 #include "db/custom_folder.h"
 #include "db/difficulty_table.h"
+#include "db/folder_watch.h"
 #include "game/gauge.h"
 #include "input/input.h"
 #include "input/joystick_init.h"
@@ -582,6 +584,9 @@ void run_select(App& app) {
             busy = false;
         });
     };
+    // 曲フォルダの監視（BMjoy の拡張）。変わったフォルダを覚え、変化が落ち着いてから 1 つずつ読み直す
+    FolderWatcher& watcher = app.watcher;
+    std::deque<std::string> watched_dirs;
     // 起動時に曲フォルダと難易度表を読み直す（設定で「手動」なら読み直さない。F8 で今のフォルダだけ）
     // 起動の画面で読み直し済みなら、ここでは読み直さない
     if (app.cfg.db_update == 0 && !app.updated_at_start) refresh();
@@ -1726,6 +1731,15 @@ void run_select(App& app) {
             } else if (b.button == kSelect) {
                 change_difficulty();
             }
+        }
+        // 監視で変わったフォルダを、裏の読み直しが空いているときに 1 つずつ読み直す
+        for (std::string& d : watcher.take_changed())
+            if (std::find(watched_dirs.begin(), watched_dirs.end(), d) == watched_dirs.end()) watched_dirs.push_back(std::move(d));
+        if (!watched_dirs.empty() && !busy) {
+            std::string d = std::move(watched_dirs.front());
+            watched_dirs.pop_front();
+            std::printf("曲フォルダが変わった：%s\n", d.c_str());
+            refresh(true, d);
         }
         if (to_keyconfig && (!sk || sk->fadeout == 0 || sctx.timers.lapse(2, t_ms) > sk->fadeout)) {
             to_keyconfig = false;

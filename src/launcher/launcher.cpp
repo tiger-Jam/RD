@@ -615,6 +615,7 @@ int main(int, char**) {
                 message = db.open(song_db_path()) && db.clear_charts() ? "次回の起動時に曲データベースを再作成します"
                                                                       : "曲データベースを開けません";
             }
+            g.check(X + 20, Y + 12, "曲フォルダを監視する", cfg.watch_folders);
             g.label(X + 20, Y + 44, "素材のフォルダ");
             g.edit_str(cfg.lr2_root, X + 124, Y + 38, 360, 20);
             if (g.button(X + 492, Y + 37, 74, 22, "参照")) pick_folder(window, [&](const std::string& p) { cfg.lr2_root = p; });

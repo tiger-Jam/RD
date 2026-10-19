@@ -8,6 +8,7 @@
 
 #include "app/config.h"
 #include "audio/mixer.h"
+#include "db/folder_watch.h"
 #include "db/song_db.h"
 #include "input/keyconfig.h"
 #include "skin/lr2_skin.h"
@@ -26,6 +27,8 @@ struct App {
     std::string lr2_root;  // 実際に使うLR2のフォルダ（見つからなければ空）
     std::unique_ptr<Lr2Skin> play_skin, result_skin, select_skin, decide_skin, courseresult_skin;
     std::unique_ptr<SkinRenderer> skin_renderer, result_renderer, select_renderer, decide_renderer;
+    // 曲フォルダの監視（起動の画面の前から見て、そのあいだの変化も取りこぼさない）
+    FolderWatcher watcher;
     int view_w = 640, view_h = 480;
     double refresh_hz = 60.0;
     bool updated_at_start = false;  // 起動の画面で曲データベースと難易度表を更新した（選曲画面では読み直さない）

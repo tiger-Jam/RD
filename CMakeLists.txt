@@ -59,6 +59,7 @@ add_library(bmj_core STATIC
     src/db/song_db.cpp
     src/db/difficulty_table.cpp
     src/db/custom_folder.cpp
+    src/db/folder_watch.cpp
     src/audio/dsp.cpp
 )
 target_include_directories(bmj_core PUBLIC src)
@@ -74,7 +75,7 @@ else()
     target_link_libraries(bmj_core PUBLIC CURL::libcurl)
 endif()
 if(APPLE)
-    target_link_libraries(bmj_core PUBLIC iconv)
+    target_link_libraries(bmj_core PUBLIC iconv "-framework CoreServices")
 endif()
 
 # 本体（LR2 の LR2body.exe に相当）。LR2 と同じくコンソールは出さない（ログはコマンドプロンプトから動かしたときだけ見える）
