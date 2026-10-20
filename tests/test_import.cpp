@@ -200,3 +200,44 @@ TEST(lr2_skin_adjust) {
     }
     fs::remove_all(root);
 }
+
+// LR2 の素材を BMjoy のフォルダに写し、設定の中の素材の場所を写した先に直す
+TEST(import_copy_lr2_assets) {
+    namespace fs = std::filesystem;
+    fs::path root = fs::temp_directory_path() / "bmj_asset_test";
+    fs::remove_all(root);
+    fs::path lr2 = root / "LR2", other = root / "LR2b", dst = root / "BMjoy";
+    auto put = [](const fs::path& p) {
+        fs::create_directories(p.parent_path());
+        std::ofstream(p, std::ios::binary) << "x";
+    };
+    put(lr2 / "LR2files/Theme/WMIX/select/select.lr2skin");
+    put(lr2 / "LR2files/Sound/lr2.lr2ss");
+    put(lr2 / "LR2files/Bgm/a/select.wav");
+    put(lr2 / "LR2files/Database/song.db");
+    put(other / "LR2files/CustomFolder/clear.lr2folder");
+    AppConfig cfg;
+    cfg.lr2_root = lr2.string();
+    cfg.select_skin = (lr2 / "LR2files/Theme/WMIX/select/select.lr2skin").string();
+    cfg.sound_set = (lr2 / "LR2files/Sound/lr2.lr2ss").string();
+    cfg.skin_custom[cfg.select_skin] = {};
+    cfg.custom_folder_dirs = {(other / "LR2files/CustomFolder").string()};
+    AssetCopyResult r = copy_lr2_assets(cfg, dst.string());
+    CHECK(r.ok);
+    CHECK_EQ(r.files, 4);
+    CHECK(fs::exists(dst / "LR2files/Theme/WMIX/select/select.lr2skin"));
+    CHECK(fs::exists(dst / "LR2files/Bgm/a/select.wav"));
+    CHECK(fs::exists(dst / "LR2files/CustomFolder/clear.lr2folder"));
+    CHECK(!fs::exists(dst / "LR2files/Database"));  // 曲・記録のデータは写さない
+    CHECK(fs::path(cfg.lr2_root) == dst);
+    CHECK(fs::path(cfg.select_skin) == dst / "LR2files/Theme/WMIX/select/select.lr2skin");
+    CHECK(fs::path(cfg.sound_set) == dst / "LR2files/Sound/lr2.lr2ss");
+    CHECK(cfg.skin_custom.count(cfg.select_skin) == 1 && cfg.skin_custom.size() == 1);
+    CHECK(fs::path(cfg.custom_folder_dirs[0]) == dst / "LR2files/CustomFolder");
+    CHECK(fs::exists(lr2 / "LR2files/Database/song.db"));  // 元はそのまま
+    // 2 回目は写すものが無い
+    AppConfig again;
+    again.lr2_root = lr2.string();
+    CHECK_EQ(copy_lr2_assets(again, dst.string()).files, 0);
+    fs::remove_all(root);
+}

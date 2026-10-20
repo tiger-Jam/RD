@@ -32,4 +32,19 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
 // スキンのカスタマイズだけを引き継ぐ。引き継いだスキンの数を返す
 int import_lr2_skin_custom(const std::string& lr2_dir, const std::string& skin_root, AppConfig& cfg);
 
+struct AssetCopyResult {
+    bool ok = false;
+    std::string error;
+    int files = 0;        // 写したファイルの数（同じものがすでにあれば数えない）
+    int failed = 0;       // 写せなかったファイルの数
+    int64_t bytes = 0;
+};
+
+// LR2 の素材（スキン・サウンドセット・BGM・壁紙・カスタムフォルダなど）を、BMjoy のフォルダ（dst_root。実行ファイルの横）の
+// LR2files に写し、設定の中の素材の場所（cfg.lr2_root・各スキン・サウンドセット・スキンのカスタマイズと位置の調整の鍵・
+// カスタムフォルダの置き場）を写した先に直す。LR2 の曲・記録・IR のデータ（Database・Ir・Replay など）は写さない。
+// 写す元は cfg.lr2_root と、LR2 の LR2files の下にあるカスタムフォルダの置き場。元のファイルは読むだけ
+AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root,
+                                const std::function<void(const std::string&)>& status = {});
+
 }  // namespace bmj

@@ -391,6 +391,8 @@ int main(int, char**) {
         Lr2ImportResult res;
         std::vector<std::string> song_dirs, tables, custom_folder_dirs;
         decltype(AppConfig::skin_custom) skin_custom;
+        AppConfig cfg;          // 引き継いだあとの設定（素材の場所を写した先に直したもの）
+        AssetCopyResult assets;
         ~ImportJob() {
             if (th.joinable()) th.join();
         }
@@ -606,7 +608,19 @@ int main(int, char**) {
                             std::lock_guard<std::mutex> lock(job.mu);
                             job.status = s;
                         }, base.lr2_root);
+                        // 素材（スキン・サウンドセット・BGM など）も BMjoy のフォルダ（実行ファイルの横）に写し、そこから読む
+                        AssetCopyResult ac;
+                        if (r.ok) {
+                            if (c.lr2_root.empty()) c.lr2_root = dir;
+                            const char* exe_dir = SDL_GetBasePath();
+                            ac = copy_lr2_assets(c, exe_dir ? exe_dir : "", [&job](const std::string& s) {
+                                std::lock_guard<std::mutex> lock(job.mu);
+                                job.status = s;
+                            });
+                        }
                         std::lock_guard<std::mutex> lock(job.mu);
+                        job.assets = ac;
+                        job.cfg = c;
                         job.res = r;
                         job.song_dirs = c.song_dirs;
                         job.custom_folder_dirs = c.custom_folder_dirs;
@@ -749,6 +763,14 @@ int main(int, char**) {
                     cfg.custom_folder_dirs = job.custom_folder_dirs;
                     cfg.tables = job.tables;
                     cfg.skin_custom = job.skin_custom;
+                    if (job.assets.ok) {
+                        // 素材の場所は BMjoy のフォルダに付け替えたもの
+                        const AppConfig& n = job.cfg;
+                        cfg.lr2_root = n.lr2_root, cfg.play_skin = n.play_skin, cfg.result_skin = n.result_skin;
+                        cfg.courseresult_skin = n.courseresult_skin, cfg.select_skin = n.select_skin, cfg.decide_skin = n.decide_skin;
+                        cfg.keyconfig_skin = n.keyconfig_skin, cfg.sound_set = n.sound_set;
+                        cfg.skin_custom = n.skin_custom, cfg.skin_adjust = n.skin_adjust, cfg.custom_folder_dirs = n.custom_folder_dirs;
+                    }
                     message = "LR2 から引き継ぎました（曲フォルダ " + std::to_string(job.res.song_dirs) + "、譜面 " +
                               std::to_string(job.res.charts) + "、スコア " + std::to_string(job.res.scores) + "、難易度表 " +
                               std::to_string(job.res.tables) + "、スキン " + std::to_string(job.res.skins) + "）";

@@ -74,6 +74,7 @@ struct Options {
     std::vector<std::string> add_song_dirs, add_tables;
     std::string import_lr2;  // LR2のスコアデータベース
     std::string import_lr2_dir;  // LR2 のフォルダ（曲フォルダの登録・曲の情報・スコアをまとめて引き継いで終わる）
+    bool copy_assets = false;
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000, effect = -1;
     bool gas = false;
@@ -110,6 +111,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--add-table") o.add_tables.push_back(next());
         else if (a == "--import-lr2") o.import_lr2 = next();
         else if (a == "--import-lr2-dir") o.import_lr2_dir = next();
+        else if (a == "--copy-lr2-assets") o.copy_assets = true;  // 今の素材のフォルダ（LR2）の素材を、実行ファイルの横に写して付け替える
         else if (a == "--skin-opt") {
             std::string v = next();
             size_t eq = v.find('=');
@@ -454,6 +456,19 @@ int main(int argc, char** argv) {
         raw_hid().start();
         if (!app.init(argv[0])) return 1;
         midi_input().start();  // SDL のイベントで送るので、SDL の準備の後に開く
+        if (opt.copy_assets) {
+            const char* exe_dir = SDL_GetBasePath();
+            if (c.lr2_root.empty()) c.lr2_root = app.lr2_root;
+            AssetCopyResult r = copy_lr2_assets(c, exe_dir ? exe_dir : "", [](const std::string& s) { std::printf("%s\n", s.c_str()); });
+            if (!r.ok) {
+                std::printf("素材を写せない: %s\n", r.error.c_str());
+                return 1;
+            }
+            std::printf("素材を写した：%d ファイル（%.1f MB）、写せなかったもの %d。素材のフォルダ：%s\n", r.files, r.bytes / 1048576.0, r.failed,
+                        c.lr2_root.c_str());
+            app.save_config();
+            return 0;
+        }
         if (!opt.import_lr2_dir.empty()) {
             auto t0 = std::chrono::steady_clock::now();
             Lr2ImportResult r = import_from_lr2(opt.import_lr2_dir, c, app.db, [](const std::string& s) { std::printf("%s\n", s.c_str()); },

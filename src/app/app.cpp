@@ -20,6 +20,8 @@ std::string find_lr2_root(const std::string& configured, const char* argv0) {
     std::vector<std::string> cands;
     if (!configured.empty()) cands.push_back(configured);
     if (const char* env = dev_env("BMJ_LR2_ROOT")) cands.push_back(env);
+    // 実行ファイルの横（LR2 と同じく、BMjoy のフォルダに LR2files を置いて自己完結させる）
+    if (const char* base = SDL_GetBasePath()) cands.push_back(base);
     cands.push_back(".");
     std::error_code ec;
     fs::path exe = fs::weakly_canonical(fs::path(argv0), ec).parent_path();

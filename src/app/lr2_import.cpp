@@ -145,4 +145,100 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     return res;
 }
 
+namespace {
+
+// パスを比べるための形（区切りを / にそろえ、英字は小文字。Windows は大文字小文字を区別しないため）
+std::string path_key(const fs::path& p) {
+    std::string k = p.lexically_normal().generic_string();
+    for (char& c : k) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    while (k.size() > 1 && k.back() == '/') k.pop_back();
+    return k;
+}
+
+// p が root の下なら、root からの相対パスを返す
+bool under(const fs::path& p, const fs::path& root, fs::path& rel) {
+    std::string kp = path_key(p), kr = path_key(root);
+    if (kp.size() < kr.size() || kp.compare(0, kr.size(), kr) != 0 || (kp.size() > kr.size() && kp[kr.size()] != '/')) return false;
+    rel = fs::path(p).lexically_normal().lexically_relative(fs::path(root).lexically_normal());
+    if (rel.empty() || rel.native().rfind(fs::path("..").native(), 0) == 0) {
+        // 大文字小文字の違いで lexically_relative が使えないときは、文字数で切る
+        std::string g = fs::path(p).lexically_normal().generic_string();
+        rel = fs::path(g.substr(std::min(g.size(), path_key(root).size() + 1)));
+    }
+    return true;
+}
+
+}  // namespace
+
+AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, const std::function<void(const std::string&)>& status) {
+    AssetCopyResult res;
+    std::error_code ec;
+    const fs::path src = cfg.lr2_root;
+    const fs::path dst = dst_root;
+    if (cfg.lr2_root.empty() || !fs::is_directory(src / "LR2files", ec)) return res.error = "LR2 のフォルダが見つからない：" + cfg.lr2_root, res;
+    if (path_key(src) == path_key(dst)) return res.error = "すでに BMjoy のフォルダの素材を使っている", res;
+
+    // 写すもの：見た目と音にかかわるものだけ（曲・記録・IR のデータは BMjoy が別に持つ）
+    static const char* kDirs[] = {"Theme", "Sound", "Bgm", "WallPaper", "Config", "Mouse", "Movie", "Help"};
+    auto copy_tree = [&](const fs::path& from, const fs::path& to) {
+        if (!fs::is_directory(from, ec)) return;
+        for (auto it = fs::recursive_directory_iterator(from, fs::directory_options::skip_permission_denied, ec);
+             !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            std::error_code e2;
+            if (!it->is_regular_file(e2)) continue;
+            fs::path rel = it->path().lexically_relative(from);
+            fs::path out = to / rel;
+            fs::create_directories(out.parent_path(), e2);
+            // すでに同じ大きさ・同じ日時以降のものがあれば写さない（何度実行してもよい）
+            if (fs::exists(out, e2) && fs::file_size(out, e2) == it->file_size(e2) &&
+                fs::last_write_time(out, e2) >= it->last_write_time(e2))
+                continue;
+            if (fs::copy_file(it->path(), out, fs::copy_options::overwrite_existing, e2)) {
+                res.files++;
+                res.bytes += static_cast<int64_t>(it->file_size(e2));
+                if (status && res.files % 200 == 0) status("素材を写しています（" + std::to_string(res.files) + " ファイル）");
+            } else {
+                res.failed++;
+            }
+        }
+        ec.clear();
+    };
+    for (const char* d : kDirs) copy_tree(src / "LR2files" / d, dst / "LR2files" / d);
+
+    // カスタムフォルダの置き場：LR2 の LR2files の下にあるものは、同じ相対の場所に写して付け替える
+    for (std::string& d : cfg.custom_folder_dirs) {
+        fs::path p = d, rel;
+        for (fs::path cur = p; !cur.empty() && cur != cur.parent_path(); cur = cur.parent_path()) {
+            if (path_key(cur.filename()) != "lr2files") continue;
+            if (!under(p, cur, rel)) break;
+            copy_tree(p, dst / "LR2files" / rel);
+            d = (dst / "LR2files" / rel).string();
+            break;
+        }
+    }
+
+    // 設定の中の素材の場所を、写した先に直す
+    auto relocate = [&](std::string& path) {
+        fs::path rel;
+        if (!path.empty() && path != "none" && under(path, src, rel)) path = (dst / rel).string();
+    };
+    for (std::string* p : {&cfg.play_skin, &cfg.result_skin, &cfg.courseresult_skin, &cfg.select_skin, &cfg.decide_skin,
+                           &cfg.keyconfig_skin, &cfg.sound_set})
+        relocate(*p);
+    auto relocate_keys = [&](auto& m) {
+        std::remove_reference_t<decltype(m)> out;
+        for (auto& [k, v] : m) {
+            std::string nk = k;
+            relocate(nk);
+            out[nk] = v;
+        }
+        m.swap(out);
+    };
+    relocate_keys(cfg.skin_custom);
+    relocate_keys(cfg.skin_adjust);
+    cfg.lr2_root = dst.string();
+    res.ok = true;
+    return res;
+}
+
 }  // namespace bmj
