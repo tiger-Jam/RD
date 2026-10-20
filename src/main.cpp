@@ -21,6 +21,7 @@
 #include <cmath>
 #include <filesystem>
 #include <future>
+#include <mutex>
 #include <optional>
 #include <cstdio>
 #include <cstdlib>
@@ -267,9 +268,25 @@ bool startup_screen(App& app, bool update) {
         if (db.open(song_db_path())) {
             if (dev_env("BMJ_FORCE_RESCAN")) db.clear_charts();  // 開発用：全部読み直す
             int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
-            ScanStats s = db.scan(app.cfg.song_dirs, threads, [&](int, int, const std::string& path) {
-                if (!path.empty()) draw({"Now Loading...", path});
+            // 曲フォルダの確かめは裏で行い、その間も画面を描き直して応答する（HDD の中身の情報が OS に残っていないと
+            // 数分かかることがあり、その間黙っていると Windows に「応答なし」として閉じられる）
+            std::mutex scan_mu;
+            std::string scan_path;
+            auto scan_job = std::async(std::launch::async, [&] {
+                return db.scan(app.cfg.song_dirs, threads, [&](int, int, const std::string& path) {
+                    std::lock_guard<std::mutex> lock(scan_mu);
+                    if (!path.empty()) scan_path = path;
+                });
             });
+            while (scan_job.wait_for(std::chrono::milliseconds(16)) != std::future_status::ready) {
+                std::string p;
+                {
+                    std::lock_guard<std::mutex> lock(scan_mu);
+                    p = scan_path;
+                }
+                draw({"Now Loading...", p});
+            }
+            ScanStats s = scan_job.get();
             std::printf("曲データベースを更新した：%d 譜面（追加 %d／変更 %d／削除 %d／読めない %d）%.1f 秒\n", s.found,
                         s.added, s.updated, s.removed, s.failed, s.seconds);
             // LR2 から引き継いだ仮の譜面（中身をまだ読んでいないもの）も、ここで全部読む（LR2 と同じく起動の画面で済ませる）
