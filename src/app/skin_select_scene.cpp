@@ -187,7 +187,7 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
                         bool changed = ty == 190 ? catalog.step_skin(app.cfg, dir) : catalog.step_custom(app.cfg, ty - 220, dir);
                         if (changed) {
                             // サウンドセットはその場で読み直す（選曲の BGM も新しい音で鳴らし直す）
-                            if (catalog.selected_type() == 10 && ty == 190) {
+                            if (catalog.selected_type() == 10) {  // サウンドセットか、その中の選択（選曲 BGM など）を替えた
                                 app.load_sound_set();
                                 app.mixer.play_system(kSysSelect, true);
                             }

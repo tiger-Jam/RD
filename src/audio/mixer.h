@@ -53,6 +53,9 @@ public:
     // lead_in_frames 後に譜面の時刻0が来るように再生を始める
     void start(int64_t lead_in_frames);
     void stop();
+    // 予定の音（BGM・自動演奏）をこれ以上鳴らし始めない。鳴っている音はそのまま最後まで鳴らす
+    // （LR2：演奏を終えてフェードアウトに入ったら、新しい音は鳴らさないが、鳴っている音は止めずにリザルトへ持ち込む）
+    void freeze_schedule() { schedule_frozen_.store(true, std::memory_order_release); }
 
     // 今すぐ鳴らす／止める（キー押下・LNを離したとき）。メインスレッドからだけ呼ぶ
     void play_now(uint16_t sound) { push_command(static_cast<int32_t>(sound)); }  // キー音（KEY 側）
@@ -163,6 +166,7 @@ private:
     std::atomic<bool> running_{false};
     // 次に書き出すフレームの譜面上の位置（譜面の時刻のフレーム。FREQ・SPEED なら 1 フレームで play_rate_ 進む）。
     // 音声スレッドだけが触る
+    std::atomic<bool> schedule_frozen_{false};
     double song_pos_ = 0;
 
     // イコライザ・ピッチ・エフェクタ。設定はメインスレッドから 3 つの枠で受け渡す（ロックを使わない）

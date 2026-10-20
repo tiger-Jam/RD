@@ -144,6 +144,7 @@ void Mixer::start(int64_t lead_in_frames) {
     for (Voice& v : voices_) v = Voice{};
     song_pos_ = static_cast<double>(-lead_in_frames);
     schedule_next_ = 0;
+    schedule_frozen_.store(false, std::memory_order_release);
     clock_valid_ = false;
     clock_seq_.fetch_add(1);
     base_us_.store(-lead_in_frames * 1000000 / rate_);
@@ -361,7 +362,8 @@ void Mixer::render_chunk(float* out, uint32_t n, bool running) {
     if (running) {
         // この区間に入る予定の音（BGM・自動演奏）を、フレーム単位の位置で鳴らす
         double end = song_pos_ + n * step;
-        while (schedule_next_ < schedule_.size() && static_cast<double>(schedule_[schedule_next_].frame) < end) {
+        const bool frozen = schedule_frozen_.load(std::memory_order_acquire);
+        while (!frozen && schedule_next_ < schedule_.size() && static_cast<double>(schedule_[schedule_next_].frame) < end) {
             const ScheduledSound& e = schedule_[schedule_next_++];
             start_voice(e.sound, std::min(0.0, song_pos_ - static_cast<double>(e.frame)), e.key);
         }

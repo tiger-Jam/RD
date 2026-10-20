@@ -556,7 +556,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         int chart_op3 = 0, chart_op4 = 0;
         Lr2Skin* rskin = nullptr;
         auto enter_result = [&](bool quit_early) {
-            mixer.stop();
+            // 鳴っている音は止めずにリザルトへ持ち込む（LR2 と同じ。閉店したときは、閉店した時点で止めてある）
+            mixer.freeze_schedule();
             print_result(chart, judge);
             const PlayStats& ps = judge.stats();
             // LR2（Main.cpp:1697）：オートプレイ・1 ノーツも判定していない・GOOD 以上が 1 つも無いときは、
@@ -706,6 +707,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             }
         } score_tw, hp_tw;
         auto quit_with_fade = [&] {
+            mixer.freeze_schedule();  // フェードアウトの間は新しい音を鳴らさない（LR2: Play.cpp の演奏スレッドが止まる）
             fade_quit = judge.stats().note_current < judge.stats().total_notes;
             phase = Phase::Fadeout;
             ctx.timers.set(2, (SDL_GetTicksNS() - scene_start) / 1e6);
@@ -1228,6 +1230,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     mixer.play_system(kSysStop);  // 閉店（LR2: Play.cpp:1367）
                     view.failed = true;
                 } else if (song_us > chart.end_us) {
+                    mixer.freeze_schedule();
                     phase = Phase::Fadeout;
                     ctx.timers.set(2, now_ms);
                 }
