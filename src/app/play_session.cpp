@@ -329,6 +329,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     ctx.silent = silent;
     ctx.replay = opt.replay;
     ctx.replay_rec = !opt.replay && !opt.autoplay && !course && cfg.replay_save > 0;
+    // 自己ベストのランプ（op 100〜105）も読み込みの条件になる（WMIX はこれで選んだ絵を、リザルトで更新前のランプに使う）
+    ctx.best_clear = has_best ? best_score.clear : 0;
+    ctx.best_exscore = has_best ? best_score.exscore : 0;
     app.load_play_skin(ctx.load_options());
     Lr2Skin* skin = app.play_skin.get();
     ctx.skin = skin;
