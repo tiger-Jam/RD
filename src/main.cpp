@@ -309,7 +309,10 @@ bool startup_screen(App& app, bool update) {
         } else {
             std::printf("曲データベースを開けない: %s\n", song_db_path().c_str());
         }
-        // 難易度表はまとめて並べて取りに行く（応答の無いサイトがあっても、待つのは1つぶんで済む）
+    }
+    {
+        // 難易度表は、曲フォルダの更新を手動にしていても起動のたびに確かめる（取りに行くのはその日の最初の 1 回だけ）。
+        // まとめて並べて取りに行く（応答の無いサイトがあっても、待つのは1つぶんで済む）
         const std::vector<std::string>& urls = app.cfg.tables;
         std::vector<std::future<DifficultyTable>> jobs;
         for (const std::string& u : urls) jobs.push_back(std::async(std::launch::async, [u] { return update_table(table_cache_dir(), u); }));
@@ -462,7 +465,7 @@ int main(int argc, char** argv) {
             app.save_config();
             return 0;
         }
-        // LR2 と同じ起動の画面。曲データベースと難易度表の更新もここで行う（設定で「手動」なら選曲画面の F5 だけ）
+        // LR2 と同じ起動の画面。曲データベースの更新（設定で「手動」なら選曲画面の F8 だけ）と難易度表の更新もここで行う
         if (opt.chart_path.empty() && !opt.keyconfig) {
             if (c.watch_folders) app.watcher.start(c.song_dirs);
             bool update = c.db_update == 0;
