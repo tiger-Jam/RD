@@ -332,7 +332,11 @@ bool startup_screen(App& app, bool update) {
         for (size_t i = 0; i < got.size(); ++i) {
             const DifficultyTable& t = *got[i];
             std::string name = t.name.empty() ? urls[i] : t.name;
-            std::string res = t.warning.empty() ? std::to_string(t.charts.size()) + " charts" : t.from_cache ? "failed (using cache)" : "failed";
+            // 毎回、表ごとにどう読んだかを出す（今日取りに行った／今日すでに取った手元の版／取れずに手元の版／取れない）
+            const std::string n = std::to_string(t.charts.size()) + " charts";
+            std::string res = !t.warning.empty() ? (t.from_cache ? "update failed, " + n + " (local copy)" : "failed")
+                              : t.from_cache   ? n + " (checked today)"
+                                               : n + " (updated)";
             lines.push_back("[" + name + "]: " + res);
             std::printf("難易度表 %s：%zu 譜面%s\n", name.c_str(), t.charts.size(), t.warning.empty() ? "" : ("（" + t.warning + "）").c_str());
         }
