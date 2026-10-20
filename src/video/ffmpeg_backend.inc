@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <cstring>
+#include <vector>
 #include <type_traits>
 
 #include "video/video_backend.h"
@@ -139,6 +141,7 @@ public:
         start_ = st->start_time != AV_NOPTS_VALUE ? st->start_time * time_base_ : 0;
         w_ = codec_->width, h_ = codec_->height;
         if (w_ <= 0 || h_ <= 0) return false;
+        src_w_ = w_, src_h_ = h_, src_fmt_ = codec_->pix_fmt;
         sws_ = a.sws_get(w_, h_, codec_->pix_fmt, w_, h_, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
         pkt_ = a.packet_alloc();
         frame_ = a.frame_alloc();
@@ -154,10 +157,25 @@ public:
                 int64_t pts = frame_->best_effort_timestamp;
                 f.t_ms = pts == AV_NOPTS_VALUE ? 0 : (pts * time_base_ - start_) * 1000.0;
                 f.w = w_, f.h = h_;
+                // 途中で絵の大きさや形式が変わる動画もあるので、そのときは変換を作り直す（出す大きさは最初のまま）
+                if (frame_->width != src_w_ || frame_->height != src_h_ || frame_->format != src_fmt_) {
+                    if (sws_) a.sws_free(sws_);
+                    src_w_ = frame_->width, src_h_ = frame_->height, src_fmt_ = frame_->format;
+                    sws_ = a.sws_get(src_w_, src_h_, static_cast<AVPixelFormat>(src_fmt_), w_, h_, AV_PIX_FMT_RGBA, SWS_BILINEAR,
+                                     nullptr, nullptr, nullptr);
+                }
+                if (!sws_) return false;
+                // 変換は行の幅を 64 バイトにそろえ、余白も付けた入れ物に書かせる。速い命令（AVX2 など）を使う変換は
+                // 行の終わりを越えて書くことがあり、幅ぴったりの入れ物だとヒープを壊す（幅 396 の mpeg1 で落ちた）
+                const int stride = (w_ * 4 + 63) / 64 * 64;
+                conv_.resize(static_cast<size_t>(stride) * (h_ + 2) + 64);
+                uint8_t* dst[4] = {conv_.data(), nullptr, nullptr, nullptr};
+                int lines[4] = {stride, 0, 0, 0};
+                a.sws_scale_fn(sws_, frame_->data, frame_->linesize, 0, src_h_, dst, lines);
                 f.rgba.resize(static_cast<size_t>(w_) * h_ * 4);
-                uint8_t* dst[4] = {f.rgba.data(), nullptr, nullptr, nullptr};
-                int lines[4] = {w_ * 4, 0, 0, 0};
-                a.sws_scale_fn(sws_, frame_->data, frame_->linesize, 0, h_, dst, lines);
+                for (int y = 0; y < h_; ++y)
+                    std::memcpy(f.rgba.data() + static_cast<size_t>(y) * w_ * 4, conv_.data() + static_cast<size_t>(y) * stride,
+                                static_cast<size_t>(w_) * 4);
                 return true;
             }
             if (flushing_) return false;
@@ -186,6 +204,8 @@ private:
     AVPacket* pkt_ = nullptr;
     AVFrame* frame_ = nullptr;
     int stream_ = -1, w_ = 0, h_ = 0;
+    int src_w_ = 0, src_h_ = 0, src_fmt_ = -1;  // 変換の元（デコードした絵）の大きさと形式
+    std::vector<uint8_t> conv_;                  // 変換の出力（行の幅をそろえたもの）
     double time_base_ = 0, start_ = 0;  // 秒
     bool flushing_ = false;
 };
