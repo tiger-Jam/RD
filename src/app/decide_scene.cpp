@@ -89,7 +89,7 @@ DecideResult run_decide(App& app, const SelectContext& base) {
         for (const ButtonInput& b : buttons)
             if (b.down && b.button >= kKey1 && b.button <= kKey7) want_skip = true;
         if (input.button_held(kStart) && input.button_held(kSelect)) want_back = true;
-        if (!timers.on(1) && t > sk->startinput) timers.set(1, t);
+        if (!timers.on(1) && t > sk->startinput) timers.set(1, t), timers.set(11, t);  // LR2: 入力受付と同時に 11 も（Main.cpp:1469）
 
         // 同じフレームで重なったら、#SCENETIME → 飛ばす → 戻る の順に見る（LR2 と同じ）
         if (phase == Phase::Wait) {

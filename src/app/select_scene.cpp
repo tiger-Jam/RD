@@ -927,7 +927,8 @@ void run_select(App& app) {
         sctx.timers.reset(15);
         sctx.timers.set(16, scene_ms());
     };
-    // バナー（#RELOADBANNER のスキンだけ。仕様 2.17）。カーソルの曲が変わるたびに裏で読み、読めたら 102 番の画像にする
+    // バナー（仕様 2.17）。カーソルの曲が変わるたびに裏で読み、読めたら 102 番の画像にする。
+    // OpenLR2 は #RELOADBANNER のスキンだけで読むが、LR2 では指定の無い WMIX でも出るので、いつも読む
     struct BannerLoad {
         std::mutex mu;
         std::string path;   // 読み込み中・読み込んだもの
@@ -1789,7 +1790,9 @@ void run_select(App& app) {
         input.collect(now, lanes, buttons);
         double t_ms = scene_ms();
         // 入力の受付開始（#STARTINPUT。LR2 のタイマー1）
-        if (!sctx.timers.on(1) && (!sk || t_ms > sk->startinput)) sctx.timers.set(1, t_ms);
+        // LR2 は入力受付（タイマー 1）と同時に、曲を選んだタイマー 11 も立てる（Main.cpp:1469）。
+        // 立てないと、遊んで戻ったときに曲名などがカーソルを動かすまで出ない
+        if (!sctx.timers.on(1) && (!sk || t_ms > sk->startinput)) sctx.timers.set(1, t_ms), sctx.timers.set(11, t_ms);
         // 鍵盤の光（タイマー 100+鍵 / 120+鍵）
         for (const LaneInput& li : lanes) {
             if (li.down) sctx.timers.set(100 + li.lane, t_ms), sctx.timers.reset(120 + li.lane);
@@ -2019,7 +2022,7 @@ void run_select(App& app) {
                         }
                     }
             }
-            if (sk->reload_banner) {
+            {
                 std::string want = sctx.chart ? banner_path_of(*sctx.chart) : "";
                 if (want != banner_want) {
                     banner_want = want;

@@ -157,7 +157,7 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
     else SDL_ShowCursor();
     while (!done) {
         double t = now_ms();
-        if (!timers.on(1) && t > skin.startinput) timers.set(1, t);
+        if (!timers.on(1) && t > skin.startinput) timers.set(1, t), timers.set(11, t);  // LR2: 入力受付と同時に 11 も
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) timers.set(2, t);

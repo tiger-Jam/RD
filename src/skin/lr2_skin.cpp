@@ -243,8 +243,10 @@ SkinSrc read_src(const Csv& c, const Lr2Skin& sk) {
     s.h = c.val(6);
     if (s.gr >= 0 && s.gr < static_cast<int>(sk.images.size())) {
         const SkinImage& img = sk.images[s.gr];
-        if (s.w < 0 && img.movie.empty()) s.w = img.w;
-        if (s.h < 0 && img.movie.empty()) s.h = img.h;
+        // 動画と、譜面ごとに差し替える画像（100 STAGEFILE・101 BACKBMP・102 BANNER）の -1 は、描くときに絵の大きさにする
+        const bool per_chart = s.gr >= 100 && s.gr <= 102;
+        if (s.w < 0 && img.movie.empty() && !per_chart) s.w = img.w;
+        if (s.h < 0 && img.movie.empty() && !per_chart) s.h = img.h;
     }
     s.div_x = std::max(1, c.val(7));
     s.div_y = std::max(1, c.val(8));

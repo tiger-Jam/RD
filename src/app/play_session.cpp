@@ -1015,7 +1015,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             int startinput = skin ? skin->startinput : 0;
             int load_wait = skin ? skin->loadstart + skin->loadend : 0;
             int playstart = skin ? skin->playstart : 1000;
-            if (!ctx.timers.on(1) && now_ms >= startinput) ctx.timers.set(1, now_ms);
+            if (!ctx.timers.on(1) && now_ms >= startinput) ctx.timers.set(1, now_ms), ctx.timers.set(11, now_ms);  // LR2: 入力受付と同時に 11 も
             if (!ctx.timers.on(40) && loader_joined && now_ms >= load_wait) ctx.timers.set(40, now_ms);
             // 曲は #PLAYSTART が過ぎ、START・SELECT と数字キー（1〜8・0）が離されてから始める（LR2: Play.cpp:1755）
             auto start_blocked = [&] {

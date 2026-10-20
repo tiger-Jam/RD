@@ -119,13 +119,20 @@ void SkinRenderer::update_movies(const PlaySkinState& st) {
 }
 
 SDL_FRect SkinRenderer::frame_rect(const SkinSrc& src, int frame) const {
-    // 動画の SRC で幅・高さが -1 なら、動画全体
+    // 動画と、譜面ごとに差し替える画像（STAGEFILE など）の SRC で幅・高さが -1 なら、絵の全体
     int sw = src.w, sh = src.h;
-    if (sw < 0 || sh < 0)
+    if (sw < 0 || sh < 0) {
         if (auto it = movies_.find(src.gr); it != movies_.end()) {
             if (sw < 0) sw = it->second->width();
             if (sh < 0) sh = it->second->height();
+        } else if (auto ov = overrides_.find(src.gr); ov != overrides_.end() && ov->second) {
+            float tw = 0, th = 0;
+            SDL_GetTextureSize(ov->second, &tw, &th);
+            if (sw < 0) sw = static_cast<int>(tw);
+            if (sh < 0) sh = static_cast<int>(th);
         }
+    }
+    if (sw < 0 || sh < 0) return SDL_FRect{0, 0, 0, 0};
     int bw = sw / src.div_x, bh = sh / src.div_y;
     int i = frame % src.div_x, j = frame / src.div_x;
     return SDL_FRect{static_cast<float>(src.x + bw * i), static_cast<float>(src.y + bh * j), static_cast<float>(bw),

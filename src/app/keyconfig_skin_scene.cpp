@@ -82,7 +82,7 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
     bool done = false;
     while (!done) {
         double t = now_ms();
-        if (!timers.on(1) && t > skin.startinput) timers.set(1, t);
+        if (!timers.on(1) && t > skin.startinput) timers.set(1, t), timers.set(11, t);  // LR2: 入力受付と同時に 11 も
         const bool fading = timers.on(2);
         const bool accept = timers.on(1) && !fading;
         auto start_fade = [&] {
