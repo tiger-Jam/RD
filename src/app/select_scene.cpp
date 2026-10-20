@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <future>
+#include <condition_variable>
 #include <functional>
 #include <unordered_set>
 #include <list>
@@ -859,7 +860,6 @@ void run_select(App& app) {
     catalog.scan(app.lr2_root);
     sctx.catalog = &catalog;
     sctx.player = app.db.player_stats();
-    std::unordered_map<std::string, bool> folder_has_text;  // 曲のフォルダに .txt があるか（op 175）
     uint64_t scene_start = SDL_GetTicksNS();
     auto scene_ms = [&] { return (SDL_GetTicksNS() - scene_start) / 1e6; };
     sctx.timers.set(0, 0);
@@ -934,12 +934,46 @@ void run_select(App& app) {
     // OpenLR2 は #RELOADBANNER のスキンだけで読むが、LR2 では指定の無い WMIX でも出るので、いつも読む
     struct BannerLoad {
         std::mutex mu;
-        std::string path;   // 読み込み中・読み込んだもの
+        std::condition_variable cv;
+        std::string want;          // いま読んでほしいもの（画面の処理が書く。待たずに次々書き換えてよい）
+        std::string want_folder;   // 付属テキストの有無を確かめてほしいフォルダ
+        std::string path;          // 読み終えたもの
         SkinImage image;
         bool ready = false;
+        std::unordered_map<std::string, bool> folder_text;  // フォルダ → 付属テキスト（.txt）があるか
+        bool stop = false;
     };
     auto banner = std::make_shared<BannerLoad>();
-    std::thread banner_thread;
+    // バナーと付属テキストの有無は、裏の 1 本のスレッドで読む（曲は HDD にあることが多く、画面の処理の中で読むと
+    // 冷えた HDD ではカーソルを動かすたび・フォルダを開くたびに待たされる）。いつも一番新しく頼まれたものだけを読む
+    std::thread banner_thread([b = banner] {
+        std::unique_lock<std::mutex> lock(b->mu);
+        for (;;) {
+            b->cv.wait(lock, [&] { return b->stop || !b->want.empty() || !b->want_folder.empty(); });
+            if (b->stop) return;
+            std::string want = std::move(b->want), folder = std::move(b->want_folder);
+            b->want.clear(), b->want_folder.clear();
+            lock.unlock();
+            int text = -1;
+            if (!folder.empty()) {
+                text = 0;
+                std::error_code ec;
+                for (const auto& de : fs::directory_iterator(folder, ec)) {
+                    std::string ext = de.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+                    if (ext == ".txt") text = 1;
+                }
+            }
+            SkinImage img;
+            if (!want.empty()) {
+                static const uint8_t black[3] = {0, 0, 0};
+                load_skin_image(want, img, black, false);
+            }
+            lock.lock();
+            if (text >= 0) b->folder_text[folder] = text == 1;
+            if (!want.empty()) b->path = want, b->image = std::move(img), b->ready = true;
+        }
+    });
     std::string banner_want;  // 今のカーソルの曲のバナー
     // 曲のプレビュー（LR2: Songselect.cpp:2710）。カーソルを 500ms 置いた曲を裏で読み、曲の頭からオートで鳴らす。
     // 鳴らしている間は選曲 BGM を 1 秒かけて小さくし、カーソルが別の曲に移ったら止めて戻す
@@ -1381,7 +1415,11 @@ void run_select(App& app) {
         edit_buf.clear();
         edit_text = 30;
     };
+    // 開発用：BMJ_TIMING があれば、遅かったフレームの内訳を出す
+    const bool frame_timing = dev_env("BMJ_TIMING") != nullptr;
+    uint64_t ft0 = 0, ft_banner = 0, ft_text = 0;
     while (!quit) {
+        ft0 = SDL_GetTicksNS();
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) quit = true;
@@ -2025,22 +2063,16 @@ void run_select(App& app) {
                         }
                     }
             }
+            const uint64_t ftb = SDL_GetTicksNS();
             {
                 std::string want = sctx.chart ? banner_path_of(*sctx.chart) : "";
                 if (want != banner_want) {
                     banner_want = want;
                     if (banner_tex) app.select_renderer->set_image_override(102, nullptr), SDL_DestroyTexture(banner_tex), banner_tex = nullptr;
                     if (!want.empty()) {
-                        if (banner_thread.joinable()) banner_thread.join();
-                        banner_thread = std::thread([b = banner, want] {
-                            SkinImage img;
-                            static const uint8_t black[3] = {0, 0, 0};
-                            load_skin_image(want, img, black, false);
-                            std::lock_guard<std::mutex> lock(b->mu);
-                            b->path = want;
-                            b->image = std::move(img);
-                            b->ready = true;
-                        });
+                        std::lock_guard<std::mutex> lock(banner->mu);
+                        banner->want = want;
+                        banner->cv.notify_one();
                     }
                 }
                 std::lock_guard<std::mutex> lock(banner->mu);
@@ -2054,18 +2086,16 @@ void run_select(App& app) {
                 }
             }
             sctx.has_banner = banner_tex != nullptr;
+            ft_banner = SDL_GetTicksNS() - ftb;
+            const uint64_t ftt = SDL_GetTicksNS();
             sctx.has_text = false;
             if (sctx.chart) {
-                auto [it, fresh] = folder_has_text.try_emplace(sctx.chart->folder, false);
-                if (fresh) {
-                    std::error_code ec;
-                    for (const auto& de : fs::directory_iterator(sctx.chart->folder, ec)) {
-                        std::string ext = de.path().extension().string();
-                        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
-                        if (ext == ".txt") it->second = true;
-                    }
-                }
-                sctx.has_text = it->second;
+                // 分かっていなければ裏で確かめてもらい、分かるまでは「無し」として描く
+                std::lock_guard<std::mutex> lock(banner->mu);
+                auto it = banner->folder_text.find(sctx.chart->folder);
+                if (it != banner->folder_text.end()) sctx.has_text = it->second;
+                else if (banner->want_folder != sctx.chart->folder) banner->want_folder = sctx.chart->folder, banner->cv.notify_one();
+                ft_text = SDL_GetTicksNS() - ftt;
             }
             if (editing && edit_text == 30) search_failed = false;
             sctx.folder_name = editing && edit_text == 30 ? edit_buf + "|" : search_failed ? "SEARCH FAILED" : stack.size() > 1 ? lv.name : "検索語句を入力";
@@ -2391,6 +2421,12 @@ void run_select(App& app) {
             }
         }
         if (resort_pending) resort_pending = false, reapply_view(false);
+        if (frame_timing) {
+            const uint64_t all = SDL_GetTicksNS() - ft0;
+            if (all > 50'000'000)
+                std::printf("  遅いフレーム %.0f ms（バナー %.0f、テキスト %.0f）\n", all / 1e6, ft_banner / 1e6, ft_text / 1e6);
+            ft_banner = ft_text = 0;
+        }
         frame_present(r);
         if (bgm_pending) bgm_pending = false, app.mixer.play_system(kSysSelect, true);
         if (app.scene_end_ns) {
@@ -2404,6 +2440,11 @@ void run_select(App& app) {
     for (auto& f : stale_loads) f.wait();
     app.mixer.fade_system_loop(1.0f, 0);
     app.mixer.stop_system(kSysSelect);
+    {
+        std::lock_guard<std::mutex> lock(banner->mu);
+        banner->stop = true;
+        banner->cv.notify_one();
+    }
     if (banner_thread.joinable()) banner_thread.join();
     if (banner_tex) app.select_renderer->set_image_override(102, nullptr), SDL_DestroyTexture(banner_tex);
     stop_worker = true;
