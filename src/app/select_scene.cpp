@@ -70,6 +70,9 @@ struct Entry {
     TableChart missing;
     std::shared_ptr<Course> course;  // コースのとき
     bool course_folder = false;      // コースを集めたフォルダ（バーの種類 6）
+    // フォルダのバーの種類（LR2 の SRC_BAR_BODY の番号。スキンはこれで色を変える）：1 フォルダ、2 カスタムフォルダ、3 新曲フォルダ。
+    // 難易度表は LR2 ではカスタムフォルダとして入るので 2
+    int bar_type = 1;
     bool fs_folder = false;          // 曲フォルダの階層（中の譜面に LR2 の難易度の絞り込みをかける）
     // カスタムフォルダ。中身は開くとき（とフォルダのランプを出すとき）に集める（LR2 と同じ。全部を先に集めると、数が多いと遅い）。
     // #MAXTRACKS 1 のフォルダは、開くたびに 1 曲を選び直す
@@ -217,10 +220,12 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     std::vector<Entry> root;
     for (const DifficultyTable& t : lib.tables) {
         Entry tf;
+        tf.bar_type = 2;
         tf.label = t.name.empty() ? t.url : t.name;
         tf.sub = t.warning.empty() ? (t.from_cache ? "手元の版" : "") : t.warning;
         for (const std::string& lv : t.levels) {
             Entry lf;
+            lf.bar_type = 2;
             lf.badge = t.symbol + lv;
             lf.label = t.symbol + lv;
             std::set<std::string> seen;  // 同じ譜面は 1 回だけ（LR2 と同じ）
@@ -251,20 +256,30 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     }
     // コースのフォルダ（LR2 と同じく一番上の階層に、COURSE と 段位認定 を必ず出す）。
     // 中身は難易度表に書かれたコース。段位の制約があれば段位認定、無ければ COURSE に入れる
+    // 中は、コースが載っている難易度表ごとのフォルダに分ける（全部を 1 つに並べると、段位が多くて選びにくい）
     Entry expert, grade;
     expert.label = "COURSE", grade.label = "段位認定";
     expert.course_folder = grade.course_folder = true;
-    for (const DifficultyTable& t : lib.tables)
+    for (const DifficultyTable& t : lib.tables) {
+        Entry by_table[2];  // 0 = COURSE、1 = 段位認定
+        for (Entry& f : by_table) f.course_folder = true, f.label = t.name.empty() ? t.url : t.name;
         for (const TableCourse& tc : t.courses) {
             Entry ce;
             ce.kind = Entry::Kind::Course;
             ce.course = std::make_shared<Course>(make_table_course(tc, by_md5, by_sha256));
             ce.label = ce.course->name;
-            Entry& f = ce.course->type == 2 ? grade : expert;
+            Entry& f = by_table[ce.course->type == 2 ? 1 : 0];
             f.owned += ce.course->playable();
             f.total++;
             f.children.push_back(std::move(ce));
         }
+        for (int k = 0; k < 2; ++k) {
+            if (by_table[k].children.empty()) continue;
+            Entry& parent = k == 1 ? grade : expert;
+            parent.owned += by_table[k].owned, parent.total += by_table[k].total;
+            parent.children.push_back(std::move(by_table[k]));
+        }
+    }
     root.push_back(std::move(expert));
     root.push_back(std::move(grade));
     lap("難易度表とコース");
@@ -380,6 +395,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     // カスタムフォルダ（LR2: 登録した曲フォルダの次）。#COMMAND の結果を並べる（難易度の絞り込みはかけない）
     auto custom_entry = [&](const CustomFolderDef& d) {
         Entry f;
+        f.bar_type = 2;
         f.label = d.title;
         f.custom = &d;  // 中身は開くときに集める（load_custom_entry）
         return f;
@@ -390,6 +406,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
             continue;
         }
         Entry g;
+        g.bar_type = 2;
         g.label = n.title;
         for (const CustomFolderDef& d : n.defs) {
             Entry f = custom_entry(d);
@@ -401,6 +418,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     // MOD のフォルダ（カスタムフォルダの後ろ）
     std::function<Entry(const ModFolder&)> mod_entry = [&](const ModFolder& mf) {
         Entry f;
+        f.bar_type = 2;
         f.label = mf.title;
         for (const ModFolder& c : mf.children) {
             Entry sub = mod_entry(c);
@@ -434,6 +452,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
             });
             Entry f;
             f.label = "NEW SONG";
+            f.bar_type = 3;
             f.fs_folder = true;
             for (const ChartRecord* c : fresh) f.children.push_back(chart_entry(c, std::to_string(c->playlevel))), f.owned++, f.total++;
             root.push_back(std::move(f));
@@ -454,6 +473,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
             if (list.empty()) continue;
             std::stable_sort(list.begin(), list.end(), [&](const ChartRecord* a, const ChartRecord* b) { return by_path(a->folder, b->folder); });
             Entry f;
+            f.bar_type = 2;
             f.label = v == 1 ? "FAVORITE" : "IGNORE";
             for (const ChartRecord* c : list) f.children.push_back(chart_entry(c, std::to_string(c->playlevel))), f.owned++, f.total++;
             root.push_back(std::move(f));
@@ -2183,7 +2203,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 SelectBar b;
                 const Entry& en = list[i];
                 if (en.kind == Entry::Kind::Folder) {
-                    b.type = en.course_folder ? 6 : 1;
+                    b.type = en.course_folder ? 6 : en.bar_type;
                     b.title = en.label;
                     if (app.cfg.folder_lamp && !en.course_folder) {
                         // 持っている譜面だけを見る（鍵盤数の絞り込みは効かせる）。PERFECT から始めて一番低いランプ
