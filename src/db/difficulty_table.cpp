@@ -482,4 +482,49 @@ std::string course_group_label(const std::vector<const TableCourse*>& list, cons
     return p.size() >= 3 ? p : table_name;
 }
 
+bool write_lr2_courses(const std::string& path, const std::vector<TableCourse>& courses) {
+    std::ofstream f(path, std::ios::binary);
+    if (!f) return false;
+    for (const TableCourse& c : courses) {
+        bool grade = std::find(c.constraints.begin(), c.constraints.end(), "grade_mirror") != c.constraints.end();
+        f << (grade ? "grade" : "expert") << '\t' << c.name << '\t';
+        for (size_t i = 0; i < c.charts.size(); ++i) f << (i ? "," : "") << c.charts[i].md5;
+        f << '\n';
+    }
+    return static_cast<bool>(f);
+}
+
+std::vector<TableCourse> read_lr2_courses(const std::string& path) {
+    std::vector<TableCourse> out;
+    std::ifstream f(path, std::ios::binary);
+    std::string line;
+    std::map<std::string, int> groups;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        size_t a = line.find('\t'), b = a == std::string::npos ? a : line.find('\t', a + 1);
+        if (b == std::string::npos) continue;
+        TableCourse c;
+        c.name = line.substr(a + 1, b - a - 1);
+        // LR2 の段位は、MIRROR まで選べて LR2 のゲージ（LR2 の段位認定と同じ）
+        if (line.compare(0, a, "grade") == 0) c.constraints = {"grade_mirror", "gauge_lr2"};
+        std::string md5s = line.substr(b + 1);
+        for (size_t p = 0; p < md5s.size();) {
+            size_t e = md5s.find(',', p);
+            if (e == std::string::npos) e = md5s.size();
+            if (e > p) c.charts.push_back(TableChart{}), c.charts.back().md5 = md5s.substr(p, e - p);
+            p = e + 1;
+        }
+        // 組：名前の最後の語を除いたもの（空白が続けば 1 つにまとめる）
+        std::string key = c.name;
+        while (!key.empty() && key.back() == ' ') key.pop_back();
+        size_t sp = key.rfind(' ');
+        key = sp == std::string::npos ? std::string() : key.substr(0, sp);
+        while (!key.empty() && key.back() == ' ') key.pop_back();
+        auto [it, fresh] = groups.try_emplace(key, static_cast<int>(groups.size()));
+        c.group = it->second;
+        if (!c.charts.empty()) out.push_back(std::move(c));
+    }
+    return out;
+}
+
 }  // namespace bmj

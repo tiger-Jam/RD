@@ -261,14 +261,31 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     expert.course_folder = grade.course_folder = true;
     std::vector<std::pair<std::string, Entry>> groups[2];  // 0 = COURSE、1 = 段位認定。組の名前 → フォルダ（出てきた順）
     std::set<std::string> seen_groups;                      // 中身（コースの名前の並び）で、同じ組を二度入れない
-    for (const DifficultyTable& t : lib.tables) {
+    std::set<std::string> seen_courses;                     // 課題曲の並びと制約で、同じコースを二度入れない（難易度表のものを先に使う）
+    // LR2 から引き継いだ段位・コースは、難易度表のあとに並べる（起動のあいだは同じものを使う）
+    static const std::vector<TableCourse> lr2_courses = read_lr2_courses(lr2_courses_path());
+    struct CourseSource {
+        std::string name;
+        const std::vector<TableCourse>* courses;
+    };
+    std::vector<CourseSource> sources;
+    for (const DifficultyTable& t : lib.tables) sources.push_back({t.name.empty() ? t.url : t.name, &t.courses});
+    sources.push_back({"LR2", &lr2_courses});
+    for (const CourseSource& src : sources) {
         std::map<int, std::vector<const TableCourse*>> by_group;
-        for (const TableCourse& tc : t.courses) by_group[tc.group].push_back(&tc);
+        for (const TableCourse& tc : *src.courses) {
+            std::string songs;
+            for (const TableChart& c : tc.charts) songs += c.md5 + c.sha256 + ',';
+            // 課題曲が同じでも制約が違えば別のコース（GENOCIDE 2018 の No Good・ノースピなど）
+            for (const std::string& k : tc.constraints)
+                if (k != "grade_mirror" && k != "gauge_lr2" && k != "grade") songs += '|' + k;
+            if (seen_courses.insert(songs).second) by_group[tc.group].push_back(&tc);
+        }
         for (auto& [gi, list] : by_group) {
             std::string sig;
             for (const TableCourse* tc : list) sig += tc->name + '\n';
             if (!seen_groups.insert(sig).second) continue;
-            const std::string label = course_group_label(list, t.name.empty() ? t.url : t.name);
+            const std::string label = course_group_label(list, src.name);
             for (const TableCourse* tc : list) {
                 Entry ce;
                 ce.kind = Entry::Kind::Course;

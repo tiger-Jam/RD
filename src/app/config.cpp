@@ -314,6 +314,13 @@ std::string mod_data_dir(const std::string& id) {
     return p;
 }
 
+std::string lr2_courses_path() {
+    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
+    std::string p = dir ? std::string(dir) + "lr2_courses.txt" : "lr2_courses.txt";
+    SDL_free(dir);
+    return p;
+}
+
 std::string table_cache_dir() {
     char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
     std::string p = dir ? std::string(dir) + "tables" : "tables";

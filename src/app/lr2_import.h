@@ -18,6 +18,7 @@ struct Lr2ImportResult {
     int scores = 0;          // 取り込んだスコアの数
     int tables = 0;          // 新しく登録した難易度表の数
     int skins = 0;           // カスタマイズを引き継いだスキンの数
+    int courses = 0;         // 引き継いだ段位・コースの数
 };
 
 // LR2 の設定（LR2files/Config/config.xmh、無ければ config.xml）の曲フォルダを cfg.song_dirs にし、
@@ -25,6 +26,9 @@ struct Lr2ImportResult {
 // 曲の情報（LR2files/Database/song.db）とスコア（LR2files/Database/Score/<プレイヤー ID>.db）を db に取り込む。
 // skin_root（BMjoy がスキンを読むフォルダ。空なら lr2_dir）にあるスキンのうち、LR2 でカスタマイズしたもの
 // （LR2files/SkinCustomize）は、その選択を cfg.skin_custom に写す。LR2 のファイルは読むだけで書き換えない
+// LR2 の曲データベースに登録された段位（grade）とコース（expert）を lr2_courses_path() に写す。写した数（読めなければ -1）
+int import_lr2_courses(const std::string& lr2_song_db);
+
 Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, SongDb& db,
                                 const std::function<void(const std::string&)>& status = {},
                                 const std::string& skin_root = {});

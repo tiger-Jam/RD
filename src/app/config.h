@@ -132,6 +132,8 @@ std::string format_skin_custom(const std::vector<SkinCustomChoice>& sel);
 std::string song_db_path();
 // 難易度表を手元に保存しておくフォルダ
 std::string table_cache_dir();
+// LR2 から引き継いだ段位・コース（LR2 の曲データベースの grade・expert の表を写したもの）
+std::string lr2_courses_path();
 // 譜面のリプレイのファイル（設定フォルダの replay/<sha256>.bjr）
 std::string replay_path(const std::string& sha256);
 // 全プレーの入力の記録（設定フォルダの inputlog/<sha256>/<日時>.bjr）

@@ -76,6 +76,7 @@ struct Options {
     std::string import_lr2;  // LR2のスコアデータベース
     std::string import_lr2_dir;  // LR2 のフォルダ（曲フォルダの登録・曲の情報・スコアをまとめて引き継いで終わる）
     bool copy_assets = false;
+    std::string import_lr2_courses;
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000, effect = -1;
     bool gas = false;
@@ -112,7 +113,8 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--add-table") o.add_tables.push_back(next());
         else if (a == "--import-lr2") o.import_lr2 = next();
         else if (a == "--import-lr2-dir") o.import_lr2_dir = next();
-        else if (a == "--copy-lr2-assets") o.copy_assets = true;  // 今の素材のフォルダ（LR2）の素材を、実行ファイルの横に写して付け替える
+        else if (a == "--copy-lr2-assets") o.copy_assets = true;
+        else if (a == "--import-lr2-courses") o.import_lr2_courses = next();  // LR2 の song.db の段位・コースだけを写す  // 今の素材のフォルダ（LR2）の素材を、実行ファイルの横に写して付け替える
         else if (a == "--skin-opt") {
             std::string v = next();
             size_t eq = v.find('=');
@@ -459,6 +461,12 @@ int main(int argc, char** argv) {
         raw_hid().start();
         if (!app.init(argv[0])) return 1;
         midi_input().start();  // SDL のイベントで送るので、SDL の準備の後に開く
+        if (!opt.import_lr2_courses.empty()) {
+            int n = import_lr2_courses(opt.import_lr2_courses);
+            if (n < 0) std::printf("LR2 の段位とコースを読めない: %s\n", opt.import_lr2_courses.c_str());
+            else std::printf("LR2 の段位とコースを %d 件引き継いだ\n", n);
+            return n < 0 ? 1 : 0;
+        }
         if (opt.copy_assets) {
             const char* exe_dir = SDL_GetBasePath();
             if (c.lr2_root.empty()) c.lr2_root = app.lr2_root;

@@ -7,6 +7,8 @@
 #include <regex>
 
 #include "app/skin_catalog.h"
+#include "db/difficulty_table.h"
+#include "sqlite3.h"
 #include "util/hash.h"
 #include "util/text.h"
 
@@ -133,6 +135,8 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     int n = db.import_lr2_songs((root / "Database" / "song.db").string(), &err, {}, dirs);
     if (n < 0) return res.error = err, res;
     res.charts = n;
+    if (status) status("LR2 の段位とコースを引き継いでいます");
+    res.courses = std::max(0, import_lr2_courses((root / "Database" / "song.db").string()));
     if (!res.player.empty()) {
         if (status) status("LR2 のスコアを取り込んでいます");
         fs::path score = root / "Database" / "Score" / (res.player + ".db");
@@ -239,6 +243,39 @@ AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, con
     cfg.lr2_root = dst.string();
     res.ok = true;
     return res;
+}
+
+int import_lr2_courses(const std::string& lr2_song_db) {
+    sqlite3* db = nullptr;
+    if (sqlite3_open_v2(lr2_song_db.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        return -1;
+    }
+    std::vector<TableCourse> courses;
+    for (const char* table : {"grade", "expert"}) {
+        std::string sql = std::string("SELECT title, hash FROM ") + table + " ORDER BY id";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+            sqlite3_finalize(st);
+            continue;
+        }
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            const unsigned char* t = sqlite3_column_text(st, 0);
+            const unsigned char* h = sqlite3_column_text(st, 1);
+            if (!t || !h) continue;
+            TableCourse c;
+            c.name = to_utf8_auto(reinterpret_cast<const char*>(t));
+            if (std::string(table) == "grade") c.constraints = {"grade_mirror", "gauge_lr2"};
+            // hash は「コースの印 32 文字」のあとに、ステージの譜面の md5 が 32 文字ずつ続く
+            std::string hash = reinterpret_cast<const char*>(h);
+            for (size_t i = 32; i + 32 <= hash.size(); i += 32) c.charts.push_back(TableChart{}), c.charts.back().md5 = hash.substr(i, 32);
+            if (!c.charts.empty()) courses.push_back(std::move(c));
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    if (!write_lr2_courses(lr2_courses_path(), courses)) return -1;
+    return static_cast<int>(courses.size());
 }
 
 }  // namespace bmj

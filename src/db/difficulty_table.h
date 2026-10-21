@@ -40,6 +40,10 @@ bool fetch_table(const std::string& url, DifficultyTable& out, std::string& erro
 DifficultyTable update_table(const std::string& cache_dir, const std::string& url, bool force = false);
 // コースの組（ヘッダの course の並びの並びの 1 つ）の名前。コースの名前の共通の頭から付け、無ければ table_name
 std::string course_group_label(const std::vector<const TableCourse*>& list, const std::string& table_name);
+// LR2 から引き継いだ段位・コースのファイル（1 行 1 コース：「grade か expert」TAB「名前」TAB「md5,md5,…」）。
+// 組（group）は名前の頭（最後の語を除いたもの。「発狂BMS段位認定 十段」→「発狂BMS段位認定」）ごとに振る
+bool write_lr2_courses(const std::string& path, const std::vector<TableCourse>& courses);
+std::vector<TableCourse> read_lr2_courses(const std::string& path);
 // t（UNIX 秒）が今日か（この機械の時刻の日付で比べる）
 bool is_today(int64_t t);
 // 手元の版だけを読む
