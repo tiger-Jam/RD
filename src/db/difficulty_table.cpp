@@ -181,6 +181,7 @@ void read_courses(yyjson_val* header, std::vector<TableCourse>& out) {
                 yyjson_val* w;
                 yyjson_arr_foreach(v, j, m, w) {
                     TableCourse c;
+                    c.group = static_cast<int>(i);
                     if (read_course(w, def, c)) out.push_back(std::move(c));
                 }
             } else {
@@ -442,6 +443,43 @@ DifficultyTable update_table(const std::string& cache_dir, const std::string& ur
     std::ofstream(base + ".data.json", std::ios::binary) << data;
     std::ofstream(base + ".meta") << fresh.fetched << "\n" << url << "\n";
     return fresh;
+}
+
+// コースの組の名前。組の中のコースの名前に共通する頭（大文字小文字は区別しない）から付ける
+// （「GENOCIDE 2018 発狂初段」…「GENOCIDE 2018 overjoy」→「GENOCIDE 2018」）。語の途中で切れたら空白まで戻し、
+// 終わりの「発狂」「第」は外す。共通の頭が無い組は、課題曲で見分けられるものはその名前、ほかは表の名前
+std::string course_group_label(const std::vector<const TableCourse*>& list, const std::string& table_name) {
+    // 年の表記が無い発狂BMS段位認定（2012 年版。発狂初段の 1 曲目 Papyrus で見分ける）
+    static const std::map<std::string, std::string> known = {{"c07125de4ed7fbe7cb066cc41e50e51e", "発狂BMS段位認定 2012"}};
+    if (!list.empty() && !list.front()->charts.empty())
+        if (auto it = known.find(list.front()->charts.front().md5); it != known.end()) return it->second;
+    if (list.size() < 2) return table_name;
+    auto lower = [](unsigned char c) { return static_cast<char>(c < 0x80 ? std::tolower(c) : c); };
+    std::string p = list.front()->name;
+    for (const TableCourse* tc : list) {
+        size_t n = 0;
+        while (n < p.size() && n < tc->name.size() && lower(p[n]) == lower(tc->name[n])) ++n;
+        p.resize(n);
+    }
+    // 文字（UTF-8）の途中で切れていたら、その文字の頭まで戻す
+    if (!p.empty()) {
+        size_t start = p.size() - 1;
+        while (start > 0 && (static_cast<unsigned char>(p[start]) & 0xC0) == 0x80) --start;
+        unsigned char lead = static_cast<unsigned char>(p[start]);
+        size_t len = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xE ? 3 : 4;
+        if (p.size() - start < len) p.resize(start);
+    }
+    const std::string& first = list.front()->name;
+    if (p.size() < first.size() && p.size() > 0 && std::isalnum(static_cast<unsigned char>(first[p.size()])) &&
+        std::isalnum(static_cast<unsigned char>(p.back()))) {
+        size_t sp = p.rfind(' ');
+        p = sp == std::string::npos ? std::string() : p.substr(0, sp);
+    }
+    // 終わりの段位の言葉（「発狂初段」の「発狂」、「第1期」の「第」）は外す
+    for (const std::string& tail : {std::string("発狂"), std::string("第")})
+        if (p.size() >= tail.size() && p.compare(p.size() - tail.size(), tail.size(), tail) == 0) p.resize(p.size() - tail.size());
+    while (!p.empty() && p.back() == ' ') p.pop_back();
+    return p.size() >= 3 ? p : table_name;
 }
 
 }  // namespace bmj

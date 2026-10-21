@@ -71,3 +71,28 @@ TEST(table_checked_today) {
     CHECK(!is_today(now - 2 * 86400));
     CHECK(!is_today(0));
 }
+
+// コースの組の名前（実際の難易度表に入っているコースの名前で）
+TEST(table_course_group_label) {
+    auto label = [](std::vector<std::string> names, const std::string& first_md5 = "") {
+        std::vector<TableCourse> cs(names.size());
+        for (size_t i = 0; i < names.size(); ++i) cs[i].name = names[i];
+        if (!first_md5.empty()) cs[0].charts.push_back(TableChart{}), cs[0].charts[0].md5 = first_md5;
+        std::vector<const TableCourse*> list;
+        for (const TableCourse& c : cs) list.push_back(&c);
+        return course_group_label(list, "表");
+    };
+    CHECK(label({"GENOCIDE 2018 発狂初段", "GENOCIDE 2018 発狂二段", "GENOCIDE 2018 overjoy"}) == "GENOCIDE 2018");
+    CHECK(label({"GENOCIDE 2018 No Good発狂初段", "GENOCIDE 2018 No Good発狂二段", "GENOCIDE 2018 No good overjoy"}) ==
+          "GENOCIDE 2018 No Good");
+    CHECK(label({"GENOCIDE 2018 ノースピ発狂初段", "GENOCIDE 2018 ノースピ発狂二段", "GENOCIDE 2018 ノースピoverjoy"}) ==
+          "GENOCIDE 2018 ノースピ");
+    CHECK(label({"NEW GENERATION 発狂入門", "NEW GENERATION 発狂初段", "NEW GENERATION 発狂皆伝"}) == "NEW GENERATION");
+    CHECK(label({"Satellite Skill Analyzer 2nd sl0", "Satellite Skill Analyzer 2nd sl1", "Satellite Skill Analyzer 2nd sl12"}) ==
+          "Satellite Skill Analyzer 2nd");
+    CHECK(label({"Solomon 第1期 発狂九段", "Solomon 第2期 発狂六段"}) == "Solomon");
+    CHECK(label({"Renda Skill Simulator RENDAMAN", "Renda Skill Simulator Lv10"}) == "Renda Skill Simulator");
+    CHECK(label({"Stella Skill Simulator 4th st0", "STELLA技能訓練 st Boys"}) == "Stella");  // 大文字小文字は区別しない
+    CHECK(label({"Alpha", "Beta"}) == "表");  // 共通の頭が無ければ表の名前
+    CHECK(label({"発狂初段", "発狂二段", "overjoy"}, "c07125de4ed7fbe7cb066cc41e50e51e") == "発狂BMS段位認定 2012");
+}

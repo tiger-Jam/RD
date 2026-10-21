@@ -254,30 +254,45 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     }
     // コースのフォルダ（LR2 と同じく一番上の階層に、COURSE と 段位認定 を必ず出す）。
     // 中身は難易度表に書かれたコース。段位の制約があれば段位認定、無ければ COURSE に入れる
-    // 中は、コースが載っている難易度表ごとのフォルダに分ける（全部を 1 つに並べると、段位が多くて選びにくい）
+    // 中は、コースの組（GENOCIDE 2018・NEW GENERATION・Satellite Skill Analyzer など）ごとのフォルダに分ける
+    // （全部を 1 つに並べると、段位が多くて選びにくい）。同じ組が 2 つの表に載っていれば（Stella と Stella Sub など）1 つにまとめる
     Entry expert, grade;
     expert.label = "COURSE", grade.label = "段位認定";
     expert.course_folder = grade.course_folder = true;
+    std::vector<std::pair<std::string, Entry>> groups[2];  // 0 = COURSE、1 = 段位認定。組の名前 → フォルダ（出てきた順）
+    std::set<std::string> seen_groups;                      // 中身（コースの名前の並び）で、同じ組を二度入れない
     for (const DifficultyTable& t : lib.tables) {
-        Entry by_table[2];  // 0 = COURSE、1 = 段位認定
-        for (Entry& f : by_table) f.course_folder = true, f.label = t.name.empty() ? t.url : t.name;
-        for (const TableCourse& tc : t.courses) {
-            Entry ce;
-            ce.kind = Entry::Kind::Course;
-            ce.course = std::make_shared<Course>(make_table_course(tc, by_md5, by_sha256));
-            ce.label = ce.course->name;
-            Entry& f = by_table[ce.course->type == 2 ? 1 : 0];
-            f.owned += ce.course->playable();
-            f.total++;
-            f.children.push_back(std::move(ce));
-        }
-        for (int k = 0; k < 2; ++k) {
-            if (by_table[k].children.empty()) continue;
-            Entry& parent = k == 1 ? grade : expert;
-            parent.owned += by_table[k].owned, parent.total += by_table[k].total;
-            parent.children.push_back(std::move(by_table[k]));
+        std::map<int, std::vector<const TableCourse*>> by_group;
+        for (const TableCourse& tc : t.courses) by_group[tc.group].push_back(&tc);
+        for (auto& [gi, list] : by_group) {
+            std::string sig;
+            for (const TableCourse* tc : list) sig += tc->name + '\n';
+            if (!seen_groups.insert(sig).second) continue;
+            const std::string label = course_group_label(list, t.name.empty() ? t.url : t.name);
+            for (const TableCourse* tc : list) {
+                Entry ce;
+                ce.kind = Entry::Kind::Course;
+                ce.course = std::make_shared<Course>(make_table_course(*tc, by_md5, by_sha256));
+                ce.label = ce.course->name;
+                auto& folders = groups[ce.course->type == 2 ? 1 : 0];
+                auto it = std::find_if(folders.begin(), folders.end(), [&](const auto& g) { return g.first == label; });
+                if (it == folders.end()) {
+                    folders.push_back({label, Entry{}});
+                    it = folders.end() - 1;
+                    it->second.course_folder = true, it->second.label = label;
+                }
+                it->second.owned += ce.course->playable();
+                it->second.total++;
+                it->second.children.push_back(std::move(ce));
+            }
         }
     }
+    for (int k = 0; k < 2; ++k)
+        for (auto& [label, f] : groups[k]) {
+            Entry& parent = k == 1 ? grade : expert;
+            parent.owned += f.owned, parent.total += f.total;
+            parent.children.push_back(std::move(f));
+        }
     root.push_back(std::move(expert));
     root.push_back(std::move(grade));
     lap("難易度表とコース");

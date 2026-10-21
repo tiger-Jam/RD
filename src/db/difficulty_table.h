@@ -17,6 +17,7 @@ struct TableCourse {
     std::string name;
     std::vector<TableChart> charts;
     std::vector<std::string> constraints;  // grade / grade_mirror / gauge_lr2 / ln など
+    int group = 0;  // ヘッダの course が並びの並びのとき、何番目の並びか（GENOCIDE 2018・NEW GENERATION などの組）
 };
 
 struct DifficultyTable {
@@ -37,6 +38,8 @@ bool fetch_table(const std::string& url, DifficultyTable& out, std::string& erro
 // 取得を試み、駄目なら手元の版を使う。更新で譜面が半分未満に減ったら置き換えない。
 // force でなければ、手元の版をその日（この機械の時刻の日付）のうちに取ってあれば、取りに行かずに手元の版を使う
 DifficultyTable update_table(const std::string& cache_dir, const std::string& url, bool force = false);
+// コースの組（ヘッダの course の並びの並びの 1 つ）の名前。コースの名前の共通の頭から付け、無ければ table_name
+std::string course_group_label(const std::vector<const TableCourse*>& list, const std::string& table_name);
 // t（UNIX 秒）が今日か（この機械の時刻の日付で比べる）
 bool is_today(int64_t t);
 // 手元の版だけを読む
