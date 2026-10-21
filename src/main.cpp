@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <mutex>
 #include <optional>
@@ -228,7 +229,8 @@ int latency_test(bool exclusive, int buffer) {
 //   曲データベースの更新中は「Now Loading...」と読み込み中の譜面のパス（1件ごとに描き直す）、
 //   難易度表の取得中は表ごとの状態を出し、最後に版の名前と「PUSH ANY KEY」を出して入力を待つ。押すと「READY」。
 // 閉じられたら false
-bool startup_screen(App& app, bool update) {
+// before_wait は「PUSH ANY KEY」を出す直前に呼ぶ（選曲画面の下ごしらえを始め、押されるのを待つ間に済ませる）
+bool startup_screen(App& app, bool update, const std::function<void()>& before_wait = {}) {
     // LR2（DxLib の printfDx）と同じく、拡大せずにウィンドウの画素にそのまま、ぼかさない 16px の文字で描く
     frame_target_set(app.renderer, 0, 0);
     SDL_SetRenderLogicalPresentation(app.renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
@@ -343,6 +345,7 @@ bool startup_screen(App& app, bool update) {
             std::printf("難易度表 %s：%zu 譜面%s\n", name.c_str(), t.charts.size(), t.warning.empty() ? "" : ("（" + t.warning + "）").c_str());
         }
     }
+    if (before_wait) before_wait();
     lines.push_back("");
     lines.push_back("BMjoy version 0.1.0");
     lines.push_back("PUSH ANY KEY");
@@ -485,10 +488,19 @@ int main(int argc, char** argv) {
             return 0;
         }
         // LR2 と同じ起動の画面。曲データベースの更新（設定で「手動」なら選曲画面の F8 だけ）と難易度表の更新もここで行う
+        std::future<std::shared_ptr<SelectPrep>> select_prep;  // 選曲画面の下ごしらえ（起動の画面の間に裏で作る）
         if (opt.chart_path.empty() && !opt.keyconfig) {
             if (c.watch_folders) app.watcher.start(c.song_dirs);
             bool update = c.db_update == 0;
-            if (!startup_screen(app, update)) return 0;
+            // 「PUSH ANY KEY」を待っている間に、選曲画面の一覧を裏で作り、選曲スキンを読んでおく（READY のあと待たせない）
+            auto prepare = [&] {
+                select_prep = std::async(std::launch::async, [&app] { return prepare_select(app); });
+                if (!opt.no_skin && opt.skin_opts.empty()) preload_select_skin(app);
+            };
+            if (!startup_screen(app, update, prepare)) {
+                if (select_prep.valid()) select_prep.wait();
+                return 0;
+            }
             app.updated_at_start = update;
         }
         if (opt.no_skin) app.lr2_root.clear();
@@ -519,7 +531,7 @@ int main(int argc, char** argv) {
             run_keyconfig(app.window, app.renderer, app.keycfg, keyconfig_path());
         } else if (opt.chart_path.empty()) {
             app.scene_end_ns = SDL_GetTicksNS();
-            run_select(app);
+            run_select(app, select_prep.valid() ? select_prep.get() : nullptr);
         } else {
             run_play(app, opt.chart_path, opt.play);
         }

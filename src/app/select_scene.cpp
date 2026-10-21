@@ -565,12 +565,61 @@ void draw_play_option_panel(SDL_Renderer* r, TextCache& text, const AppConfig& c
     text.draw(x + 30, y + 302, 13, dim, "START（キーボードは Q か Space）を押している間だけ開く");
 }
 
+// 選曲スキンを読むときの条件（選曲画面に入った直後の状態）
+std::array<bool, 1000> select_load_options(App& app, OptionNames& names) {
+    names.load(app.lr2_root);
+    SelectContext sctx;
+    sctx.cfg = &app.cfg;
+    sctx.names = &names;
+    std::array<bool, 1000> ops{};
+    for (int i = 0; i < 900; ++i) ops[i] = sctx.option(i);
+    return ops;
+}
+
 }  // namespace
 
-void run_select(App& app) {
+struct SelectPrep {
+    std::shared_ptr<Library> lib;
+    std::vector<Entry> root;
+    std::unordered_map<std::string, int> favs;
+    int profile = 0;
+};
+
+std::shared_ptr<SelectPrep> prepare_select(App& app) {
+    auto p = std::make_shared<SelectPrep>();
+    SongDb db;  // 自分の接続（裏のスレッドで動かすため、app.db は使わない）
+    if (!db.open(song_db_path())) return nullptr;
+    p->lib = std::make_shared<Library>();
+    Library& lib = *p->lib;
+    load_charts(lib, db, app.cfg);
+    for (const std::string& u : app.cfg.tables) {
+        DifficultyTable t;
+        if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
+        lib.tables.push_back(std::move(t));
+    }
+    p->profile = db.mod_profile(play_mod_key(app.active_mods()));
+    for (const ScoreRecord& s : db.all_scores(app.cfg.ln_mode, p->profile)) lib.scores[s.sha256] = s;
+    p->favs = db.favorites();
+    load_custom(lib, app, p->favs);
+    p->root = build_tree(lib, new_song_since(app.cfg.title_flash), p->favs);
+    return p;
+}
+
+namespace {
+bool g_select_skin_preloaded = false;
+}
+
+void preload_select_skin(App& app) {
+    OptionNames names;
+    app.load_select_skin(select_load_options(app, names));
+    g_select_skin_preloaded = true;
+}
+
+void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     SDL_Renderer* r = app.renderer;
     TextCache text(r);
     app.set_view(1280, 720);
+    if (!prep) prep = prepare_select(app);
 
     // 手元にあるものですぐに一覧を出し、曲フォルダの読み直しと難易度表の更新は裏で行う
     // 開発用：BMJ_TIMING があれば、最初の絵までの内訳を出す
@@ -581,22 +630,12 @@ void run_select(App& app) {
         std::printf("  選曲画面の準備：%s %.0f ms\n", what, (now - lap_ns) / 1e6);
         lap_ns = now;
     };
-    auto lib = std::make_shared<Library>();
-    load_charts(*lib, app.db, app.cfg);
-    lap("譜面");
-    for (const std::string& u : app.cfg.tables) {
-        DifficultyTable t;
-        if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
-        lib->tables.push_back(std::move(t));
-    }
-    const int profile = app.mod_profile();  // MOD の組み合わせごとに記録を分ける
-    lap("難易度表");
-    for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
-    lap("記録");
-    std::unordered_map<std::string, int> favs = app.db.favorites();
-    load_custom(*lib, app, favs);
-    lap("カスタムフォルダ");
-    std::vector<Entry> root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
+    // 下ごしらえ（起動の画面で裏で作ったもの。無ければ上で作った）
+    std::shared_ptr<Library> lib = prep ? prep->lib : std::make_shared<Library>();
+    const int profile = prep ? prep->profile : 0;  // MOD の組み合わせごとに記録を分ける
+    std::unordered_map<std::string, int> favs = prep ? std::move(prep->favs) : std::unordered_map<std::string, int>{};
+    std::vector<Entry> root = prep ? std::move(prep->root) : std::vector<Entry>{};
+    prep.reset();
     lap("一覧");
     // フォルダランプ（LR2: folderlamp）。フォルダの中の譜面のランプの一番低いもの。記録か一覧が変わったら数え直す
     std::unordered_map<const Entry*, int> folder_lamps;
@@ -843,15 +882,13 @@ void run_select(App& app) {
     // 選曲スキン（docs/lr2_select_spec.md）。読めなければ BMjoy の仮の画面
     OptionNames opt_names;
     lap("そのほか");
-    opt_names.load(app.lr2_root);
+    std::array<bool, 1000> load_ops = select_load_options(app, opt_names);
     SelectContext sctx;
     sctx.cfg = &app.cfg;
     sctx.names = &opt_names;
-    {
-        std::array<bool, 1000> ops{};
-        for (int i = 0; i < 900; ++i) ops[i] = sctx.option(i);
-        app.load_select_skin(ops);
-    }
+    // 起動の画面で読んでおいたら、もう一度は読まない
+    if (!g_select_skin_preloaded) app.load_select_skin(load_ops);
+    g_select_skin_preloaded = false;
     Lr2Skin* sk = app.select_skin.get();
     sctx.skin = sk;
     lap("スキン");
