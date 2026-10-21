@@ -71,7 +71,7 @@ struct Entry {
     std::shared_ptr<Course> course;  // コースのとき
     bool course_folder = false;      // コースを集めたフォルダ（バーの種類 6）
     // フォルダのバーの種類（LR2 の SRC_BAR_BODY の番号。スキンはこれで色を変える）：1 フォルダ、2 カスタムフォルダ、3 新曲フォルダ。
-    // 難易度表は LR2 ではカスタムフォルダとして入るので 2
+    // 難易度表は 1（フォルダ）、カスタムフォルダ（.lr2folder・MOD・FAVORITE）は 2 にして、色で見分けられるようにする
     int bar_type = 1;
     bool fs_folder = false;          // 曲フォルダの階層（中の譜面に LR2 の難易度の絞り込みをかける）
     // カスタムフォルダ。中身は開くとき（とフォルダのランプを出すとき）に集める（LR2 と同じ。全部を先に集めると、数が多いと遅い）。
@@ -220,12 +220,10 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     std::vector<Entry> root;
     for (const DifficultyTable& t : lib.tables) {
         Entry tf;
-        tf.bar_type = 2;
         tf.label = t.name.empty() ? t.url : t.name;
         tf.sub = t.warning.empty() ? (t.from_cache ? "手元の版" : "") : t.warning;
         for (const std::string& lv : t.levels) {
             Entry lf;
-            lf.bar_type = 2;
             lf.badge = t.symbol + lv;
             lf.label = t.symbol + lv;
             std::set<std::string> seen;  // 同じ譜面は 1 回だけ（LR2 と同じ）
