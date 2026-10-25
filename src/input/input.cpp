@@ -207,6 +207,11 @@ void InputMapper::analog_motion(uint32_t which, int16_t value, uint64_t ts) {
     static const bool debug = dev_env("BMJ_DEBUG_INPUT") != nullptr;
     if (debug && dir != analog_dir_) std::printf("皿: 値 %d（差 %d）で向き %d → %d\n", value, d, analog_dir_, dir);
     analog_move_ns_ = ts;
+    // 向きは、その向きに割り当てた皿のボタンで決める（時計回りの皿のボタン kScratchB が +）
+    for (int b : sources_[kAnalogBase + (dir > 0 ? 1 : 0)].buttons) {
+        if (b == kScratchB) analog_ticks_ += 1;
+        else if (b == kScratchA) analog_ticks_ -= 1;
+    }
     if (dir == analog_dir_) return;
     if (analog_dir_ != 0) source_change(kAnalogBase + (analog_dir_ > 0 ? 1 : 0), false, ts);
     analog_dir_ = dir;
@@ -247,6 +252,9 @@ void InputMapper::apply_button(int button, bool down, uint64_t ts) {
     count += down ? 1 : -1;
     if (count < 0) count = 0;
     button_out_.push_back({ts, button, down});
+    static const bool debug = dev_env("BMJ_DEBUG_INPUT") != nullptr;
+    if (debug && (button == kScratchA || button == kScratchB))
+        std::printf("皿 %s %s（%.1f ms、押している数 %d）\n", button == kScratchA ? "A" : "B", down ? "押す" : "離す", ts / 1e6, count), std::fflush(stdout);
 
     if (button <= kKey7) {
         // 鍵盤：最初の入力元で押下、最後の入力元が離れたら離す

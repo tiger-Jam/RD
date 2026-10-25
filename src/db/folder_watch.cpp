@@ -168,6 +168,10 @@ void FolderWatcher::stop() {}
 void FolderWatcher::notify(const std::string& path, bool is_dir) {
     if (path.empty()) return;
     fs::path p(path);
+    // 「.」で始まるフォルダ（取ってくる道具の作業用・隠しフォルダ）の中の変化は見ない。
+    // 作業中は書き込みが続くので、見ると選曲画面で読み直しが止まらない
+    for (const fs::path& part : p)
+        if (const std::string s = part.string(); s.size() > 1 && s[0] == '.' && s != "..") return;
     // 譜面のファイルならその入っているフォルダ、フォルダならそのフォルダ（増えた・消えた曲フォルダ）。
     // それ以外のファイル（キー音や画像）は譜面の一覧に関係しないので見ない
     std::string dir;

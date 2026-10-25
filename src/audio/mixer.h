@@ -98,7 +98,7 @@ public:
     // 音声のコールバックが少なくとも 1 回まわるまで待つ（stop() のあと、曲の音を差し替えてよくなるまで）
     void wait_callback() const;
     // そのシステム音がサウンドセットにあるか（無いときは別の音で代わりに鳴らす）
-    bool has_system(int id) const { return id >= 0 && id < static_cast<int>(sys_samples_.size()) && !sys_samples_[id].pcm.empty(); }
+    bool has_system(int id) const { return id >= 0 && id < static_cast<int>(sys_samples_.size()) && !sys_samples_[id].empty(); }
 
     // 譜面上の時刻（マイクロ秒）。wall_ns は SDL_GetTicksNS() と同じ基準の時刻。
     // スピーカーから実際に出ている位置を返す（出力遅延を差し引く）

@@ -32,6 +32,8 @@ std::string find_lr2_root(const std::string& configured, const char* argv0) {
     return {};
 }
 
+}  // namespace
+
 // #RESOLUTION の無いスキンは、画面全体を覆うDST（0,0 から 640x480 / 1280x720 / 1920x1080）を探して解像度を推定する。
 // 見つからなければSD（BMjoyの拡張。OpenLR2は設定の既定値を使う）
 void guess_resolution(Lr2Skin& sk) {
@@ -47,8 +49,6 @@ void guess_resolution(Lr2Skin& sk) {
     sk.width = sizes[best][0];
     sk.height = sizes[best][1];
 }
-
-}  // namespace
 
 App::~App() {
     skin_renderer.reset();
@@ -131,6 +131,9 @@ void App::load_sound_set() {
         }
     }
     std::vector<Sample> sounds = load_system_sounds(lr2_root, ss, mixer.sample_rate(), chosen);
+    // キー音を 16 ビットで持つ設定なら、効果音と選曲の BGM も 16 ビットで持つ
+    if (cfg.sound_16bit)
+        for (Sample& smp : sounds) smp.to_16bit();
     // KEY 側のシステム音（パネル・フォルダ・オプション・難易度・スクリーンショット・地雷・皿）。それ以外は BGM 側（LR2 と同じ）
     uint32_t key_side = 0;
     for (int id : {kSysFolderOpen, kSysFolderClose, kSysPanelOpen, kSysPanelClose, kSysOptionChange, kSysDifficulty, kSysScreenshot,
@@ -138,7 +141,7 @@ void App::load_sound_set() {
         key_side |= 1u << id;
     mixer.set_system_key_side(key_side);
     int n = 0;
-    for (const Sample& smp : sounds) n += !smp.pcm.empty();
+    for (const Sample& smp : sounds) n += !smp.empty();
     std::printf("システム音: %d / %zu（%s）\n", n, sounds.size(), ss.c_str());
     mixer.set_system_sounds(std::move(sounds));
 }
@@ -166,6 +169,10 @@ void App::load_mods() {
     std::vector<std::string> errors;
     mods = scan_mods(official_mods_dir(), true, &errors);
     for (ModManifest& m : scan_mods(user_mods_dir(), false, &errors)) mods.push_back(std::move(m));
+    // 起動の設定画面で変えた詳細の設定（GAS の順番、カスタムゲージ）を重ねる
+    for (ModManifest& m : mods) apply_mod_settings(m, mod_settings_path(m.id));
+    apply_lamp_colors(mods, cfg.enabled_mods);  // EX-HARD などのランプの色を、カスタムゲージ MOD で変えていれば
+    resolve_gauge_lamps(mods);
     for (const std::string& e : errors) std::printf("MOD を読めない：%s\n", e.c_str());
     for (const ModManifest* m : active_mods()) std::printf("MOD：%s %s\n", m->name.c_str(), m->version.c_str());
 }
@@ -188,25 +195,67 @@ std::vector<std::pair<std::string, const CustomGaugeDef*>> App::custom_gauges() 
     return out;
 }
 
+std::map<std::string, const CustomLampDef*> App::custom_lamps() const {
+    std::map<std::string, const CustomLampDef*> out;
+    for (const ModManifest* m : active_mods())
+        for (const CustomLampDef& l : m->lamps) out[m->id + "/" + l.id] = &l;
+    return out;
+}
+
+uint32_t App::standard_lamp_tint(int lamp, double ms) const {
+    if (lamp < 1 || lamp > 6) return 0;
+    for (const ModManifest* m : active_mods()) {
+        const CustomLampDef& l = m->standard_lamps[lamp - 1];
+        if (l.colors > 0) return 0xff000000u | l.color_at(ms);
+    }
+    return 0;
+}
+
+const GaugeColors* App::standard_gauge_colors(int gauge_type) const {
+    if (gauge_type < 0 || gauge_type >= 6) return nullptr;
+    for (const ModManifest* m : active_mods())
+        if (m->standard_gauges[gauge_type].colors > 0) return &m->standard_gauges[gauge_type];
+    return nullptr;
+}
+
 void App::cycle_gauge(int dir) {
-    // 並び：GROOVE … G-ATTACK（LR2 の番号の順）→ カスタムゲージ
+    // 並び：GROOVE … G-ATTACK（LR2 の番号の順）→ カスタムゲージ → GAS（GAS の MOD を使っていれば）
     auto gauges = custom_gauges();
-    const int n = kGaugeCount + static_cast<int>(gauges.size());
+    std::vector<std::string> keys;
+    for (const auto& g : gauges) keys.push_back(g.first);
+    if (!gas_order().empty()) keys.push_back(kGasKey);
+    const int n = kGaugeCount + static_cast<int>(keys.size());
     int cur = cfg.gauge;
-    for (size_t i = 0; i < gauges.size(); ++i)
-        if (gauges[i].first == cfg.custom_gauge) cur = kGaugeCount + static_cast<int>(i);
+    for (size_t i = 0; i < keys.size(); ++i)
+        if (keys[i] == cfg.custom_gauge) cur = kGaugeCount + static_cast<int>(i);
     cur = ((cur + dir) % n + n) % n;
     if (cur < kGaugeCount) cfg.gauge = cur, cfg.custom_gauge.clear();
-    else cfg.custom_gauge = gauges[cur - kGaugeCount].first;
+    else cfg.custom_gauge = keys[cur - kGaugeCount];
 }
 
 std::string App::custom_gauge_name() const {
+    if (cfg.custom_gauge == kGasKey && !gas_order().empty()) return "GAS";
     for (const auto& [key, g] : custom_gauges())
         if (key == cfg.custom_gauge) return g->name;
     return {};
 }
 
-int App::mod_profile() { return db.mod_profile(play_mod_key(active_mods())); }
+const ModManifest* App::metronome() const {
+    for (const ModManifest* m : active_mods())
+        if (m->metronome) return m;
+    return nullptr;
+}
+
+std::vector<std::string> App::gas_order() const {
+    for (const ModManifest* m : active_mods())
+        if (m->gas) return m->gas_order;
+    return {};
+}
+
+int App::mod_profile(bool seven_key) {
+    const std::string key = play_mod_key(active_mods());
+    return db.mod_profile(seven_key ? seven_key_record_key(key) : key);
+}
 
 void App::toggle_fullscreen() {
     cfg.fullscreen = !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN);
@@ -260,6 +309,8 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
         if (w.find(".dummy") == std::string::npos) std::printf("  スキン警告: %s\n", w.c_str());
     const uint64_t t1 = SDL_GetTicksNS();
     renderer.upload(*skin);
+    // GPU に送った画像の画素は捨てる（同じ画像を二重に持たない。引き継ぐときや反転するときはファイルから読み直す）
+    if (app.cfg.low_memory) release_skin_pixels(*skin);
     app.last_skin = skin.get();
     if (dev_env("BMJ_TIMING"))
         std::printf("  スキンの読み込み %.0f ms、GPU に送る %.0f ms\n", (t1 - t0) / 1e6, (SDL_GetTicksNS() - t1) / 1e6);

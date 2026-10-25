@@ -7,10 +7,10 @@
 #   tools/win.sh log              最後に起動したときのログを見る
 #   tools/win.sh shot [引数...]    起動して画面を1枚撮り、Mac に持ってくる（開発用）
 #
-# Windows 側のフォルダは C:\Users\<ユーザー>\bmjoy_mac_build（変えるなら BMJ_WIN_DIR）
+# Windows 側のフォルダは C:\Users\<ユーザー>\BMjoy-beta20261022（変えるなら BMJ_WIN_DIR）
 set -euo pipefail
 HOST=${BMJ_WIN_HOST:-win}
-DIR=${BMJ_WIN_DIR:-bmjoy_mac_build}
+DIR=${BMJ_WIN_DIR:-BMjoy-beta20261022}
 cd "$(dirname "$0")/.."
 WINDIR=$(ssh -o BatchMode=yes "$HOST" '$env:USERPROFILE' | tr -d '\r')"\\$DIR"
 EXE="$WINDIR\\build\\RelWithDebInfo\\BMjoybody.exe"
@@ -24,11 +24,15 @@ sync)
     tmp=$(mktemp -d)
     # git の管理下のファイル（コミットしていない変更も含む）だけを送る
     # macOS の tar は拡張属性を ._ のファイルとして入れてしまうので止める（Windows では C のソースに見えて、ビルドが壊れる）
-    git ls-files -z --cached --others --exclude-standard | COPYFILE_DISABLE=1 tar --no-xattrs --null -T - -cf "$tmp/src.tar"
+    # 消したばかりでまだコミットしていないファイルは、一覧には残るので外す
+    git ls-files -z --cached --others --exclude-standard |
+        python3 -I -c "import os,sys; sys.stdout.buffer.write(b'\\0'.join(p for p in sys.stdin.buffer.read().split(b'\\0') if p and os.path.exists(p)))" |
+        COPYFILE_DISABLE=1 tar --no-xattrs --null -T - -cf "$tmp/src.tar"
     ps "New-Item -ItemType Directory -Force '$WINDIR' | Out-Null"
     scp -q -o BatchMode=yes "$tmp/src.tar" "$HOST:$DIR/src.tar"
     rm -rf "$tmp"
-    ps "cd '$WINDIR'; tar -xf src.tar; Remove-Item src.tar; cmd /c tools\\windows\\build.cmd"
+    # 公式の MOD は丸ごと置き換える（消した MOD が Windows 側に残らないように）
+    ps "cd '$WINDIR'; Remove-Item -Recurse -Force mods -ErrorAction SilentlyContinue; tar -xf src.tar; Remove-Item src.tar; cmd /c tools\\windows\\build.cmd"
     ;;
 run)
     shift

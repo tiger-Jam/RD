@@ -23,6 +23,7 @@
 #include "db/song_db.h"
 #include "mod/mod.h"
 #include "render/text_cache.h"
+#include "util/data_dir.h"
 #include "util/dev.h"
 
 namespace fs = std::filesystem;
@@ -59,23 +60,16 @@ void dialog_cb(void*, const char* const* files, int) {
     }
 }
 
-void pick_folder(SDL_Window* w, std::function<void(const std::string&)> apply) {
+// start はダイアログを開く場所（空なら OS に任せる。Windows は前に開いた場所になる）
+void pick_folder(SDL_Window* w, std::function<void(const std::string&)> apply, const std::string& start = {}) {
     {
         std::lock_guard<std::mutex> lock(g_dialog.mu);
         g_dialog.apply = std::move(apply);
         g_dialog.ready = false;
     }
-    SDL_ShowOpenFolderDialog(dialog_cb, nullptr, w, nullptr, false);
-}
-
-void pick_skin(SDL_Window* w, std::function<void(const std::string&)> apply) {
-    {
-        std::lock_guard<std::mutex> lock(g_dialog.mu);
-        g_dialog.apply = std::move(apply);
-        g_dialog.ready = false;
-    }
-    static const SDL_DialogFileFilter filters[] = {{"スキン", "lr2skin"}};
-    SDL_ShowOpenFileDialog(dialog_cb, nullptr, w, filters, 1, nullptr, false);
+    static std::string where;  // ダイアログが閉じるまで生きている文字列（SDL は呼んだあとも読むことがある）
+    where = start;
+    SDL_ShowOpenFolderDialog(dialog_cb, nullptr, w, where.empty() ? nullptr : where.c_str(), false);
 }
 
 // 本体を立ち上げる
@@ -138,6 +132,9 @@ struct Gui {
     SDL_FRect combo_rect{};
     std::vector<std::string> combo_items;
     std::function<void(int)> combo_pick;
+    // 開いているのが色の見本（color_button）なら true。選んだ色は color_target に入る
+    bool combo_colors = false;
+    uint32_t* color_target = nullptr;
 
     bool in(SDL_FRect rc) const { return mx >= rc.x && mx < rc.x + rc.w && my >= rc.y && my < rc.y + rc.h; }
     void fill(SDL_FRect rc, SDL_Color c) {
@@ -287,15 +284,48 @@ struct Gui {
         SDL_SetRenderClipRect(r, nullptr);
         if (enabled && clicked(rc)) {
             combo_open = id;
+            combo_colors = false;
             combo_rect = {x, y + h, w, static_cast<float>(items.size()) * 18 + 2};
             combo_items = items;
             combo_pick = std::move(pick);
             pressed = false;
         }
     }
+    // 色の四角（押すと色の見本が開き、選んだ色になる）
+    void color_button(uint32_t* c, float x, float y, float w, float h, bool enabled = true) {
+        SDL_FRect rc{x, y, w, h};
+        sunken(rc, kHi);
+        fill({x + 3, y + 3, w - 6, h - 6}, enabled ? rgb(*c) : kFace);
+        if (enabled && clicked(rc)) {
+            combo_open = c;
+            combo_colors = true;
+            color_target = c;
+            combo_rect = {x, y + h, 4 * 26 + 4, 4 * 26 + 4};
+            pressed = false;
+        }
+    }
+    static SDL_Color rgb(uint32_t c) { return SDL_Color{static_cast<Uint8>(c >> 16), static_cast<Uint8>(c >> 8), static_cast<Uint8>(c), 255}; }
     // 開いているコンボボックスの一覧（ほかの部品より手前に描く）
     void combo_popup() {
         if (!combo_open) return;
+        if (combo_colors) {
+            static const uint32_t palette[16] = {0xff3030, 0xff9020, 0xffd800, 0xa0ff30, 0x30d040, 0x30e0ff, 0x3070ff, 0x2030a0,
+                                                 0x8040ff, 0xff40d0, 0xff90c0, 0xa06030, 0xffffff, 0xc0c0c0, 0x808080, 0x202020};
+            fill(combo_rect, kFace);
+            frame(combo_rect, kText);
+            for (int i = 0; i < 16; ++i) {
+                SDL_FRect cell{combo_rect.x + 3 + (i % 4) * 26.0f, combo_rect.y + 3 + (i / 4) * 26.0f, 24, 24};
+                fill(cell, rgb(palette[i]));
+                frame(cell, in(cell) ? kSel : kShadow);
+                if (in(cell) && pressed) {
+                    if (color_target) *color_target = palette[i];
+                    combo_open = nullptr, combo_colors = false, pressed = false;
+                    return;
+                }
+            }
+            if (pressed) combo_open = nullptr, combo_colors = false, pressed = false;
+            return;
+        }
         fill(combo_rect, SDL_Color{255, 255, 255, 255});
         frame(combo_rect, kText);
         for (size_t i = 0; i < combo_items.size(); ++i) {
@@ -313,8 +343,9 @@ struct Gui {
         if (pressed) combo_open = nullptr, pressed = false;
     }
     // 一覧（JUKEBOX1 の曲検索フォルダなど）。sel は選んでいる行
+    // gray：先頭のこの数の行は灰色で書く（変えられない見本）
     void listview(float x, float y, float w, float h, const std::string& header, const std::vector<std::string>& rows,
-                  int& sel, int& scroll) {
+                  int& sel, int& scroll, int gray = 0) {
         SDL_FRect rc{x, y, w, h};
         sunken(rc, kHi);
         fill({x + 2, y + 2, w - 4, 16}, kFace);
@@ -330,12 +361,471 @@ struct Gui {
             if (k == sel) fill(row, kSel);
             SDL_Rect clip{static_cast<int>(row.x), static_cast<int>(row.y), static_cast<int>(row.w), static_cast<int>(row.h)};
             SDL_SetRenderClipRect(r, &clip);
-            text->draw(row.x + 4, row.y + 2, font, k == sel ? SDL_Color{255, 255, 255, 255} : kText, rows[k], 0, 0, 0);
+            text->draw(row.x + 4, row.y + 2, font, k == sel ? SDL_Color{255, 255, 255, 255} : k < gray ? kGray : kText, rows[k], 0, 0, 0);
             SDL_SetRenderClipRect(r, nullptr);
             if (clicked(row)) sel = k;
         }
     }
 };
+
+// 本体のランプのゲームの中での名前と、色（色はスキンの絵で決まる。設定画面の見本用に W-MIX の絵の色を写した）
+const char* const kStandardLampNames[6] = {"FAILED", "EASY CLEAR", "CLEAR", "HARD CLEAR", "FULL COMBO", "PERFECT"};
+// その時刻（ms）の色。FULL COMBO は黄・白・水色の 3 コマを 0.1 秒で 1 周する。W-MIX に PERFECT の絵は無く、FULL COMBO の絵で出る
+uint32_t standard_lamp_color(int i, uint64_t ms) {
+    static const uint32_t fixed[4] = {0xff2020, 0x80ff20, 0xffc000, 0xe0e0e0};
+    static const uint32_t fc[3] = {0xffc000, 0xe0e0e0, 0x20e0ff};
+    return i < 4 ? fixed[std::clamp(i, 0, 3)] : fc[(ms % 100) * 3 / 100];
+}
+
+// MOD の詳細の画面。GAS の順番（gauge_order）、カスタムゲージの一覧（gauges）、カスタムランプの一覧（lamps）を変える。
+// 設定が 2 つ以上ある MOD は、上のボタンで page を切り替える。done は「戻る」（保存して一覧へ）
+void draw_mod_detail(Gui& g, std::vector<ModManifest>& mods, ModManifest& m, const std::vector<std::string>& enabled, float X, float Y,
+                     int& page, int& sel, int& scroll, int& add_sel, const std::function<void()>& done) {
+    // ほかの MOD のゲージ・ランプは、使っている（印を付けた）ものだけ出す
+    auto in_use = [&](const ModManifest& o) { return &o == &m || std::find(enabled.begin(), enabled.end(), o.id) != enabled.end(); };
+    resolve_gauge_lamps(mods);  // 名前（CUSTOM1 …）とランプを、いまの中身で引き直す
+    g.label(X + 14, Y + 12, m.name + " の詳細");
+    page = std::clamp(page, 0, std::max(0, static_cast<int>(m.settings.size()) - 1));
+    if (m.settings.size() > 1)
+        for (size_t i = 0; i < m.settings.size(); ++i)
+            if (g.button(X + 324 + i * 84.0f, Y + 8, 80, 22, m.settings[i].name, static_cast<int>(i) != page)) {
+                g.unfocus();
+                page = static_cast<int>(i), sel = 0, scroll = 0;
+            }
+    if (m.settings.empty()) return;
+    const ModSetting& st = m.settings[page];
+    auto num = [&](double& v, float x, float y, float w) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%g", v);
+        g.edit_box(&v, x, y, w, 20, buf, true, [&v](const std::string& s) {
+            char* end = nullptr;
+            double d = std::strtod(s.c_str(), &end);
+            if (end && end != s.c_str()) v = d;
+        });
+    };
+    // 新しい id（同じ MOD の中で重ならない）
+    auto new_id = [](const std::string& head, auto& list) {
+        for (int n = 1;; ++n) {
+            std::string id = head + std::to_string(n);
+            if (std::none_of(list.begin(), list.end(), [&](const auto& x) { return x.id == id; })) return id;
+        }
+    };
+    if (st.type == "gauge_order") {
+        // 選べるゲージ：本体の 6 つと、MOD のカスタムゲージ（鍵は「MOD/ゲージ」）
+        std::vector<std::pair<std::string, std::string>> all;  // 鍵, 名前
+        for (const char* k : kGaugeKeys) all.push_back({k, k});
+        for (const ModManifest& o : mods)
+            for (const CustomGaugeDef& cg : o.gauges) all.push_back({o.id + "/" + cg.id, cg.name});
+        auto name_of = [&](const std::string& k) {
+            for (const auto& [key, nm] : all)
+                if (key == k) return nm;
+            return k + "（無い）";
+        };
+        std::vector<std::string> rows;
+        for (const std::string& k : m.gas_order) rows.push_back(name_of(k));
+        g.label(X + 14, Y + 36, st.name);
+        g.listview(X + 14, Y + 54, 260, 200, "上から順に落ちる", rows, sel, scroll);
+        const int n = static_cast<int>(m.gas_order.size());
+        const bool has = sel >= 0 && sel < n;
+        if (g.button(X + 284, Y + 54, 80, 22, "上へ", has && sel > 0)) std::swap(m.gas_order[sel], m.gas_order[sel - 1]), --sel;
+        if (g.button(X + 284, Y + 80, 80, 22, "下へ", has && sel + 1 < n)) std::swap(m.gas_order[sel], m.gas_order[sel + 1]), ++sel;
+        if (g.button(X + 284, Y + 106, 80, 22, "外す", has && n > 1)) m.gas_order.erase(m.gas_order.begin() + sel), sel = std::min(sel, n - 2);
+        std::vector<std::string> addable_keys, addable_names;
+        for (const auto& [key, nm] : all)
+            if (std::find(m.gas_order.begin(), m.gas_order.end(), key) == m.gas_order.end()) addable_keys.push_back(key), addable_names.push_back(nm);
+        add_sel = std::clamp(add_sel, 0, std::max(0, static_cast<int>(addable_keys.size()) - 1));
+        g.combo(&add_sel, X + 284, Y + 146, 170, 22, addable_names, add_sel, [&](int i) { add_sel = i; }, !addable_keys.empty());
+        if (g.button(X + 460, Y + 146, 60, 22, "足す", !addable_keys.empty())) m.gas_order.push_back(addable_keys[add_sel]), sel = n;
+    } else if (st.type == "gauges") {
+        // 一覧の頭に見本（灰色。変えられない）：本体のゲージと、使っているほかの MOD のゲージ（EX-HARD など）。そのあとにこの MOD のゲージ
+        static const std::vector<CustomGaugeDef> standard = standard_gauge_samples();
+        std::vector<CustomGaugeDef> samples = standard;
+        for (const ModManifest& o : mods)
+            if (&o != &m && in_use(o))
+                for (CustomGaugeDef og : o.gauges) {
+                    // ランプの鍵は、この MOD から見た形（「MOD/id」）にする
+                    const bool std_lamp = std::find(std::begin(kStandardLampKeys), std::end(kStandardLampKeys), og.lamp) != std::end(kStandardLampKeys);
+                    if (!std_lamp && og.lamp.find('/') == std::string::npos) og.lamp = o.id + "/" + og.lamp;
+                    samples.push_back(og);
+                }
+        const int ns = static_cast<int>(samples.size());
+        std::vector<std::string> rows;
+        for (const CustomGaugeDef& cg : samples) rows.push_back(cg.name);
+        for (const CustomGaugeDef& cg : m.gauges) rows.push_back(cg.name);
+        g.label(X + 14, Y + 36, st.name);
+        g.listview(X + 14, Y + 54, 140, 230, "ゲージ", rows, sel, scroll, ns);
+        bool sample = sel >= 0 && sel < ns;
+        int mi = sel - ns;  // MOD のゲージの番号
+        // 番号の付くゲージ（CUSTOM1 …）は、スキンに用意したコマの数まで
+        const bool can_add = m.gauge_label.empty() || static_cast<int>(m.gauges.size()) < kMaxNumberedGauges;
+        if (g.button(X + 14, Y + 290, 66, 22, "足す", can_add)) {
+            g.unfocus();
+            // 選んでいるもの（見本でも）を元にする。何も選んでいなければ HARD
+            CustomGaugeDef ng = sample ? samples[sel] : mi >= 0 && mi < static_cast<int>(m.gauges.size()) ? m.gauges[mi] : samples[1];
+            ng.id = new_id("gauge", m.gauges);
+            ng.frame = -1;
+            m.gauges.push_back(ng);
+            sel = ns + static_cast<int>(m.gauges.size()) - 1;
+        }
+        bool has = mi >= 0 && mi < static_cast<int>(m.gauges.size());
+        if (g.button(X + 88, Y + 290, 66, 22, "消す", has)) {
+            g.unfocus();
+            m.gauges.erase(m.gauges.begin() + mi);
+            sel = std::max(0, std::min(sel, ns + static_cast<int>(m.gauges.size()) - 1));
+        }
+        // 足す・消すで選んでいる行が変わったので、引き直す
+        sample = sel >= 0 && sel < ns;
+        mi = sel - ns;
+        has = mi >= 0 && mi < static_cast<int>(m.gauges.size());
+        if (sample || has) {
+            CustomGaugeDef ro_copy = sample ? samples[sel] : CustomGaugeDef{};
+            CustomGaugeDef& cg = sample ? ro_copy : m.gauges[mi];
+            const bool ed = !sample;  // 見本は見るだけ
+            auto numf = [&](double& v, float x, float y, float w) {
+                if (ed) return num(v, x, y, w);
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), "%g", v);
+                g.edit_box(&v, x, y, w, 20, buf, false, [](const std::string&) {});
+            };
+            const float x0 = X + 166, x1 = X + 230;
+            g.label(x0, Y + 58, "名前");
+            if (m.gauge_label.empty() && ed) {
+                g.edit_str(cg.name, x1, Y + 54, 150);
+                g.label(x0 + 240, Y + 58, "ID"), g.edit_str(cg.id, x1 + 196, Y + 54, 110);
+            } else {
+                g.label(x1, Y + 58, cg.name);
+            }
+            g.label(x0, Y + 84, "種類");
+            g.combo(&cg.survival, x1, Y + 80, 150, 22, {"落ちたら終わり", "最後の値で決める"}, cg.survival ? 0 : 1,
+                    [&cg](int i) { cg.survival = i == 0; }, ed);
+            g.label(x0, Y + 110, "始まり"), numf(cg.initial, x1, Y + 106, 50);
+            g.label(x1 + 60, Y + 110, "クリア", !cg.survival), numf(cg.border, x1 + 100, Y + 106, 50);
+            g.label(x1 + 160, Y + 110, "下限", !cg.survival), numf(cg.floor, x1 + 190, Y + 106, 50);
+            // 判定ごとの増減：決まった値と、TOTAL に比べた値（TOTAL ÷ 総ノーツ数 × この値）
+            static const char* jn[6] = {"空POOR", "POOR", "BAD", "GOOD", "GREAT", "PGREAT"};
+            g.label(x1, Y + 134, "増減"), g.label(x1 + 60, Y + 134, "TOTAL 比");
+            g.label(x1 + 180, Y + 134, "増減"), g.label(x1 + 240, Y + 134, "TOTAL 比");
+            for (int k = 0; k < 6; ++k) {
+                const int jk = 5 - k;  // PGREAT から
+                const float cx = k < 3 ? 0 : 180, cy = Y + 150 + (k % 3) * 24;
+                g.label(x0 + cx, cy + 4, jn[jk]);
+                numf(cg.delta[jk].fixed, x1 + cx, cy, 50);
+                numf(cg.delta[jk].total, x1 + cx + 60, cy, 50);
+            }
+            g.label(x0, Y + 228, "地雷"), numf(cg.mine_mul, x1, Y + 224, 50);
+            g.label(x1 + 60, Y + 228, "残り"), numf(cg.low_hp, x1 + 90, Y + 224, 40);
+            g.label(x1 + 134, Y + 228, "以下で減り ×"), numf(cg.low_hp_mul, x1 + 214, Y + 224, 40);
+            // クリアしたときに付くランプ：本体のランプ（ゲームの中の名前）と、カスタムランプ（ほかの MOD のものも選べる）。横に色の見本
+            std::vector<std::string> lamp_keys, lamp_names;
+            std::vector<uint32_t> lamp_cols;
+            for (int k = 1; k < 4; ++k)
+                lamp_keys.push_back(kStandardLampKeys[k]), lamp_names.push_back(kStandardLampNames[k]),
+                    lamp_cols.push_back(m.standard_lamps[k].colors > 0 ? m.standard_lamps[k].color_at(SDL_GetTicks()) : standard_lamp_color(k, SDL_GetTicks()));
+            if (cg.lamp == kStandardLampKeys[0]) lamp_keys.push_back(kStandardLampKeys[0]), lamp_names.push_back(kStandardLampNames[0]), lamp_cols.push_back(standard_lamp_color(0, SDL_GetTicks()));
+            for (const CustomLampDef& l : m.lamps) lamp_keys.push_back(l.id), lamp_names.push_back(l.name), lamp_cols.push_back(l.color_at(SDL_GetTicks()));
+            for (const ModManifest& o : mods)
+                if (&o != &m && in_use(o))
+                    for (const CustomLampDef& l : o.lamps)
+                        lamp_keys.push_back(o.id + "/" + l.id), lamp_names.push_back(l.name + "（" + o.name + "）"),
+                            lamp_cols.push_back([&] {
+                                auto it = m.lamp_colors.find(o.id + "/" + l.id);  // ここで色を変えていればその色
+                                return it != m.lamp_colors.end() && it->second.colors > 0 ? it->second.color_at(SDL_GetTicks()) : l.color_at(SDL_GetTicks());
+                            }());
+            int lamp_sel = -1;
+            for (size_t i = 0; i < lamp_keys.size(); ++i)
+                if (lamp_keys[i] == cg.lamp) lamp_sel = static_cast<int>(i);
+            g.label(x0, Y + 254, "ランプ");
+            g.combo(&cg.lamp, x1, Y + 250, 150, 22, lamp_names, lamp_sel, [&cg, lamp_keys](int i) { cg.lamp = lamp_keys[i]; }, ed);
+            if (lamp_sel >= 0) g.fill({x1 + 156, Y + 252, 26, 18}, Gui::rgb(lamp_cols[lamp_sel])), g.frame({x1 + 156, Y + 252, 26, 18}, kDark);
+            g.label(x1 + 188, Y + 254, "がクリアで付く");
+            // ゲージの色：1 色か、80% 未満と 80% 以上の 2 色（落ちたら終わりのゲージは 1 色だけ）。四角を押すと色の見本が開く
+            g.label(x0, Y + 280, "色");
+            const bool two = cg.colors == 2 && !cg.survival;
+            if (ed) {
+                g.combo(&cg.colors, x1, Y + 276, 60, 22, {"1 色", "2 色"}, cg.colors == 2 ? 1 : 0, [&cg](int i) { cg.colors = i + 1; },
+                        !cg.survival);
+                // 帯と同じく、左が 80% 未満・右が 80% 以上
+                if (two) {
+                    g.label(x1 + 70, Y + 280, "80%未満"), g.color_button(&cg.color_low, x1 + 122, Y + 276, 36, 22);
+                    g.label(x1 + 168, Y + 280, "80%以上"), g.color_button(&cg.color, x1 + 220, Y + 276, 36, 22);
+                } else {
+                    g.color_button(&cg.color, x1 + 70, Y + 276, 36, 22);
+                }
+            } else if (sel < static_cast<int>(standard.size())) {
+                // 本体のゲージ：スキンの絵のままか、1 色・2 色に変える（遊ぶときのゲージもこの色になる）
+                GaugeColors& gc = m.standard_gauges[sel];
+                std::vector<std::string> opts = {"スキンの絵のまま", "1 色"};
+                if (!cg.survival) opts.push_back("2 色");
+                gc.colors = std::min(gc.colors, static_cast<int>(opts.size()) - 1);
+                g.combo(&gc.colors, x1, Y + 276, 120, 22, opts, gc.colors, [&gc](int i) { gc.colors = i; });
+                if (gc.colors == 2) {
+                    g.label(x1 + 128, Y + 280, "80%未満"), g.color_button(&gc.color_low, x1 + 180, Y + 276, 36, 22);
+                    g.label(x1 + 222, Y + 280, "80%以上"), g.color_button(&gc.color, x1 + 274, Y + 276, 36, 22);
+                } else if (gc.colors == 1) {
+                    g.color_button(&gc.color, x1 + 128, Y + 276, 36, 22);
+                }
+                if (gc.colors > 0)
+                    for (int i = 0; i < 50; ++i) {
+                        const uint32_t c = gc.colors == 2 && i < 40 ? gc.color_low : gc.color;
+                        g.fill({x1 + i * 5.0f, Y + 304, 4, 12}, Gui::rgb(c));
+                    }
+            } else {
+                // ほかの MOD のゲージ：その色を見せる（左が 80% 未満、右が 80% 以上）
+                g.fill({x1, Y + 278, 36, 18}, Gui::rgb(two ? cg.color_low : cg.color)), g.frame({x1, Y + 278, 36, 18}, kDark);
+                if (two) g.fill({x1 + 42, Y + 278, 36, 18}, Gui::rgb(cg.color)), g.frame({x1 + 42, Y + 278, 36, 18}, kDark);
+            }
+            // 見本の帯（遊ぶときのゲージと同じく 50 こまで、右の 10 こまが 80% 以上）
+            if (ed)
+                for (int i = 0; i < 50; ++i) {
+                    const uint32_t c = two && i < 40 ? cg.color_low : cg.color;
+                    g.fill({x1 + i * 5.0f, Y + 304, 4, 12}, SDL_Color{static_cast<Uint8>(c >> 16), static_cast<Uint8>(c >> 8), static_cast<Uint8>(c), 255});
+                }
+        }
+    } else if (st.type == "lamps") {
+        // 一覧の頭に見本（灰色）：本体のランプ（色だけ変えられる）と、使っているほかの MOD のランプ（EX-HARD など。見るだけ）。
+        // そのあとにこの MOD のランプ
+        static const std::vector<CustomLampDef> samples = standard_lamp_samples();
+        const int nstd = static_cast<int>(samples.size());
+        std::vector<std::pair<std::string, const CustomLampDef*>> others;  // 鍵（MOD/id）とランプ
+        for (const ModManifest& o : mods)
+            if (&o != &m && in_use(o))
+                for (const CustomLampDef& l : o.lamps) others.push_back({o.id + "/" + l.id, &l});
+        const int ns = nstd + static_cast<int>(others.size());
+        std::vector<std::string> rows;
+        for (int i = 0; i < nstd; ++i) rows.push_back(kStandardLampNames[i]);
+        for (const auto& [key, l] : others) rows.push_back(l->name);
+        for (const CustomLampDef& l : m.lamps) rows.push_back(l.name);
+        g.label(X + 14, Y + 36, st.name);
+        g.listview(X + 14, Y + 54, 140, 230, "ランプ", rows, sel, scroll, ns);
+        int mi = sel - ns;
+        bool has = mi >= 0 && mi < static_cast<int>(m.lamps.size());
+        if (g.button(X + 14, Y + 290, 66, 22, "足す")) {
+            g.unfocus();
+            // 選んでいるもの（ほかの MOD のランプでも）を元にする
+            const CustomLampDef* base = has ? &m.lamps[mi] : sel >= nstd && sel < ns ? others[sel - nstd].second : nullptr;
+            CustomLampDef nl = base ? *base : CustomLampDef{};
+            nl.id = new_id("lamp", m.lamps);
+            if (!base) nl.name = "NEW LAMP", nl.rank = 4.5;
+            m.lamps.push_back(nl);
+            sel = ns + static_cast<int>(m.lamps.size()) - 1;
+        }
+        if (g.button(X + 88, Y + 290, 66, 22, "消す", has)) {
+            g.unfocus();
+            m.lamps.erase(m.lamps.begin() + mi);
+            sel = std::max(0, std::min(sel, ns + static_cast<int>(m.lamps.size()) - 1));
+        }
+        // 足す・消すで選んでいる行が変わったので、引き直す
+        mi = sel - ns;
+        has = mi >= 0 && mi < static_cast<int>(m.lamps.size());
+        const uint64_t now = SDL_GetTicks();
+        const float x0 = X + 166, x1 = X + 214;
+        // 本体のランプのいまの色（色を変えていればその色、無ければスキンの絵の色）
+        auto std_color = [&](int i) {
+            const CustomLampDef& o = m.standard_lamps[i];
+            return o.colors > 0 ? o.color_at(static_cast<double>(now)) : standard_lamp_color(i, now);
+        };
+        // ほかの MOD のランプのいまの色（ここで変えていればその色）
+        auto other_color = [&](const std::string& key, const CustomLampDef& l) {
+            auto it = m.lamp_colors.find(key);
+            return it != m.lamp_colors.end() && it->second.colors > 0 ? it->second.color_at(static_cast<double>(now)) : l.color_at(static_cast<double>(now));
+        };
+        // 選曲画面のバーの見本（左端の帯がランプ）
+        auto bar_sample = [&](float y, uint32_t c, const std::string& title) {
+            g.fill({x1, y, 170, 22}, SDL_Color{40, 44, 60, 255});
+            g.fill({x1 + 2, y + 2, 8, 18}, Gui::rgb(c));
+            g.text->draw(x1 + 18, y + 5, g.font, SDL_Color{255, 255, 255, 255}, title, 0, 0, 0);
+        };
+        const CustomLampDef* cur = nullptr;  // いま選んでいるランプ（本体のものは見本）
+        // 色のえらび方（本体のランプは「スキンの絵のまま」も選べる）、色、点滅の速さを 1 行ずつ
+        // keep：「〜のまま」の選択肢の名前（空なら無し）。from：「〜のまま」から変えるときに写す色
+        auto color_rows = [&](CustomLampDef& l, const std::string& keep, const CustomLampDef* from = nullptr) {
+            g.label(x0, Y + 86, "色");
+            if (!keep.empty())
+                g.combo(&l.colors, x1, Y + 82, 120, 22, {keep, "1 色", "点滅"}, l.colors, [&l, from](int i) {
+                    if (l.colors == 0 && i > 0 && from) l.color = from->color, l.color2 = from->color2, l.blink_ms = from->blink_ms;
+                    l.colors = i;
+                });
+            else
+                g.combo(&l.colors, x1, Y + 82, 120, 22, {"1 色", "点滅"}, l.colors == 2 ? 1 : 0, [&l](int i) { l.colors = i + 1; });
+            if (l.colors >= 1) g.color_button(&l.color, x1, Y + 108, 36, 22);
+            if (l.colors == 2) {
+                g.label(x1 + 44, Y + 112, "と"), g.color_button(&l.color2, x1 + 62, Y + 108, 36, 22);
+                static const int speeds[3] = {1000, 500, 250};
+                int sp = l.blink_ms >= 750 ? 0 : l.blink_ms >= 375 ? 1 : 2;
+                g.label(x0, Y + 138, "速さ");
+                g.combo(&l.blink_ms, x1, Y + 134, 120, 22, {"ゆっくり", "ふつう", "速い"}, sp, [&l](int i) { l.blink_ms = speeds[i]; });
+            }
+        };
+        if (sel >= 0 && sel < nstd) {
+            g.label(x0, Y + 58, "名前"), g.label(x1, Y + 58, kStandardLampNames[sel]);
+            color_rows(m.standard_lamps[sel], "スキンの絵のまま");
+            g.label(x0, Y + 172, "見え方"), bar_sample(Y + 168, std_color(sel), "曲名");
+            cur = &samples[sel];
+        } else if (sel >= nstd && sel < ns) {
+            // ほかの MOD のランプ（EX-HARD など）：名前と強さはその MOD のまま、色だけここで変えられる
+            const auto& [key, l] = others[sel - nstd];
+            CustomLampDef keep;
+            keep.colors = 0;  // 初めは MOD の色のまま
+            CustomLampDef& over = m.lamp_colors.try_emplace(key, keep).first->second;
+            g.label(x0, Y + 58, "名前"), g.label(x1, Y + 58, l->name);
+            color_rows(over, "MOD の色のまま", l);
+            if (over.colors == 0) {
+                g.fill({x1, Y + 110, 36, 18}, Gui::rgb(l->color)), g.frame({x1, Y + 110, 36, 18}, kDark);
+                if (l->colors == 2) g.label(x1 + 44, Y + 112, "と"), g.fill({x1 + 62, Y + 110, 36, 18}, Gui::rgb(l->color2)), g.frame({x1 + 62, Y + 110, 36, 18}, kDark);
+            }
+            g.label(x0, Y + 172, "見え方"), bar_sample(Y + 168, other_color(key, *l), "曲名");
+            cur = l;
+        } else if (has) {
+            CustomLampDef& l = m.lamps[mi];
+            l.as = std::clamp(static_cast<int>(l.rank), 1, 4);  // 絵と記録は、すぐ下の本体のランプのもの
+            g.label(x0, Y + 58, "名前"), g.edit_str(l.name, x1, Y + 54, 150);
+            color_rows(l, "");
+            g.label(x0, Y + 172, "見え方"), bar_sample(Y + 168, l.color_at(static_cast<double>(now)), "曲名");
+            // このランプを付けるゲージ
+            std::string users;
+            for (const ModManifest& o : mods)
+                for (const CustomGaugeDef& cg : o.gauges)
+                    if (cg.lamp_key == m.id + "/" + l.id) users += (users.empty() ? "" : "、") + cg.name;
+            // 長ければ「強い順」の一覧の手前で切る
+            g.label(x0, Y + 204, "使うゲージ");
+            const SDL_Rect clip{static_cast<int>(x1 + 30), static_cast<int>(Y + 200), static_cast<int>(X + 392 - x1 - 30), 20};
+            SDL_SetRenderClipRect(g.r, &clip);
+            g.label(x1 + 30, Y + 204, users.empty() ? "なし" : users);
+            SDL_SetRenderClipRect(g.r, nullptr);
+            cur = &l;
+        }
+        // 強い順の一覧（本体のランプと、使える全部のカスタムランプ）。同じ譜面にランプがいくつかあれば、上のものが出る
+        struct Rung {
+            std::string name;
+            double rank;
+            uint32_t color;
+            const CustomLampDef* lamp;
+        };
+        std::vector<Rung> ladder;
+        for (int i = 0; i < nstd; ++i) ladder.push_back({kStandardLampNames[i], samples[i].rank, std_color(i), &samples[i]});
+        for (const ModManifest& o : mods)
+            if (in_use(o))
+                for (const CustomLampDef& l : o.lamps)
+                    ladder.push_back({l.name, l.rank, &o == &m ? l.color_at(static_cast<double>(now)) : other_color(o.id + "/" + l.id, l), &l});
+        std::stable_sort(ladder.begin(), ladder.end(), [](const Rung& a, const Rung& b) { return a.rank > b.rank; });
+        const float lx = X + 400, ly = Y + 36;
+        g.label(lx, ly, "強い順（上ほど強い）");
+        g.sunken({lx, ly + 18, 164, 234}, kHi);
+        int at = -1;
+        for (size_t i = 0; i < ladder.size() && i < 14; ++i) {
+            const float ry = ly + 20 + i * 16.0f;
+            const bool me = ladder[i].lamp == cur;
+            if (me) at = static_cast<int>(i), g.fill({lx + 2, ry, 160, 16}, kSel);
+            g.fill({lx + 6, ry + 3, 10, 10}, Gui::rgb(ladder[i].color));
+            g.text->draw(lx + 22, ry + 2, g.font, me ? SDL_Color{255, 255, 255, 255} : kText, ladder[i].name, 0, 0, 0);
+        }
+        // 上へ・下へ：FAILED より上、FULL COMBO より下で動かす。動かしたら、新しく隣になった 2 つの間の値にする
+        const bool movable = has && at >= 0;
+        const bool can_up = movable && at >= 1 && ladder[at - 1].rank < 5;
+        const bool can_down = movable && at + 1 < static_cast<int>(ladder.size()) && ladder[at + 1].rank > 1;
+        if (g.button(lx, Y + 290, 78, 22, "上へ", can_up)) {
+            const double hi = at >= 2 ? ladder[at - 2].rank : ladder[at - 1].rank + 1;
+            m.lamps[mi].rank = (ladder[at - 1].rank + hi) / 2;
+        }
+        if (g.button(lx + 86, Y + 290, 78, 22, "下へ", can_down)) {
+            const double lo = at + 2 < static_cast<int>(ladder.size()) ? ladder[at + 2].rank : 0;
+            m.lamps[mi].rank = (ladder[at + 1].rank + lo) / 2;
+        }
+    }
+    if (st.type == "metronome") {
+        // メトロノームの音量（0〜500%。曲の BGM の音量にも合わせて鳴る）
+        g.label(X + 14, Y + 40, st.name);
+        g.label(X + 40, Y + 70, "音量");
+        g.edit_int(m.metronome_volume, X + 90, Y + 66, 60, 20, true, 0, kMaxMetronomeVolume);
+        g.label(X + 156, Y + 70, "%");
+    }
+    if (st.type == "judges") {
+        // 一覧の頭に本体の判定の見本（灰色。変えられない）、そのあとにこの MOD の判定
+        static const std::vector<CustomJudgeDef> samples = standard_judge_samples();
+        const int ns = static_cast<int>(samples.size());
+        std::vector<std::string> rows;
+        for (const CustomJudgeDef& j : samples) rows.push_back((j.id == m.judge_use ? "★ " : "") + j.name);
+        for (size_t i = 0; i < m.judges.size(); ++i)
+            rows.push_back((m.judges[i].id == m.judge_use ? "★ " : "") + std::string("JUDGE") + std::to_string(i + 1) + " " + m.judges[i].name);
+        g.label(X + 14, Y + 36, st.name);
+        // 遊ぶ判定（選ばなければ判定は変わらず、記録も分けない）
+        {
+            // 並びは選曲画面の判定の欄と同じ：使わない（OFF）・本体の判定・JUDGE1〜
+            std::vector<std::string> names = {"使わない"}, ids = {""};
+            for (const char* k : kStandardJudgeIds) names.push_back(k), ids.push_back(k);
+            for (size_t i = 0; i < m.judges.size(); ++i)
+                names.push_back("JUDGE" + std::to_string(i + 1) + " " + m.judges[i].name), ids.push_back(m.judges[i].id);
+            int use = 0;
+            for (size_t i = 0; i < ids.size(); ++i)
+                if (ids[i] == m.judge_use) use = static_cast<int>(i);
+            g.label(X + 270, Y + 34, "遊ぶ判定");
+            g.combo(&m.judge_use, X + 334, Y + 30, 200, 22, names, use, [&m, ids](int i) { m.judge_use = ids[i]; });
+        }
+        g.listview(X + 14, Y + 54, 140, 230, "判定", rows, sel, scroll, ns);
+        int mi = sel - ns;
+        // 選曲画面の判定の欄に出せるのは JUDGE1〜9（スキンに用意したコマの数）まで
+        if (g.button(X + 14, Y + 290, 66, 22, "足す", m.judges.size() < 9)) {
+            g.unfocus();
+            // 選んでいるもの（見本でも）を元にする。何も選んでいなければ #RANK どおり
+            CustomJudgeDef nj = sel >= 0 && sel < ns ? samples[sel] : mi >= 0 && mi < static_cast<int>(m.judges.size()) ? m.judges[mi] : samples[0];
+            nj.id = new_id("judge", m.judges);
+            if (sel >= 0 && sel < ns) nj.name = std::string(samples[sel].name) + " の改造";
+            m.judges.push_back(nj);
+            sel = ns + static_cast<int>(m.judges.size()) - 1;
+        }
+        if (g.button(X + 88, Y + 290, 66, 22, "消す", mi >= 0 && mi < static_cast<int>(m.judges.size()))) {
+            g.unfocus();
+            if (m.judges[mi].id == m.judge_use) m.judge_use.clear();
+            m.judges.erase(m.judges.begin() + mi);
+            sel = std::max(0, std::min(sel, ns + static_cast<int>(m.judges.size()) - 1));
+        }
+        // 足す・消すで選んでいる行が変わったので、引き直す
+        mi = sel - ns;
+        const bool sample = sel >= 0 && sel < ns, has = mi >= 0 && mi < static_cast<int>(m.judges.size());
+        if (sample || has) {
+            CustomJudgeDef ro = sample ? samples[sel] : CustomJudgeDef{};
+            CustomJudgeDef& j = sample ? ro : m.judges[mi];
+            const bool ed = !sample;
+            const float x0 = X + 166, x1 = X + 250;
+            g.label(x0, Y + 62, "名前");
+            if (ed) g.edit_str(j.name, x1, Y + 58, 180);
+            else g.label(x1, Y + 62, j.name);
+            g.label(x1, Y + 88, "早い側"), g.label(x1 + 70, Y + 88, "遅い側"), g.label(x1 + 140, Y + 88, "（ms）");
+            static const char* names[4] = {"PGREAT", "GREAT", "GOOD", "BAD"};
+            int* w[4] = {j.pgreat, j.great, j.good, j.bad};
+            for (int k = 0; k < 4; ++k) {
+                const float y = Y + 104 + k * 24;
+                g.label(x0, y + 4, names[k]);
+                g.edit_int(w[k][0], x1, y, 60, 20, ed, 0, 1000);
+                g.edit_int(w[k][1], x1 + 70, y, 60, 20, ed, 0, 1000);
+            }
+            g.label(x0, Y + 206, "空POOR"), g.edit_int(j.empty_poor, x1, Y + 202, 60, 20, ed, 0, 5000);
+            g.label(x1 + 70, Y + 206, "（早い側だけ）");
+            g.check(x0, Y + 232, "#RANK に合わせて伸び縮み（NORMAL の幅で書く）", j.rank_scaled, ed);
+            // 幅の図：真ん中がちょうど、左が早い・右が遅い。外から BAD・GOOD・GREAT・PGREAT
+            const float cx = X + 166 + 190, sc = 190.0f / 220.0f, by = Y + 262;
+            g.fill({cx - 190, by, 380, 16}, SDL_Color{40, 44, 60, 255});
+            const SDL_Color cols[4] = {{255, 255, 255, 255}, {255, 210, 60, 255}, {90, 200, 90, 255}, {150, 90, 200, 255}};
+            for (int k = 3; k >= 0; --k) {
+                const float l = std::min(w[k][0], 220) * sc, r = std::min(w[k][1], 220) * sc;
+                g.fill({cx - l, by + 2, l + r, 12}, cols[k]);
+            }
+            g.line(cx, by - 2, cx, by + 18, kText);
+            g.label(cx - 190, by + 20, "← 早い"), g.label(cx + 190, by + 20, "遅い →", true, 2);
+            // 色の意味
+            static const char* legend[4] = {"PGREAT", "GREAT", "GOOD", "BAD"};
+            float lx = cx - 120;
+            for (int k = 0; k < 4; ++k) {
+                g.fill({lx, by + 22, 10, 10}, cols[k]), g.frame({lx, by + 22, 10, 10}, kDark);
+                lx += 14 + g.label(lx + 14, by + 20, legend[k]) + 8;
+            }
+        }
+    }
+    if (g.button(X + 484, Y + 312, 80, 24, "戻る")) {
+        g.unfocus();
+        done();
+    }
+}
 
 }  // namespace
 
@@ -345,7 +835,11 @@ int main(int, char**) {
         return 1;
     }
     AppConfig cfg;
+    migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の LR2files へ
     const std::string cfg_path = config_path();
+    std::error_code first_ec;
+    // 初めての起動（設定ファイルがまだ無い）なら、案内の画面から始める
+    const bool first_run = !fs::exists(fs::u8path(cfg_path), first_ec);
     cfg.load(cfg_path);
 
     SDL_Window* window = SDL_CreateWindow("BMjoy SETUP", kW, kH, SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -378,7 +872,31 @@ int main(int, char**) {
     std::vector<std::string> mod_errors;
     std::vector<ModManifest> mods = scan_mods(official_mods_dir(), true, &mod_errors);
     for (ModManifest& m : scan_mods(user_mods_dir(), false, &mod_errors)) mods.push_back(std::move(m));
+    // 詳細の設定（GAS の順番・カスタムゲージ）を重ねる
+    for (ModManifest& m : mods) apply_mod_settings(m, mod_settings_path(m.id));
+    resolve_gauge_lamps(mods);
+    // 詳細の設定は、変えたらすぐ書く（「戻る」を押さずに閉じたり起動したりしても消えないように）。
+    // 書いた中身を覚えておき、毎フレーム比べて変わっていたら書く
+    std::map<std::string, std::string> saved_settings;
+    for (const ModManifest& m : mods)
+        if (!m.settings.empty()) saved_settings[m.id] = mod_settings_json(m);
+    auto save_changed_settings = [&] {
+        for (const ModManifest& m : mods) {
+            if (m.settings.empty()) continue;
+            std::string j = mod_settings_json(m);
+            if (j == saved_settings[m.id]) continue;
+            if (save_mod_settings(m, mod_settings_path(m.id))) saved_settings[m.id] = std::move(j);
+            else std::printf("MOD の設定を書けない: %s\n", mod_settings_path(m.id).c_str());
+        }
+    };
     int mod_sel = mods.empty() ? -1 : 0, mod_scroll = 0;
+    // MOD の詳細の画面（-1 なら一覧）。det_sel は詳細の中の一覧で選んでいる行
+    int mod_detail = -1, det_page = 0, det_sel = 0, det_scroll = 0, det_add = 0;
+    if (const char* d = dev_env("BMJ_LAUNCHER_DETAIL"))  // 開発用：その MOD の詳細を開いておく
+        for (size_t i = 0; i < mods.size(); ++i)
+            if (mods[i].id == d) mod_detail = mod_sel = static_cast<int>(i);
+    if (const char* d = dev_env("BMJ_LAUNCHER_PAGE")) det_page = std::atoi(d);  // 開発用：詳細の何枚目を開くか
+    if (const char* d = dev_env("BMJ_LAUNCHER_ROW")) det_sel = std::atoi(d);    // 開発用：詳細の一覧の何行目を選ぶか
     int song_sel = -1, song_scroll = 0, table_sel = -1, table_scroll = 0;
     std::string table_input;
     std::string message;
@@ -399,6 +917,43 @@ int main(int, char**) {
     } job;
     bool quit = false, start = false;
     bool autostart = dev_env("BMJ_LAUNCHER_AUTOSTART") != nullptr;  // 開発用：すぐ起動する
+    // LR2 から引き継ぐ（BMJOY タブのボタンと、初めての起動の案内から）
+    auto start_lr2_import = [&](const std::string& dir) {
+        job.running = true, job.done = false;
+        job.status = "LR2 から引き継いでいます";
+        job.th = std::thread([&job, dir, base = cfg] {
+            AppConfig c = base;
+            SongDb db;
+            Lr2ImportResult r;
+            if (!db.open(song_db_path())) r.error = "曲データベースを開けません";
+            else r = import_from_lr2(dir, c, db, [&job](const std::string& s) {
+                std::lock_guard<std::mutex> lock(job.mu);
+                job.status = s;
+            }, base.lr2_root);
+            // 素材（スキン・サウンドセット・BGM など）も BMjoy のフォルダ（実行ファイルの横）に写し、そこから読む
+            AssetCopyResult ac;
+            if (r.ok) {
+                if (c.lr2_root.empty()) c.lr2_root = dir;
+                const char* exe_dir = SDL_GetBasePath();
+                ac = copy_lr2_assets(c, exe_dir ? exe_dir : "", [&job](const std::string& s) {
+                    std::lock_guard<std::mutex> lock(job.mu);
+                    job.status = s;
+                });
+            }
+            std::lock_guard<std::mutex> lock(job.mu);
+            job.assets = ac;
+            job.cfg = c;
+            job.res = r;
+            job.song_dirs = c.song_dirs;
+            job.custom_folder_dirs = c.custom_folder_dirs;
+            job.tables = c.tables;
+            job.skin_custom = c.skin_custom;
+            job.done = true;
+        });
+    };
+    // 初めての起動の案内（-1 なら出さない。0 = 始め方を選ぶ 1 = 曲フォルダ 2 = 難易度表）
+    int guide = first_run ? 0 : -1;
+    if (const char* gs = dev_env("BMJ_LAUNCHER_GUIDE")) guide = std::atoi(gs);  // 開発用：案内の画面を出す
 
     while (!quit) {
         g.pressed = false, g.wheel = 0, g.typed.clear();
@@ -427,6 +982,25 @@ int main(int, char**) {
                 if (fs::is_directory(p, ec) && std::find(cfg.song_dirs.begin(), cfg.song_dirs.end(), p) == cfg.song_dirs.end())
                     cfg.song_dirs.push_back(p), tab = 1;
             }
+        }
+        // 開発用：BMJ_LAUNCHER_CLICKS の「x,y;x,y;…」（/ でも区切れる）を、5 フレーム目から 3 フレームごとに 1 つずつ押したことにする
+        static std::vector<std::pair<float, float>> dev_clicks = [] {
+            std::vector<std::pair<float, float>> v;
+            if (const char* c = dev_env("BMJ_LAUNCHER_CLICKS"))
+                for (const char* q = c; *q;) {
+                    float x = 0, y = 0;
+                    int n = 0;
+                    if (std::sscanf(q, "%f,%f%n", &x, &y, &n) != 2) break;
+                    v.push_back({x, y});
+                    q += n;
+                    if (*q == ';' || *q == '/') ++q;  // Windows の起動の口では ; が使えないので / でも区切れる
+                }
+            return v;
+        }();
+        static int dev_frame = 0;
+        if (++dev_frame >= 5 && (dev_frame - 5) % 3 == 0 && static_cast<size_t>((dev_frame - 5) / 3) < dev_clicks.size()) {
+            const auto [cx, cy] = dev_clicks[(dev_frame - 5) / 3];
+            g.mx = cx, g.my = cy, g.pressed = true;
         }
         {
             std::lock_guard<std::mutex> lock(g_dialog.mu);
@@ -457,12 +1031,61 @@ int main(int, char**) {
             g.line(rc.x + rc.w - 2, rc.y + 1, rc.x + rc.w - 2, rc.y + rc.h, kShadow);
             if (on) g.line(rc.x + 1, page.y, rc.x + rc.w - 2, page.y, kFace);
             g.label(tx + 5, rc.y + (on ? 3 : 2), tabs[i]);
-            if (g.clicked(rc)) tab = i;
+            if (guide < 0 && g.clicked(rc)) tab = i;
             tx += w;
         }
 
         const float X = page.x, Y = page.y;  // ページの左上（以下の座標は LR2 SETUP の画面に合わせてある）
-        if (tab == 0) {
+        if (guide >= 0) {
+            // 初めての起動の案内。タブの上に重ねて出し、終わったら普通の設定の画面に戻る
+            g.fill({page.x - 2, 36, page.w + 4, page.h + 22}, kFace);
+            g.raised({page.x, 40, page.w, page.h + 16});
+            const float gx = X + 24, gy = 56;
+            if (guide == 0) {
+                g.label(gx, gy, "BMjoy へようこそ");
+                g.label(gx, gy + 30, "はじめに、遊ぶための準備をします。");
+                g.label(gx, gy + 50, "LR2 を使っていたなら、曲フォルダ・記録・スキン・設定をまとめて引き継げます。");
+                if (g.button(gx, gy + 90, 240, 30, "LR2 から引き継ぐ", !job.running))
+                    pick_folder(window, [&](const std::string& dir) {
+                        start_lr2_import(dir);
+                        guide = -1, tab = 6;  // 引き継ぎの進み具合は BMJOY タブの下に出る
+                    });
+                g.label(gx + 256, gy + 99, "LR2 のフォルダ（LR2body.exe がある所）を選びます");
+                if (g.button(gx, gy + 136, 240, 30, "新しく始める")) guide = 1;
+                g.label(gx + 256, gy + 145, "曲フォルダと難易度表を登録します");
+                if (g.button(gx, gy + 182, 240, 30, "あとで設定する")) guide = -1;
+                g.label(gx + 256, gy + 191, "いつもの設定の画面へ進みます");
+            } else if (guide == 1) {
+                g.label(gx, gy, "1 / 2　曲フォルダ");
+                g.label(gx, gy + 24, "BMS の曲が入っているフォルダを登録します。フォルダをここへドロップしても登録できます。");
+                g.listview(gx, gy + 50, 530, 200, "path", cfg.song_dirs, song_sel, song_scroll);
+                if (g.button(gx, gy + 260, 74, 22, "追加"))
+                    pick_folder(window, [&](const std::string& p) {
+                        if (std::find(cfg.song_dirs.begin(), cfg.song_dirs.end(), p) == cfg.song_dirs.end()) cfg.song_dirs.push_back(p);
+                    });
+                bool has = song_sel >= 0 && song_sel < static_cast<int>(cfg.song_dirs.size());
+                if (g.button(gx + 84, gy + 260, 74, 22, "登録解除", has)) cfg.song_dirs.erase(cfg.song_dirs.begin() + song_sel), song_sel = -1;
+                if (g.button(gx + 376, gy + 300, 74, 24, "戻る")) guide = 0;
+                if (g.button(gx + 456, gy + 300, 74, 24, "次へ", !cfg.song_dirs.empty())) guide = 2;
+            } else {
+                g.label(gx, gy, "2 / 2　難易度表");
+                g.label(gx, gy + 24, "使いたい難易度表の URL を登録します（あとから BMJOY タブでも登録できます）。");
+                g.listview(gx, gy + 50, 530, 170, "url", cfg.tables, table_sel, table_scroll);
+                g.edit_str(table_input, gx, gy + 230, 380, 20);
+                if (g.button(gx + 390, gy + 229, 64, 22, "追加", !table_input.empty())) {
+                    if (std::find(cfg.tables.begin(), cfg.tables.end(), table_input) == cfg.tables.end()) cfg.tables.push_back(table_input);
+                    table_input.clear();
+                }
+                bool has = table_sel >= 0 && table_sel < static_cast<int>(cfg.tables.size());
+                if (g.button(gx + 462, gy + 229, 68, 22, "登録解除", has)) cfg.tables.erase(cfg.tables.begin() + table_sel), table_sel = -1;
+                if (g.button(gx + 376, gy + 300, 74, 24, "戻る")) guide = 1;
+                if (g.button(gx + 456, gy + 300, 74, 24, "完了")) {
+                    guide = -1;
+                    cfg.save(cfg_path);
+                    message = "準備ができました。「BMjoyの起動」で始めると、最初に曲フォルダを読み込みます";
+                }
+            }
+        } else if (tab == 0) {
             // LR2 SETUP（100201）の MAIN と同じ並び。プレイヤーと IR は BMjoy に無いので灰色
             g.group(X + 9, Y + 9, 556, 99, "PLAYER");
             g.label(X + 26, Y + 40, "PLAYER ID");
@@ -596,39 +1219,7 @@ int main(int, char**) {
         } else if (tab == 6) {
             // BMjoy だけの設定（LR2 SETUP には無い）
             if (g.button(X + 268, Y + 10, 146, 22, "LR2 から引き継ぐ", !job.running)) {
-                pick_folder(window, [&](const std::string& dir) {
-                    job.running = true, job.done = false;
-                    job.status = "LR2 から引き継いでいます";
-                    job.th = std::thread([&job, dir, base = cfg] {
-                        AppConfig c = base;
-                        SongDb db;
-                        Lr2ImportResult r;
-                        if (!db.open(song_db_path())) r.error = "曲データベースを開けません";
-                        else r = import_from_lr2(dir, c, db, [&job](const std::string& s) {
-                            std::lock_guard<std::mutex> lock(job.mu);
-                            job.status = s;
-                        }, base.lr2_root);
-                        // 素材（スキン・サウンドセット・BGM など）も BMjoy のフォルダ（実行ファイルの横）に写し、そこから読む
-                        AssetCopyResult ac;
-                        if (r.ok) {
-                            if (c.lr2_root.empty()) c.lr2_root = dir;
-                            const char* exe_dir = SDL_GetBasePath();
-                            ac = copy_lr2_assets(c, exe_dir ? exe_dir : "", [&job](const std::string& s) {
-                                std::lock_guard<std::mutex> lock(job.mu);
-                                job.status = s;
-                            });
-                        }
-                        std::lock_guard<std::mutex> lock(job.mu);
-                        job.assets = ac;
-                        job.cfg = c;
-                        job.res = r;
-                        job.song_dirs = c.song_dirs;
-                        job.custom_folder_dirs = c.custom_folder_dirs;
-                        job.tables = c.tables;
-                        job.skin_custom = c.skin_custom;
-                        job.done = true;
-                    });
-                });
+                pick_folder(window, start_lr2_import);
             }
             if (g.button(X + 420, Y + 10, 146, 22, "曲データベースの再作成")) {
                 SongDb db;
@@ -638,7 +1229,8 @@ int main(int, char**) {
             g.check(X + 20, Y + 12, "曲フォルダを監視する", cfg.watch_folders);
             g.label(X + 20, Y + 44, "素材のフォルダ");
             g.edit_str(cfg.lr2_root, X + 124, Y + 38, 360, 20);
-            if (g.button(X + 492, Y + 37, 74, 22, "参照")) pick_folder(window, [&](const std::string& p) { cfg.lr2_root = p; });
+            if (g.button(X + 492, Y + 37, 74, 22, "参照"))
+                pick_folder(window, [&](const std::string& p) { cfg.lr2_root = p; }, cfg.lr2_root.empty() ? base_dir() : cfg.lr2_root);
             g.label(X + 20, Y + 74, "解像度");
             static const std::vector<std::string> res_names = {"スキンに合わせる", "SD（640×480）", "HD（1280×720）", "FHD（1920×1080）"};
             static const char* res_vals[] = {"", "sd", "hd", "fhd"};
@@ -651,23 +1243,11 @@ int main(int, char**) {
             int fi = 0;
             while (fi < 9 && fps_vals[fi] != cfg.fps) ++fi;
             g.combo(&cfg.fps, X + 392, Y + 68, 174, 20, fps_names, fi == 9 ? 0 : fi, [&](int i) { cfg.fps = fps_vals[i]; });
-            struct SkinRow { const char* name; std::string* path; };
-            SkinRow skins[] = {{"選曲スキン", &cfg.select_skin}, {"プレイスキン", &cfg.play_skin}, {"リザルトスキン", &cfg.result_skin},
-                               {"コースリザルト", &cfg.courseresult_skin}};
+            // スキンはゲームの中のスキンセレクトで選ぶ（LR2 と同じ）ので、ここには出さない
             float y = Y + 102;
-            for (SkinRow& sr : skins) {
-                g.label(X + 20, y + 6, sr.name);
-                std::string shown = sr.path->empty() ? "（既定）" : *sr.path;
-                g.edit_str(*sr.path, X + 124, y, 280, 20);
-                if (sr.path->empty() && g.focus != sr.path) g.label(X + 128, y + 4, "（既定）", false);
-                std::string* target = sr.path;
-                if (g.button(X + 412, y - 1, 74, 22, "参照")) pick_skin(window, [target](const std::string& p) { *target = p; });
-                if (g.button(X + 492, y - 1, 74, 22, "既定に戻す")) sr.path->clear();
-                y += 28;
-            }
             g.label(X + 20, y + 10, "難易度表（URL）");
-            g.listview(X + 20, y + 28, 546, 76, "url", cfg.tables, table_sel, table_scroll);
-            float by = y + 112;
+            g.listview(X + 20, y + 26, 546, 162, "url", cfg.tables, table_sel, table_scroll);
+            float by = y + 196;
             g.edit_str(table_input, X + 20, by, 380, 20);
             if (g.button(X + 410, by - 1, 74, 22, "追加", !table_input.empty())) {
                 if (std::find(cfg.tables.begin(), cfg.tables.end(), table_input) == cfg.tables.end()) cfg.tables.push_back(table_input);
@@ -675,10 +1255,14 @@ int main(int, char**) {
             }
             bool has = table_sel >= 0 && table_sel < static_cast<int>(cfg.tables.size());
             if (g.button(X + 492, by - 1, 74, 22, "登録解除", has)) cfg.tables.erase(cfg.tables.begin() + table_sel), table_sel = -1;
-            g.check(X + 20, by + 30, "選曲中に曲のプレビューを鳴らす", cfg.preview);
+            g.check(X + 20, by + 26, "選曲中に曲のプレビューを鳴らす", cfg.preview);
+            g.check(X + 20, by + 48, "キー音を 16 ビットで読み込む", cfg.sound_16bit);
+            g.check(X + 280, by + 48, "メモリを節約する", cfg.low_memory);
 #ifdef _WIN32
-            g.check(X + 280, by + 30, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
+            g.check(X + 280, by + 26, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
 #endif
+        } else if (tab == 8 && mod_detail >= 0 && mod_detail < static_cast<int>(mods.size())) {
+            draw_mod_detail(g, mods, mods[mod_detail], cfg.enabled_mods, X, Y, det_page, det_sel, det_scroll, det_add, [&] { mod_detail = -1; });
         } else if (tab == 8) {
             // MOD：使うものに印を付ける。プレーに影響する MOD（判定・譜面・入力）を使うと、記録はふだんのものと分かれる
             float y = Y + 12;
@@ -707,6 +1291,7 @@ int main(int, char**) {
             y += rows * row_h + 14;
             if (mod_sel >= 0 && mod_sel < static_cast<int>(mods.size())) {
                 const ModManifest& m = mods[mod_sel];
+                if (!m.settings.empty() && g.button(X + 488, y - 4, 76, 22, "詳細")) mod_detail = mod_sel, det_page = 0, det_sel = 0, det_scroll = 0, det_add = 0;
                 g.label(X + 14, y, m.author.empty() ? m.id : m.id + "  作者：" + m.author);
                 g.label(X + 14, y + 18, m.description);
                 std::string parts;
@@ -759,21 +1344,19 @@ int main(int, char**) {
                 job.th.join();
                 job.running = false;
                 if (job.res.ok) {
-                    cfg.song_dirs = job.song_dirs;
-                    cfg.custom_folder_dirs = job.custom_folder_dirs;
-                    cfg.tables = job.tables;
-                    cfg.skin_custom = job.skin_custom;
-                    if (job.assets.ok) {
-                        // 素材の場所は BMjoy のフォルダに付け替えたもの
-                        const AppConfig& n = job.cfg;
-                        cfg.lr2_root = n.lr2_root, cfg.play_skin = n.play_skin, cfg.result_skin = n.result_skin;
-                        cfg.courseresult_skin = n.courseresult_skin, cfg.select_skin = n.select_skin, cfg.decide_skin = n.decide_skin;
-                        cfg.keyconfig_skin = n.keyconfig_skin, cfg.sound_set = n.sound_set;
-                        cfg.skin_custom = n.skin_custom, cfg.skin_adjust = n.skin_adjust, cfg.custom_folder_dirs = n.custom_folder_dirs;
+                    // 引き継いだ設定を全部使う。素材を写せなかったときだけ、素材の場所は今のままにする
+                    AppConfig n = job.cfg;
+                    if (!job.assets.ok) {
+                        n.lr2_root = cfg.lr2_root, n.play_skin = cfg.play_skin, n.result_skin = cfg.result_skin;
+                        n.courseresult_skin = cfg.courseresult_skin, n.select_skin = cfg.select_skin, n.decide_skin = cfg.decide_skin;
+                        n.keyconfig_skin = cfg.keyconfig_skin, n.sound_set = cfg.sound_set, n.skin_adjust = cfg.skin_adjust;
                     }
+                    cfg = n;
                     message = "LR2 から引き継ぎました（曲フォルダ " + std::to_string(job.res.song_dirs) + "、譜面 " +
                               std::to_string(job.res.charts) + "、スコア " + std::to_string(job.res.scores) + "、難易度表 " +
-                              std::to_string(job.res.tables) + "、スキン " + std::to_string(job.res.skins) + "）";
+                              std::to_string(job.res.tables) + "、スキン " + std::to_string(job.res.skins) + "、設定 " +
+                              std::to_string(job.res.settings) + "、お気に入り " + std::to_string(job.res.favorites) +
+                              (job.res.keyconfig ? "、キーコンフィグ" : "") + "）";
                 } else {
                     message = job.res.error;
                 }
@@ -795,7 +1378,7 @@ int main(int, char**) {
             std::string err;
             if (!cfg.save(cfg_path)) {
                 message = "設定を保存できません: " + cfg_path;
-            } else if (std::printf("本体を起動します\n"), !launch_body(err)) {
+            } else if (save_changed_settings(), std::printf("本体を起動します\n"), !launch_body(err)) {
                 message = err;
                 std::printf("%s\n", err.c_str());
             } else {
@@ -806,13 +1389,18 @@ int main(int, char**) {
             // 開発用：BMJ_LAUNCHER_TAB のタブを1枚保存して終わる
             static int frames = 0;
             if (const char* t = dev_env("BMJ_LAUNCHER_TAB")) tab = std::atoi(t);
-            if (++frames == 10) {
+            // 押す操作（BMJ_LAUNCHER_CLICKS）があれば、押し終わってから撮る
+            if (++frames == 10 + 3 * static_cast<int>(dev_clicks.size())) {
                 if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
                 quit = true;
             }
         }
+        save_changed_settings();  // MOD の詳細の設定が変わっていれば書く
         SDL_RenderPresent(r);
     }
+    // 打ちかけの欄も確定してから、残っている変更を書く
+    g.unfocus();
+    save_changed_settings();
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(window);
     SDL_Quit();

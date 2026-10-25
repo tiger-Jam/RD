@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
 #include "audio/dsp.h"
+#include "audio/sound_bank.h"
 #include "test.h"
 
 using namespace bmj;
@@ -186,4 +188,20 @@ TEST(dsp_pitch_shifter_changes_pitch_only) {
     same.process(out.data(), 4800);
     CHECK(out == in);
     CHECK_EQ(same.latency_frames(), 0);
+}
+
+TEST(dsp_16bit_samples_mix_like_float) {
+    // 16 ビットで持った音も、float で持った音とほぼ同じに鳴る（1/32767 の丸めの差だけ）。持つ大きさは半分
+    Sample s;
+    for (int i = 0; i < 100; ++i) s.pcm.push_back(std::sin(i * 0.3f) * 0.8f), s.pcm.push_back(std::cos(i * 0.3f) * 0.5f);
+    const Sample f = s;
+    s.to_16bit();
+    CHECK(s.pcm.empty() && s.pcm16.size() == f.pcm.size() && s.frames() == f.frames() && !s.empty());
+    std::vector<float> gain(60, 1.0f), a(120, 0.0f), b(120, 0.0f);
+    double pa = 0.5, pb = 0.5;
+    CHECK(mix_resampled(f.pcm.data(), f.frames(), pa, 1.5, false, gain.data(), 0.7f, a.data(), 60));
+    CHECK(mix_resampled(s.pcm16.data(), s.frames(), pb, 1.5, false, gain.data(), 0.7f, b.data(), 60));
+    float worst = 0;
+    for (size_t i = 0; i < a.size(); ++i) worst = std::max(worst, std::abs(a[i] - b[i]));
+    CHECK(worst < 1e-4f);
 }

@@ -1,5 +1,7 @@
 #include "app/lr2_import.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -94,6 +96,180 @@ int import_lr2_skin_custom(const std::string& lr2_dir, const std::string& skin_r
     return count;
 }
 
+int import_lr2_settings(const std::string& xml, AppConfig& cfg) {
+    // <name>数</name> を、その節（<play> など）の中から読む
+    auto section = [&](const char* name) {
+        const std::string open = std::string("<") + name + ">", close = std::string("</") + name + ">";
+        size_t a = xml.find(open), b = a == std::string::npos ? a : xml.find(close, a);
+        return a == std::string::npos || b == std::string::npos ? std::string() : xml.substr(a, b - a);
+    };
+    int count = 0;
+    auto num = [&](const std::string& sec, const char* tag, auto& field, int lo, int hi) {
+        const std::regex re(std::string("<") + tag + ">\\s*(-?\\d+)\\s*</" + tag + ">");
+        std::smatch m;
+        if (!std::regex_search(sec, m, re)) return;
+        int v = std::clamp(std::atoi(m[1].str().c_str()), lo, hi);
+        using T = std::decay_t<decltype(field)>;
+        field = static_cast<T>(v);
+        ++count;
+    };
+    const std::string play = section("play"), sound = section("sound"), select = section("select"), system = section("system");
+    // 遊び方（LR2: config.xml の <play>）
+    num(play, "hs", cfg.hi_speed, 10, 990);
+    num(play, "hsmax", cfg.hs_max, 10, 990);
+    num(play, "hsmin", cfg.hs_min, 10, 990);
+    num(play, "hsmargin", cfg.hs_margin, 1, 100);
+    num(play, "hstype", cfg.hs_fix, 0, 4);
+    num(play, "shutter", cfg.lane_cover_v, 0, 100);
+    num(play, "shuttertype", cfg.lane_cover, 0, 1);
+    num(play, "shuttermargin", cfg.shutter_margin, 1, 100);
+    num(play, "gauge", cfg.gauge, 0, 5);
+    num(play, "random", cfg.random, 0, 5);
+    num(play, "effect", cfg.effect, 0, 3);
+    num(play, "autojudgeadjust", cfg.auto_adjust, 0, 2);
+    num(play, "judgetime", cfg.judge_timing, -199, 199);
+    num(play, "bga", cfg.bga, 0, 3);
+    num(play, "bgasize", cfg.bga_size, 0, 1);
+    num(play, "poorbga", cfg.poor_bga_ms, 0, 10000);
+    num(play, "ghost", cfg.ghost, 0, 3);
+    num(play, "scoregraph", cfg.score_graph, 0, 1);
+    num(play, "target", cfg.target, 0, 8);
+    if (cfg.target > 5) cfg.target = 0;  // 6〜8 は IR のターゲット（BMjoy には無い）
+    num(play, "defaulttarget", cfg.target_percent, 50, 100);
+    num(play, "replaysave", cfg.replay_save, 0, 4);
+    num(play, "basespeed", cfg.base_speed, 10, 1000);
+    num(play, "disableleftclickexit", cfg.no_right_click_exit, 0, 1);
+    // 音（<sound>）
+    num(sound, "volumeflag", cfg.volume_on, 0, 1);
+    num(sound, "volumemaster", cfg.vol_master, 0, 100);
+    num(sound, "volumekey", cfg.vol_key, 0, 100);
+    num(sound, "volumebgm", cfg.vol_bgm, 0, 100);
+    num(sound, "eqflag", cfg.sound_fx.eq_on, 0, 1);
+    for (int i = 0; i < 7; ++i) num(sound, ("eqp" + std::to_string(i)).c_str(), cfg.sound_fx.eq[i], -100, 100);
+    num(sound, "pitchflag", cfg.sound_fx.pitch_on, 0, 1);
+    num(sound, "pitchtype", cfg.sound_fx.pitch_type, 0, 2);
+    num(sound, "pitchp", cfg.sound_fx.pitch, -100, 100);
+    for (int i = 0; i < 3; ++i) {
+        FxSlot& f = cfg.sound_fx.fx[i];
+        const std::string n = "_" + std::to_string(i);
+        num(sound, ("fxflag" + n).c_str(), f.on, 0, 1);
+        num(sound, ("fxtype" + n).c_str(), f.type, 0, 100);
+        num(sound, ("fxtarget" + n).c_str(), f.target, 0, 100);
+        num(sound, ("fxp1" + n).c_str(), f.p1, -1000, 1000);
+        num(sound, ("fxp2" + n).c_str(), f.p2, -1000, 1000);
+    }
+    cfg.sound_fx.clamp();
+    // 選曲（<select>）。ソートと鍵盤数の絞り込みは、BMjoy では beatoraja の並びなので写さない
+    num(select, "difficulty", cfg.select_difficulty, 0, 5);
+    num(select, "searchmax", cfg.search_max, 0, 100000);
+    num(select, "speedfirst", cfg.select_speed_first, 1, 5000);
+    num(select, "speednext", cfg.select_speed_next, 1, 5000);
+    num(select, "folderlamp", cfg.folder_lamp, 0, 1);
+    num(select, "preview", cfg.preview, 0, 1);
+    num(select, "levelbarflash_5", cfg.levelbar_5, 1, 99);
+    num(select, "levelbarflash_7", cfg.levelbar_7, 1, 99);
+    num(select, "levelbarflash_9", cfg.levelbar_9, 1, 99);
+    // 画面など（<system>）
+    num(system, "vsync", cfg.vsync, 0, 1);
+    num(system, "inputinterval", cfg.input_interval, 0, 1000);
+    num(system, "titleflash", cfg.title_flash, 0, 100000);
+    num(system, "windowsize_x", cfg.window_w, 0, 16384);
+    num(system, "windowsize_y", cfg.window_h, 0, 16384);
+    return count;
+}
+
+namespace {
+
+// DirectInput のキー番号 → SDL のスキャンコード（LR2 のキーボードの割り当て）
+SDL_Scancode dik_to_scancode(int dik) {
+    static const std::map<int, SDL_Scancode> table = {
+        {0x01, SDL_SCANCODE_ESCAPE}, {0x02, SDL_SCANCODE_1}, {0x03, SDL_SCANCODE_2}, {0x04, SDL_SCANCODE_3},
+        {0x05, SDL_SCANCODE_4}, {0x06, SDL_SCANCODE_5}, {0x07, SDL_SCANCODE_6}, {0x08, SDL_SCANCODE_7},
+        {0x09, SDL_SCANCODE_8}, {0x0A, SDL_SCANCODE_9}, {0x0B, SDL_SCANCODE_0}, {0x0C, SDL_SCANCODE_MINUS},
+        {0x0D, SDL_SCANCODE_EQUALS}, {0x0E, SDL_SCANCODE_BACKSPACE}, {0x0F, SDL_SCANCODE_TAB}, {0x10, SDL_SCANCODE_Q},
+        {0x11, SDL_SCANCODE_W}, {0x12, SDL_SCANCODE_E}, {0x13, SDL_SCANCODE_R}, {0x14, SDL_SCANCODE_T},
+        {0x15, SDL_SCANCODE_Y}, {0x16, SDL_SCANCODE_U}, {0x17, SDL_SCANCODE_I}, {0x18, SDL_SCANCODE_O},
+        {0x19, SDL_SCANCODE_P}, {0x1A, SDL_SCANCODE_LEFTBRACKET}, {0x1B, SDL_SCANCODE_RIGHTBRACKET},
+        {0x1C, SDL_SCANCODE_RETURN}, {0x1D, SDL_SCANCODE_LCTRL}, {0x1E, SDL_SCANCODE_A}, {0x1F, SDL_SCANCODE_S},
+        {0x20, SDL_SCANCODE_D}, {0x21, SDL_SCANCODE_F}, {0x22, SDL_SCANCODE_G}, {0x23, SDL_SCANCODE_H},
+        {0x24, SDL_SCANCODE_J}, {0x25, SDL_SCANCODE_K}, {0x26, SDL_SCANCODE_L}, {0x27, SDL_SCANCODE_SEMICOLON},
+        {0x28, SDL_SCANCODE_APOSTROPHE}, {0x29, SDL_SCANCODE_GRAVE}, {0x2A, SDL_SCANCODE_LSHIFT},
+        {0x2B, SDL_SCANCODE_BACKSLASH}, {0x2C, SDL_SCANCODE_Z}, {0x2D, SDL_SCANCODE_X}, {0x2E, SDL_SCANCODE_C},
+        {0x2F, SDL_SCANCODE_V}, {0x30, SDL_SCANCODE_B}, {0x31, SDL_SCANCODE_N}, {0x32, SDL_SCANCODE_M},
+        {0x33, SDL_SCANCODE_COMMA}, {0x34, SDL_SCANCODE_PERIOD}, {0x35, SDL_SCANCODE_SLASH}, {0x36, SDL_SCANCODE_RSHIFT},
+        {0x37, SDL_SCANCODE_KP_MULTIPLY}, {0x38, SDL_SCANCODE_LALT}, {0x39, SDL_SCANCODE_SPACE},
+        {0x3A, SDL_SCANCODE_CAPSLOCK}, {0x3B, SDL_SCANCODE_F1}, {0x3C, SDL_SCANCODE_F2}, {0x3D, SDL_SCANCODE_F3},
+        {0x3E, SDL_SCANCODE_F4}, {0x3F, SDL_SCANCODE_F5}, {0x40, SDL_SCANCODE_F6}, {0x41, SDL_SCANCODE_F7},
+        {0x42, SDL_SCANCODE_F8}, {0x43, SDL_SCANCODE_F9}, {0x44, SDL_SCANCODE_F10}, {0x45, SDL_SCANCODE_NUMLOCKCLEAR},
+        {0x46, SDL_SCANCODE_SCROLLLOCK}, {0x47, SDL_SCANCODE_KP_7}, {0x48, SDL_SCANCODE_KP_8}, {0x49, SDL_SCANCODE_KP_9},
+        {0x4A, SDL_SCANCODE_KP_MINUS}, {0x4B, SDL_SCANCODE_KP_4}, {0x4C, SDL_SCANCODE_KP_5}, {0x4D, SDL_SCANCODE_KP_6},
+        {0x4E, SDL_SCANCODE_KP_PLUS}, {0x4F, SDL_SCANCODE_KP_1}, {0x50, SDL_SCANCODE_KP_2}, {0x51, SDL_SCANCODE_KP_3},
+        {0x52, SDL_SCANCODE_KP_0}, {0x53, SDL_SCANCODE_KP_PERIOD}, {0x57, SDL_SCANCODE_F11}, {0x58, SDL_SCANCODE_F12},
+        {0x70, SDL_SCANCODE_INTERNATIONAL2},  // カナ
+        {0x73, SDL_SCANCODE_INTERNATIONAL1},  // ろ（＼_）
+        {0x79, SDL_SCANCODE_INTERNATIONAL4},  // 変換
+        {0x7B, SDL_SCANCODE_INTERNATIONAL5},  // 無変換
+        {0x7D, SDL_SCANCODE_INTERNATIONAL3},  // ￥
+        {0x90, SDL_SCANCODE_KP_EQUALS}, {0x91, SDL_SCANCODE_LEFTBRACKET},  // @（JIS）は [ の位置
+        {0x92, SDL_SCANCODE_APOSTROPHE},                                  // :（JIS）
+        {0x9C, SDL_SCANCODE_KP_ENTER}, {0x9D, SDL_SCANCODE_RCTRL}, {0xB5, SDL_SCANCODE_KP_DIVIDE},
+        {0xB8, SDL_SCANCODE_RALT}, {0xC7, SDL_SCANCODE_HOME}, {0xC8, SDL_SCANCODE_UP}, {0xC9, SDL_SCANCODE_PAGEUP},
+        {0xCB, SDL_SCANCODE_LEFT}, {0xCD, SDL_SCANCODE_RIGHT}, {0xCF, SDL_SCANCODE_END}, {0xD0, SDL_SCANCODE_DOWN},
+        {0xD1, SDL_SCANCODE_PAGEDOWN}, {0xD2, SDL_SCANCODE_INSERT}, {0xD3, SDL_SCANCODE_DELETE},
+        {0xDB, SDL_SCANCODE_LGUI}, {0xDC, SDL_SCANCODE_RGUI}, {0xDD, SDL_SCANCODE_APPLICATION}};
+    auto it = table.find(dik);
+    return it != table.end() ? it->second : SDL_SCANCODE_UNKNOWN;
+}
+
+}  // namespace
+
+bool import_lr2_keyconfig(const std::string& path, KeyConfig& out) {
+    std::string xml = read_all(fs::u8path(path));
+    if (xml.empty()) return false;
+    // LR2 の keyNN → BMjoy のボタン（1P の分。key10 / key11 は皿の 2 方向、key12 が START、key13 が SELECT）
+    const std::pair<const char*, int> slots[] = {{"key01", kKey1},     {"key02", kKey1 + 1}, {"key03", kKey1 + 2},
+                                                 {"key04", kKey1 + 3}, {"key05", kKey1 + 4}, {"key06", kKey1 + 5},
+                                                 {"key07", kKey1 + 6}, {"key10", kScratchA}, {"key11", kScratchB},
+                                                 {"key12", kStart},    {"key13", kSelect}};
+    KeyConfig k = out;
+    clear_bindings(k);
+    bool any = false;
+    static const std::regex id_re("<id>\\s*(\\d+)\\s*</id>");
+    for (const auto& [tag, button] : slots) {
+        const std::string open = std::string("<") + tag + ">", close = std::string("</") + tag + ">";
+        size_t a = xml.find(open), b = a == std::string::npos ? a : xml.find(close, a);
+        if (a == std::string::npos || b == std::string::npos) continue;
+        const std::string body = xml.substr(a, b - a);
+        for (auto it = std::sregex_iterator(body.begin(), body.end(), id_re); it != std::sregex_iterator(); ++it) {
+            const int id = std::atoi((*it)[1].str().c_str());
+            Binding bind;
+            if (id > 0 && id < 0x100) {
+                const SDL_Scancode sc = dik_to_scancode(id);
+                if (sc == SDL_SCANCODE_UNKNOWN) continue;
+                bind.type = Binding::Type::Key, bind.index = sc;
+            } else if (id >= 0x100 && id < 0x200) {
+                // パッド：32 個ずつ。1 台目はどのパッドでもよいことにし、2 台目からは機器の番号を付ける
+                const int pad = (id - 0x100) / 0x20, bit = (id - 0x100) % 0x20;
+                bind.device = pad == 0 ? 0 : pad + 1;
+                if (bit == 0) bind.type = Binding::Type::JoyAxis, bind.index = 1, bind.dir = 1;        // 下
+                else if (bit == 1) bind.type = Binding::Type::JoyAxis, bind.index = 0, bind.dir = -1;  // 左
+                else if (bit == 2) bind.type = Binding::Type::JoyAxis, bind.index = 0, bind.dir = 1;   // 右
+                else if (bit == 3) bind.type = Binding::Type::JoyAxis, bind.index = 1, bind.dir = -1;  // 上
+                else bind.type = Binding::Type::JoyButton, bind.index = bit - 4;
+            } else if (id >= 0x200 && id < 0x200 + 128) {
+                bind.type = Binding::Type::Midi, bind.index = id - 0x200;
+            } else {
+                continue;
+            }
+            std::vector<Binding>& v = k.buttons[button];
+            if (std::find(v.begin(), v.end(), bind) == v.end() && static_cast<int>(v.size()) < kKeySlots) v.push_back(bind), any = true;
+        }
+    }
+    if (!any) return false;
+    out = k;
+    return true;
+}
+
 Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, SongDb& db,
                                 const std::function<void(const std::string&)>& status, const std::string& skin_root) {
     Lr2ImportResult res;
@@ -124,6 +300,14 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     cfg.song_dirs = dirs;
     cfg.custom_folder_dirs = custom_dirs;
     res.song_dirs = static_cast<int>(dirs.size());
+    // 遊び方・音・選曲・画面の設定
+    res.settings = import_lr2_settings(xml, cfg);
+    // キーコンフィグ（BMjoy のキーコンフィグを LR2 のものに置き換える）
+    {
+        KeyConfig k;
+        if (!k.load(keyconfig_path())) k = KeyConfig::lr2_default();
+        if (import_lr2_keyconfig((root / "Config" / "keyconfig.xml").string(), k)) res.keyconfig = k.save(keyconfig_path());
+    }
 
     // 難易度表（すでに登録してあるものは足さない）
     for (const std::string& u : SongDb::lr2_table_urls((root / "Database" / "song.db").string()))
@@ -137,6 +321,8 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     res.charts = n;
     if (status) status("LR2 の段位とコースを引き継いでいます");
     res.courses = std::max(0, import_lr2_courses((root / "Database" / "song.db").string()));
+    if (status) status("LR2 のお気に入りを引き継いでいます");
+    res.favorites = std::max(0, db.import_lr2_favorites((root / "Database" / "song.db").string()));
     if (!res.player.empty()) {
         if (status) status("LR2 のスコアを取り込んでいます");
         fs::path score = root / "Database" / "Score" / (res.player + ".db");

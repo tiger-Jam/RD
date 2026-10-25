@@ -439,8 +439,15 @@ DifficultyTable update_table(const std::string& cache_dir, const std::string& ur
         return cached;
     }
     fresh.fetched = now_sec();
-    std::ofstream(base + ".header.json", std::ios::binary) << header;
-    std::ofstream(base + ".data.json", std::ios::binary) << data;
+    // 書き終えてから差し替える（選曲画面が読んでいる最中に、書きかけのファイルを読ませない）
+    auto write_whole = [](const std::string& path, const std::string& body) {
+        const std::string tmp = path + ".tmp";
+        { std::ofstream(tmp, std::ios::binary) << body; }
+        std::error_code ec;
+        std::filesystem::rename(tmp, path, ec);
+    };
+    write_whole(base + ".header.json", header);
+    write_whole(base + ".data.json", data);
     std::ofstream(base + ".meta") << fresh.fetched << "\n" << url << "\n";
     return fresh;
 }

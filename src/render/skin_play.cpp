@@ -1,3 +1,4 @@
+#include "skin/bmjoy_buttons.h"
 #include "render/skin_play.h"
 
 #include <algorithm>
@@ -67,8 +68,8 @@ bool PlayContext::option_raw(int option) const {
     case 50: return ret;              // オフライン
     case 80: return in_result || !timers.on(40) ? ret : !ret;  // 読み込み中（リザルトではタイマー40が立たないので真）
     case 81: return !in_result && timers.on(40) ? ret : !ret;
-    case 54: return assist ? !ret : ret;  // 皿の自動演奏 OFF / ON
-    case 55: return assist ? ret : !ret;
+    case 54: return ret;  // 皿の自動演奏 OFF / ON（BMjoy には無い）
+    case 55: return !ret;
     case 308: return st && st->exscore() == 0 ? ret : !ret;  // このプレイの EX スコアが 0
     case 318: {  // 2P 側の EX が 0（ターゲット無しを含む）
         const Ghost* g = p2_ghost();
@@ -403,7 +404,9 @@ int PlayContext::bp_now() const {
 
 int PlayContext::button(int type) const {
     switch (type) {
-    case 40: return judge ? judge->gauge_type() : gauge_type;  // ゲージの種類
+    // ゲージの種類（カスタムゲージは、落ちるものを HARD、落ちないものを GROOVE として見せる）
+    case 40: return judge ? judge->display_gauge_type() : gauge_type;
+    case kClearLabelButton: return judge ? judge->display_gauge_type() : gauge_type;  // 今回のクリア（絵の選び方はゲージの種類と同じ）
     // エフェクタの種類・オンオフ・掛け先、イコライザ、ピッチ・方式
     case 20: case 21: case 22: return sound_fx ? sound_fx->fx[type - 20].type : 0;
     case 23: case 24: case 25: return sound_fx && sound_fx->fx[type - 23].on ? 1 : 0;

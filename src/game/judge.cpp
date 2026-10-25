@@ -90,6 +90,8 @@ JudgeEngine::JudgeEngine(const Chart& chart, const JudgeConfig& cfg)
             t[j] = g.delta[j].fixed + (stats_.total_notes > 0 ? g.delta[j].total * chart.total / stats_.total_notes : 0.0);
         ctable_.push_back(t);
     }
+    cur_custom_ = cfg.custom_play;
+    if (!cfg_.gas_chain.empty()) gas_set(cfg_.gas_chain[0]);
     if (cfg.course >= 0 && cfg.carry) {
         gauge_.set_hp(cfg.carry_hp);
         stats_.course_combo = cfg.carry_combo;
@@ -114,6 +116,38 @@ bool JudgeEngine::failed() const {
     return gauge_failed(gauge_, gauge_type_);
 }
 
+bool JudgeEngine::gas_entry_failed(int e) const {
+    if (e < kGaugeCount) return gauge_failed(gauge_, e) && !(e == kGroove || e == kEasy);
+    const CustomGaugeDef& g = cfg_.custom_gauges[e - kGaugeCount];
+    return g.survival && chp_[e - kGaugeCount] < 2.0;
+}
+
+bool JudgeEngine::gas_entry_cleared(int e) const {
+    if (e >= kGaugeCount) return custom_cleared(e - kGaugeCount);
+    if (stats_.note_current < stats_.total_notes) return false;
+    return (e == kGroove || e == kEasy) ? gauge_.hp(e) >= 80.0 : gauge_.hp(e) >= 2.0;
+}
+
+void JudgeEngine::gas_set(int e) {
+    if (e < kGaugeCount) gauge_type_ = e, cur_custom_ = -1;
+    else cur_custom_ = e - kGaugeCount;
+}
+
+void JudgeEngine::gas_step() {
+    const std::vector<int>& c = cfg_.gas_chain;
+    while (gas_pos_ + 1 < c.size() && gas_entry_failed(c[gas_pos_])) gas_set(c[++gas_pos_]);
+}
+
+void JudgeEngine::gas_settle() {
+    const std::vector<int>& c = cfg_.gas_chain;
+    for (size_t p = gas_pos_; p < c.size(); ++p)
+        if (gas_entry_cleared(c[p])) {
+            gas_pos_ = p;
+            gas_set(c[p]);
+            return;
+        }
+}
+
 bool JudgeEngine::custom_cleared(int i) const {
     if (stats_.note_current < stats_.total_notes) return false;
     const CustomGaugeDef& g = cfg_.custom_gauges[i];
@@ -122,7 +156,7 @@ bool JudgeEngine::custom_cleared(int i) const {
 
 void JudgeEngine::apply_judge(int judge, double mul) {
     gauge_.apply_judge(judge, mul);
-    if (cfg_.gas) gauge_type_ = gas_select(gauge_, cfg_.gauge_type);
+    if (cfg_.gas && cfg_.gas_chain.empty()) gauge_type_ = gas_select(gauge_, cfg_.gauge_type);
     for (size_t i = 0; i < chp_.size(); ++i) {
         const CustomGaugeDef& g = cfg_.custom_gauges[i];
         double& hp = chp_[i];
@@ -133,6 +167,7 @@ void JudgeEngine::apply_judge(int judge, double mul) {
         if (!g.survival) hp = std::max(hp, g.floor);
         else if (hp < 2.0) hp = 0;
     }
+    gas_step();
 }
 
 void JudgeEngine::apply_mine(int damage, int lane, int64_t t_us) {
@@ -152,7 +187,8 @@ void JudgeEngine::apply_mine(int damage, int lane, int64_t t_us) {
         if (!g.survival) chp_[i] = std::max(chp_[i], g.floor);
         else if (chp_[i] < 2.0) chp_[i] = 0;
     }
-    if (cfg_.gas) gauge_type_ = gas_select(gauge_, cfg_.gauge_type);
+    if (cfg_.gas && cfg_.gas_chain.empty()) gauge_type_ = gas_select(gauge_, cfg_.gauge_type);
+    gas_step();
 }
 
 // LR2: JudgeToScore + ApplyJudgeNote
@@ -228,21 +264,6 @@ void JudgeEngine::advance(int64_t t_us) {
             if (l.cur >= l.notes.size()) break;
             size_t before = l.cur;
             int before_count = stats_.note_current;
-            if (lane_auto(lane) && !cfg_.autoplay) {
-                // 皿の自動演奏（LR2: Play.cpp の bmsobj_note.autoplay）。始点で音を鳴らし、終点（LN）で数だけ進める
-                while (l.sound_cur < l.notes.size() && chart_.notes[l.notes[l.sound_cur]].time_us <= t_us) {
-                    const Note& s = chart_.notes[l.notes[l.sound_cur++]];
-                    if (s.kind != NoteKind::Mine && s.sound > 0) play_.push_back(s.sound);
-                }
-                const Note& n = chart_.notes[l.notes[l.cur]];
-                int64_t due = n.kind == NoteKind::Long ? n.end_us : n.time_us;
-                if (due > t_us) break;
-                if (n.kind != NoteKind::Mine) stats_.note_current += is_charge(n) ? 2 : 1;
-                done_[l.notes[l.cur]] = true;
-                l.note_val = n.sound;
-                l.cur++;
-                continue;
-            }
             if (cfg_.autoplay) {
                 const Note& n = chart_.notes[l.notes[l.cur]];
                 size_t idx = l.notes[l.cur];
@@ -273,7 +294,7 @@ void JudgeEngine::press(int lane, int64_t t_us) {
     if (lane < 0 || lane >= kLaneCount) return;
     advance(t_us);
     held_[lane] = true;
-    if (cfg_.autoplay || lane_auto(lane)) return;  // 自動演奏のレーンは押しても何もしない（LR2: Play.cpp:1138）
+    if (cfg_.autoplay) return;  // オートプレイでは押しても何もしない（LR2: Play.cpp:1138）
     Lane& l = lanes_[lane];
     if (l.cur >= l.notes.size()) {
         if (l.note_val > 0) play_.push_back(l.note_val);
@@ -286,7 +307,7 @@ void JudgeEngine::release(int lane, int64_t t_us) {
     if (lane < 0 || lane >= kLaneCount) return;
     advance(t_us);
     held_[lane] = false;
-    if (cfg_.autoplay || lane_auto(lane)) return;
+    if (cfg_.autoplay) return;
     Lane& l = lanes_[lane];
     if (l.cur >= l.notes.size()) return;
     proc(lane, 3, to_ms(t_us), t_us);

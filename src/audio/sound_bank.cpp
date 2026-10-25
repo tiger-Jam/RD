@@ -1,6 +1,7 @@
 #include "audio/sound_bank.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 #include <atomic>
@@ -136,9 +137,16 @@ bool decode_sound_file(const std::string& path, uint32_t out_rate, Sample& out, 
     return ok;
 }
 
+void Sample::to_16bit() {
+    pcm16.resize(pcm.size());
+    for (size_t i = 0; i < pcm.size(); ++i)
+        pcm16[i] = static_cast<int16_t>(std::lround(std::clamp(pcm[i], -1.0f, 1.0f) * 32767.0f));
+    std::vector<float>().swap(pcm);
+}
+
 void SoundBank::load(const std::vector<std::string>& paths, uint32_t out_rate, int threads,
                      std::vector<std::string>* errors, std::atomic<int>* done,
-                     const std::vector<std::pair<int64_t, int64_t>>* ranges) {
+                     const std::vector<std::pair<int64_t, int64_t>>* ranges, bool pcm16) {
     samples_.assign(paths.size(), Sample{});
     // 同じファイルは 1 回だけデコードする
     std::map<std::string, size_t> first_of;
@@ -157,6 +165,7 @@ void SoundBank::load(const std::vector<std::string>& paths, uint32_t out_rate, i
                 std::lock_guard<std::mutex> lock(err_mu);
                 errors->push_back(err);
             }
+            if (pcm16) decoded[k].to_16bit();
         }
     };
     if (threads < 1) threads = 1;
@@ -181,10 +190,18 @@ void SoundBank::load(const std::vector<std::string>& paths, uint32_t out_rate, i
             --uses[k];
             int64_t f0 = std::clamp<int64_t>(start * out_rate / 1000000, 0, src.frames());
             int64_t f1 = end < 0 ? src.frames() : std::clamp<int64_t>(end * out_rate / 1000000, f0, src.frames());
-            samples_[i].pcm.assign(src.pcm.begin() + f0 * 2, src.pcm.begin() + f1 * 2);
+            if (!src.pcm16.empty()) samples_[i].pcm16.assign(src.pcm16.begin() + f0 * 2, src.pcm16.begin() + f1 * 2);
+            else samples_[i].pcm.assign(src.pcm.begin() + f0 * 2, src.pcm.begin() + f1 * 2);
         }
         if (done) done->fetch_add(1);
     }
+}
+
+void SoundBank::scale(size_t id, float gain) {
+    if (id >= samples_.size()) return;
+    Sample& s = samples_[id];
+    for (float& v : s.pcm) v *= gain;
+    for (int16_t& v : s.pcm16) v = static_cast<int16_t>(std::clamp(static_cast<int>(v * gain), -32768, 32767));
 }
 
 }  // namespace bmj

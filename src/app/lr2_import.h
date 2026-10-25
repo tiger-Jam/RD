@@ -6,6 +6,7 @@
 
 #include "app/config.h"
 #include "db/song_db.h"
+#include "input/keyconfig.h"
 
 namespace bmj {
 
@@ -19,7 +20,19 @@ struct Lr2ImportResult {
     int tables = 0;          // 新しく登録した難易度表の数
     int skins = 0;           // カスタマイズを引き継いだスキンの数
     int courses = 0;         // 引き継いだ段位・コースの数
+    int settings = 0;        // 引き継いだ遊び方などの設定の数
+    bool keyconfig = false;  // キーコンフィグを引き継いだ
+    int favorites = 0;       // 引き継いだお気に入り・IGNORE の数
 };
+
+// LR2 の設定（config.xml の中身）から、遊び方・音・選曲・画面の設定を cfg に写す。写した項目の数を返す。
+// 選曲のソートと鍵盤数の絞り込みは、BMjoy では beatoraja の並びなので写さない
+int import_lr2_settings(const std::string& xml, AppConfig& cfg);
+
+// LR2 のキーコンフィグ（LR2files/Config/keyconfig.xml）を BMjoy の形にする（1P の鍵盤・皿・START・SELECT）。
+// LR2 の入力の番号は、0〜255 がキーボード（DirectInput のキー番号）、256〜511 がパッド（パッドごとに 32 個のビット。
+// 0 下 1 左 2 右 3 上、4 から先がボタン）、512〜 が MIDI のノート。読めなければ false
+bool import_lr2_keyconfig(const std::string& path, KeyConfig& out);
 
 // LR2 の設定（LR2files/Config/config.xmh、無ければ config.xml）の曲フォルダを cfg.song_dirs にし、
 // LR2 の曲データベースにある難易度表（難易度表の管理ツールが書いたもの）の URL を cfg.tables に足し、

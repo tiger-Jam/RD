@@ -1,0 +1,12 @@
+{
+  // メトロノーム：遊んでいる間、譜面の拍に合わせて音を鳴らす（小節の頭は accent、ほかの拍は beat）。
+  // 拍は BPM と STOP から数え、曲と同じ時計で鳴らすので、FREQ で速さを変えても拍からずれない。
+  // 音のファイルは小さめ（500% で割れない大きさ）に作ってあるので、音量は 400% くらいがふつう
+  "id": "metronome",
+  "name": "メトロノーム",
+  "version": "1",
+  "author": "BMjoy",
+  "description": "譜面の BPM に合わせてメトロノームの音を鳴らす",
+  "settings": [{ "type": "metronome", "name": "音量" }],
+  "metronome": { "accent": "accent.wav", "beat": "beat.wav", "volume": 400 }
+}

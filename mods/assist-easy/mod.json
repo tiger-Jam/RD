@@ -1,13 +1,15 @@
 {
+  // ASSIST EASY：EASY よりクリアの線が低く（60%）、減りも小さいゲージ（数値は beatoraja の ASSIST EASY）
   "id": "assist-easy",
   "name": "ASSIST EASY",
-  "version": "1",
+  "version": "2",
   "author": "BMjoy",
-  "description": "EASY より減りが小さく、60% でクリアになるゲージ",
+  "description": "GAUGE に ASSIST EASY を足す",
   "gauges": [
     {
       "id": "assist-easy",
       "name": "ASSIST EASY",
+      "frame": 8,
       "initial": 20,
       "border": 60,
       "survival": false,
@@ -16,7 +18,11 @@
         "pgreat": { "total": 1.0 }, "great": { "total": 1.0 }, "good": { "total": 0.5 },
         "bad": -1.5, "poor": -3, "empty_poor": -0.5
       },
-      "lamp": { "name": "ASSIST EASY", "color": "#b080ff", "rank": 1.5, "as": 1 }
+      "colors": 2,
+      "color": "#ff3030",
+      "color_low": "#b080ff",
+      "lamp": "assist-easy"
     }
-  ]
+  ],
+  "lamps": [{ "id": "assist-easy", "name": "ASSIST EASY", "color": "#b080ff", "rank": 1.5 }]
 }

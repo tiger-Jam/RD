@@ -1,4 +1,5 @@
 #include <chrono>
+#include "app/course.h"
 #include "db/difficulty_table.h"
 #include "test.h"
 
@@ -95,4 +96,20 @@ TEST(table_course_group_label) {
     CHECK(label({"Stella Skill Simulator 4th st0", "STELLA技能訓練 st Boys"}) == "Stella");  // 大文字小文字は区別しない
     CHECK(label({"Alpha", "Beta"}) == "表");  // 共通の頭が無ければ表の名前
     CHECK(label({"発狂初段", "発狂二段", "overjoy"}, "c07125de4ed7fbe7cb066cc41e50e51e") == "発狂BMS段位認定 2012");
+}
+
+TEST(table_course_hash) {
+    TableCourse tc;
+    tc.constraints = {"grade_mirror", "gauge_lr2"};
+    tc.charts.resize(2);
+    tc.charts[0].md5 = std::string(32, 'a'), tc.charts[1].md5 = std::string(32, 'b');
+    // LR2 の段位と同じ形（頭の 11 文字目が種類）。LR2 から取り込んだ記録はこれで引く
+    const std::string normal = make_table_course(tc, {}, {}).hash;
+    CHECK(normal == "00000000002" + std::string(21, '0') + std::string(32, 'a') + std::string(32, 'b'));
+    // ノースピ・No Good は、同じ曲でも普通の段位と別の記録にする
+    tc.constraints = {"grade_mirror", "no_speed"};
+    const std::string nospeed = make_table_course(tc, {}, {}).hash;
+    tc.constraints = {"grade_mirror", "no_good"};
+    const std::string nogood = make_table_course(tc, {}, {}).hash;
+    CHECK(nospeed != normal && nogood != normal && nospeed != nogood);
 }

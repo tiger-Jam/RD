@@ -1,5 +1,7 @@
 #include "app/config.h"
 
+#include "util/data_dir.h"
+
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -7,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "util/data_dir.h"
 #include "util/text.h"
 
 namespace bmj {
@@ -67,17 +70,17 @@ bool AppConfig::load(const std::string& path) {
         std::string key(trim(l.substr(0, eq)));
         std::string val(trim(l.substr(eq + 1)));
         int iv = std::atoi(val.c_str());
-        if (key == "lr2_root") lr2_root = val;
-        else if (key == "play_skin") play_skin = val;
-        else if (key == "result_skin") result_skin = val;
-        else if (key == "courseresult_skin") courseresult_skin = val;
-        else if (key == "select_skin") select_skin = val;
-        else if (key == "decide_skin") decide_skin = val;
-        else if (key == "keyconfig_skin") keyconfig_skin = val;
-        else if (key == "sound_set") sound_set = val;
+        if (key == "lr2_root") lr2_root = from_portable(val);
+        else if (key == "play_skin") play_skin = from_portable(val);
+        else if (key == "result_skin") result_skin = from_portable(val);
+        else if (key == "courseresult_skin") courseresult_skin = from_portable(val);
+        else if (key == "select_skin") select_skin = from_portable(val);
+        else if (key == "decide_skin") decide_skin = from_portable(val);
+        else if (key == "keyconfig_skin") keyconfig_skin = from_portable(val);
+        else if (key == "sound_set") sound_set = from_portable(val);
         else if (key == "skin_res") skin_res = val;
-        else if (key == "song_dir") song_dirs.push_back(val);
-        else if (key == "custom_folder_dir") custom_folder_dirs.push_back(val);
+        else if (key == "song_dir") song_dirs.push_back(from_portable(val));
+        else if (key == "custom_folder_dir") custom_folder_dirs.push_back(from_portable(val));
         else if (key == "mod") enabled_mods.push_back(val);
         else if (key == "custom_gauge") custom_gauge = val;
         else if (key == "table") tables.push_back(val);
@@ -132,7 +135,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "lift_v") lift_v = iv;
         else if (key == "effect") effect = iv;
         else if (key == "random") random = iv;
-        else if (key == "assist") assist = iv != 0;
+        else if (key == "seven_key") seven_key = iv != 0;
         else if (key == "gauge") gauge = iv;
         else if (key == "gas") gas = iv != 0;
         else if (key == "fps") fps = iv;
@@ -144,6 +147,8 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "db_update") db_update = iv;
         else if (key == "select_speed_first") select_speed_first = iv;
         else if (key == "preview") preview = iv != 0;
+        else if (key == "sound_16bit") sound_16bit = iv != 0;
+        else if (key == "low_memory") low_memory = iv != 0;
         else if (key == "base_speed") base_speed = iv;
         else if (key == "poor_bga_ms") poor_bga_ms = iv;
         else if (key == "input_interval") input_interval = iv;
@@ -156,7 +161,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "audio_exclusive") audio_exclusive = iv != 0;
         else if (key == "audio_buffer") audio_buffer = iv;
         else if (key.rfind("skin_custom ", 0) == 0)
-            skin_custom[std::string(trim(std::string_view(key).substr(12)))] = parse_skin_custom(val);
+            skin_custom[from_portable(std::string(trim(std::string_view(key).substr(12))))] = parse_skin_custom(val);
         else if (key.rfind("skin_adjust ", 0) == 0) {
             // skin_adjust <スキンのパス> = 位置x,位置y,拡大x,拡大y,判定x,判定y,大きさx,大きさy,制限,ノーツx,ノーツy
             SkinAdjust a;
@@ -165,7 +170,7 @@ bool AppConfig::load(const std::string& path) {
             std::istringstream in(val);
             std::string item;
             for (int i = 0; i < 11 && std::getline(in, item, ','); ++i) *f[i] = std::atoi(item.c_str());
-            skin_adjust[std::string(trim(std::string_view(key).substr(12)))] = a;
+            skin_adjust[from_portable(std::string(trim(std::string_view(key).substr(12))))] = a;
         }
     }
     sound_fx.clamp();
@@ -176,17 +181,17 @@ bool AppConfig::save(const std::string& path) const {
     std::ofstream f(path);
     if (!f) return false;
     f << "# BMjoy の設定\n";
-    f << "lr2_root = " << lr2_root << "\n";
-    f << "play_skin = " << play_skin << "\n";
-    f << "result_skin = " << result_skin << "\n";
-    f << "courseresult_skin = " << courseresult_skin << "\n";
-    f << "select_skin = " << select_skin << "\n";
-    f << "decide_skin = " << decide_skin << "\n";
-    f << "keyconfig_skin = " << keyconfig_skin << "\n";
-    f << "sound_set = " << sound_set << "\n";
+    f << "lr2_root = " << to_portable(lr2_root) << "\n";
+    f << "play_skin = " << to_portable(play_skin) << "\n";
+    f << "result_skin = " << to_portable(result_skin) << "\n";
+    f << "courseresult_skin = " << to_portable(courseresult_skin) << "\n";
+    f << "select_skin = " << to_portable(select_skin) << "\n";
+    f << "decide_skin = " << to_portable(decide_skin) << "\n";
+    f << "keyconfig_skin = " << to_portable(keyconfig_skin) << "\n";
+    f << "sound_set = " << to_portable(sound_set) << "\n";
     f << "skin_res = " << skin_res << "\n";
-    for (const std::string& d : song_dirs) f << "song_dir = " << d << "\n";
-    for (const std::string& d : custom_folder_dirs) f << "custom_folder_dir = " << d << "\n";
+    for (const std::string& d : song_dirs) f << "song_dir = " << to_portable(d) << "\n";
+    for (const std::string& d : custom_folder_dirs) f << "custom_folder_dir = " << to_portable(d) << "\n";
     for (const std::string& m : enabled_mods) f << "mod = " << m << "\n";
     f << "# カスタムゲージで遊ぶならその鍵（MOD の id/ゲージの id）\n";
     f << "custom_gauge = " << custom_gauge << "\n";
@@ -242,7 +247,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "lift_v = " << lift_v << "  # LIFT の量 0〜100\n";
     f << "effect = " << effect << "  # 0=OFF 1=HIDDEN 2=SUDDEN 3=HID+SUD\n";
     f << "random = " << random << "  # 0=OFF 1=MIRROR 2=RANDOM 3=S-RANDOM 4=SCATTER 5=CONVERGE\n";
-    f << "assist = " << (assist ? 1 : 0) << "  # 皿の自動演奏\n";
+    f << "seven_key = " << (seven_key ? 1 : 0) << "  # 7k モード（7 鍵の譜面の皿を除く）\n";
     f << "gauge = " << gauge << "  # 0=GROOVE 1=HARD 2=DEATH 3=EASY 4=P-ATTACK 5=G-ATTACK\n";
     f << "gas = " << (gas ? 1 : 0) << "\n";
     f << "fps = " << fps << "  # 0=モニタに合わせる -1=上限なし それ以外=その値\n";
@@ -254,6 +259,8 @@ bool AppConfig::save(const std::string& path) const {
     f << "db_update = " << db_update << "  # 0=起動時に曲フォルダを読み直す 1=手動（選曲画面の F8 で今のフォルダだけ）\n";
     f << "select_speed_first = " << select_speed_first << "\n";
     f << "preview = " << (preview ? 1 : 0) << "  # 選曲中に曲を鳴らす\n";
+    f << "sound_16bit = " << (sound_16bit ? 1 : 0) << "  # 1=キー音を 16 ビットで持つ（メモリが半分）\n";
+    f << "low_memory = " << (low_memory ? 1 : 0) << "  # 1=メモリを節約する（スキンの画像を二重に持たない・フォルダの中身を写さない）\n";
     f << "base_speed = " << base_speed << "\n";
     f << "poor_bga_ms = " << poor_bga_ms << "\n";
     f << "input_interval = " << input_interval << "\n";
@@ -265,74 +272,34 @@ bool AppConfig::save(const std::string& path) const {
     f << "joystick_directinput = " << (joystick_directinput ? 1 : 0) << "  # Windows：1 にすると SDL の DirectInput も使う（起動が遅くなる環境がある）\n";
     f << "audio_exclusive = " << (audio_exclusive ? 1 : 0) << "  # 1 = Windows の WASAPI 排他モード（音の遅れが小さい）\n";
     f << "audio_buffer = " << audio_buffer << "  # 1 回分のフレーム数。0 = 自動\n";
-    for (const auto& [skin, sel] : skin_custom) f << "skin_custom " << skin << " = " << format_skin_custom(sel) << "\n";
+    for (const auto& [skin, sel] : skin_custom) f << "skin_custom " << to_portable(skin) << " = " << format_skin_custom(sel) << "\n";
     for (const auto& [skin, a] : skin_adjust)
         if (!a.is_default())
-            f << "skin_adjust " << skin << " = " << a.shift_x << "," << a.shift_y << "," << a.rate_x << "," << a.rate_y << ","
+            f << "skin_adjust " << to_portable(skin) << " = " << a.shift_x << "," << a.shift_y << "," << a.rate_x << "," << a.rate_y << ","
               << a.judge_x << "," << a.judge_y << "," << a.size_x << "," << a.size_y << "," << a.dark << "," << a.note_x << ","
               << a.note_y << "\n";
     return static_cast<bool>(f);
 }
 
-std::string config_path() {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = dir ? std::string(dir) + "config.txt" : "config.txt";
-    SDL_free(dir);
-    return p;
-}
+std::string config_path() { return data_dir() + "Config/config.txt"; }
 
-std::string replay_path(const std::string& sha256) {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = (dir ? std::string(dir) : std::string()) + "replay/" + sha256 + ".bjr";
-    SDL_free(dir);
-    return p;
-}
+std::string replay_path(const std::string& sha256) { return data_dir() + "Replay/" + sha256 + ".bjr"; }
 
 std::string input_log_path(const std::string& sha256, int64_t played_at) {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = (dir ? std::string(dir) : std::string()) + "inputlog/" + sha256 + "/" + std::to_string(played_at) + ".bjr";
-    SDL_free(dir);
-    return p;
+    return data_dir() + "Replay/InputLog/" + sha256 + "/" + std::to_string(played_at) + ".bjr";
 }
 
-std::string official_mods_dir() {
-    const char* base = SDL_GetBasePath();
-    return std::string(base ? base : "") + "mods";
-}
+std::string official_mods_dir() { return base_dir() + "mods"; }
 
-std::string user_mods_dir() {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = dir ? std::string(dir) + "mods" : "mods";
-    SDL_free(dir);
-    return p;
-}
+std::string user_mods_dir() { return data_dir() + "Mods"; }
 
-std::string mod_data_dir(const std::string& id) {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = (dir ? std::string(dir) : std::string()) + "moddata/" + id;
-    SDL_free(dir);
-    return p;
-}
+std::string mod_data_dir(const std::string& id) { return data_dir() + "Mods/ModData/" + id; }
+std::string mod_settings_path(const std::string& id) { return mod_data_dir(id) + "/settings.json"; }
 
-std::string lr2_courses_path() {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = dir ? std::string(dir) + "lr2_courses.txt" : "lr2_courses.txt";
-    SDL_free(dir);
-    return p;
-}
+std::string lr2_courses_path() { return data_dir() + "Database/lr2_courses.txt"; }
 
-std::string table_cache_dir() {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = dir ? std::string(dir) + "tables" : "tables";
-    SDL_free(dir);
-    return p;
-}
+std::string table_cache_dir() { return data_dir() + "Database/Table"; }
 
-std::string song_db_path() {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = dir ? std::string(dir) + "songs.db" : "songs.db";
-    SDL_free(dir);
-    return p;
-}
+std::string song_db_path() { return data_dir() + "Database/songs.db"; }
 
 }  // namespace bmj

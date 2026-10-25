@@ -10,6 +10,7 @@
 #include <initializer_list>
 #include <sstream>
 
+#include "util/data_dir.h"
 #include "util/text.h"
 
 namespace bmj {
@@ -276,11 +277,6 @@ bool KeyConfig::save(const std::string& path) const {
     return static_cast<bool>(f);
 }
 
-std::string keyconfig_path() {
-    char* dir = SDL_GetPrefPath(nullptr, "BMjoy");
-    std::string p = dir ? std::string(dir) + "keyconfig.txt" : "keyconfig.txt";
-    SDL_free(dir);
-    return p;
-}
+std::string keyconfig_path() { return data_dir() + "Config/keyconfig.txt"; }
 
 }  // namespace bmj

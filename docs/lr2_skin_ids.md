@@ -203,8 +203,8 @@ OpenLR2 では 500 を超える番号は常に未起動扱い（WMIX の DP ス�
 | 51 | オンライン | S,R | L:S,R,CR / W:S,R,CR | S: OK<br>P: OK<br>R: OK |  |
 | 52 | EXTRA MODE OFF | S,D | L:S,D(IF) / W:S | S: 固定OK<br>D: 画面なし<br>P: 未実装 | P/R は常に偽（スキン未使用） |
 | 53 | EXTRA MODE ON | S,D | L:S,D(IF) / W:S | S: 固定OK<br>D: 画面なし<br>P: 固定OK |  |
-| 54 | AUTO SCRATCH 1P OFF | S,P | L:— / W:— | S: OK<br>P: 未実装 | PlayContext に無く常に偽 |
-| 55 | AUTO SCRATCH 1P ON | S,P | L:P,P他 / W:— | S: OK<br>P: 未実装 | LR2 標準 7 鍵プレイスキンが使う（ASSIST 表示）。アシストを入れても出ない |
+| 54 | AUTO SCRATCH 1P OFF | S,P | L:— / W:— | S: 固定OK<br>P: 固定OK | BMjoy には AUTO SCRATCH が無いので常に真 |
+| 55 | AUTO SCRATCH 1P ON | S,P | L:P,P他 / W:— | S: 固定OK<br>P: 固定OK | 常に偽（7k モードは AUTO SCRATCH ではないので ASSIST 表示を出さない） |
 | 56 | AUTO SCRATCH 2P OFF | S,P | L:— / W:— | S: 固定OK<br>P: 未実装 |  |
 | 57 | AUTO SCRATCH 2P ON | S,P | L:P他 / W:— | S: 固定OK<br>P: 固定OK |  |
 | 60 | スコア保存不可 | S | L:S / W:S | S: 固定OK | BMjoy はオート以外常に保存 |
@@ -423,7 +423,7 @@ LR2 の文字列表はシーンをまたいで残る（選曲で入れた値が�
 | 64 | ランダム 2P | S | L:S / W:— | S: 固定OK |  |
 | 65 | ゲージ 1P | S | L:S / W:— | S: OK |  |
 | 66 | ゲージ 2P | S | L:S / W:— | S: 誤り | 1P の値を出す |
-| 67 | アシスト 1P | S | L:S / W:— | S: OK |  |
+| 67 | アシスト 1P | S | L:S / W:— | S: OK | BMjoy は 7k モード（7K+S / 7K） |
 | 68 | アシスト 2P | S | L:S / W:— | S: 固定OK |  |
 | 69 | バトル | S | L:S / W:— | S: 固定OK |  |
 | 70 | フリップ | S | L:S / W:— | S: 固定OK |  |
@@ -536,7 +536,7 @@ LR2 の文字列表はシーンをまたいで残る（選曲で入れた値が�
 | 41 | ゲージ 2P | S,R | L:S / W:S,R | S: 誤り<br>R: 固定OK | S は 1P の値を表示 |
 | 42 | ランダム 1P | S | L:S / W:S | S: OK |  |
 | 43 | ランダム 2P | S | L:S / W:S | S: 未実装 | 両スキンが使う |
-| 44 | アシスト 1P | S | L:S / W:S | S: OK |  |
+| 44 | アシスト 1P | S | L:S / W:S | S: OK | BMjoy は 7k モード（0 = 7K+S 1 = 7K）。W-MIX のコマは tools/skin/wmix_gauge_frames.py |
 | 45 | アシスト 2P | S | L:S / W:S | S: 未実装 |  |
 | 46 | シャッター（レーンカバー） | S | L:S / W:S | S: OK |  |
 | 50 | HID/SUD 1P | S | L:S / W:S | S: OK |  |
@@ -630,7 +630,7 @@ LR2 の文字列表はシーンをまたいで残る（選曲で入れた値が�
 1. **リザルトの op 900〜999 がプレイスキンの値を見ている**（`render/skin_play.cpp` の `option()` の default 節が `PlayContext::skin`＝プレイスキンの `op[]` を引く）。リザルト描画の間は `ctx.skin` をリザルトスキンにする。WMIX result が DST op 928 を使う。
 2. **op 80/81（ロード未完了/完了）**: LR2 では選曲・リザルトで timer40 が立たないので op80 が常に真。BMjoy は選曲で偽、リザルトではプレイのタイマーを見て偽。LR2 標準の select/result の回転する CIRCLE 背景が消えている。
 3. **op 350/351**: `#FLIPRESULT`/`#DISABLEFLIP` を読み、プレイスキンに `#FLIPRESULT` が無ければ 350 真・351 偽にする（LR2 標準 result.lr2skin の分岐）。`#FLIPRESULT` があるとき（LR2 標準の右側プレイ）の 1P/2P データの入れ替えは C に回す。
-4. **op 54/55（AUTO SCRATCH 1P）をプレイでも返す**。LR2 標準 7 鍵プレイスキンのアシスト表示。
+4. ~~op 54/55（AUTO SCRATCH 1P）をプレイでも返す~~：AUTO SCRATCH を無くした（7k モードに置き換え）ので、常に OFF を返す。
 5. **ボタン 55（HS-FIX）をプレイで設定値にする**（WMIX play の HS-FIX 表示が常に OFF）。
 6. **timer 44 をプレイ開始時に HARD 系ゲージなら立てる**。
 7. **数値 45〜49 のプレイ・リザルト**: 選曲と同じ「同フォルダの難易度別レベル」を渡す（WMIX の play/result が使う。いまは他の難易度が 0 と出る）。

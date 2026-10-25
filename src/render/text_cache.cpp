@@ -52,6 +52,23 @@ void TextCache::clear() {
     for (auto& [k, t] : cache_)
         if (t.tex) SDL_DestroyTexture(t.tex);
     cache_.clear();
+    used_.clear();
+}
+
+// 長く使っていない半分を捨てる（全部を捨てると、画面に出ている文字を全部作り直すことになり、その瞬間に固まる）
+void TextCache::evict() {
+    std::vector<std::pair<uint64_t, std::string>> order;
+    order.reserve(used_.size());
+    for (const auto& [k, t] : used_) order.emplace_back(t, k);
+    std::sort(order.begin(), order.end());
+    for (size_t i = 0; i < order.size() / 2; ++i) {
+        auto it = cache_.find(order[i].second);
+        if (it != cache_.end()) {
+            if (it->second.tex) SDL_DestroyTexture(it->second.tex);
+            cache_.erase(it);
+        }
+        used_.erase(order[i].second);
+    }
 }
 
 float TextCache::draw(float x, float y, int size, SDL_Color c, const std::string& s, int align, float max_w, int thick) {
@@ -150,13 +167,32 @@ TextCache::Tex TextCache::get_system(int size, const std::string& s) {
 TextCache::Tex TextCache::get_system(int, const std::string&) { return {}; }
 #endif
 
+namespace {
+int g_made = 0;         // 新しく作った文字列の数（画面の処理のスレッドだけが数える）
+uint64_t g_made_ns = 0;  // それにかかった時間
+}  // namespace
+
+void TextCache::take_made(int& count, double& ms) {
+    count = g_made, ms = g_made_ns / 1e6;
+    g_made = 0, g_made_ns = 0;
+}
+
 TextCache::Tex TextCache::get(int size, int thick, const std::string& s) {
     char keybuf[32];
     std::snprintf(keybuf, sizeof(keybuf), "%d/%d/%d/", size, thick, antialias_ ? 1 : 0);
     std::string key = keybuf + s;
-    if (auto it = cache_.find(key); it != cache_.end()) return it->second;
-    // 使い捨ての文字列（数字など）でキャッシュが膨らみすぎたら作り直す
-    if (cache_.size() > 2000) clear();
+    if (auto it = cache_.find(key); it != cache_.end()) {
+        used_[key] = ++tick_;
+        return it->second;
+    }
+    const uint64_t made_t0 = SDL_GetTicksNS();
+    struct Count {
+        uint64_t t0;
+        ~Count() { ++g_made, g_made_ns += SDL_GetTicksNS() - t0; }
+    } count{made_t0};
+    // 使い捨ての文字列（数字など）でキャッシュが膨らみすぎたら、長く使っていないものから捨てる
+    if (cache_.size() > 2000) evict();
+    used_[key] = ++tick_;
 #ifdef _WIN32
     if (!system_font_.empty()) {
         Tex t = get_system(size, s);

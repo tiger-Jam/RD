@@ -23,7 +23,7 @@ struct Replay {
     int64_t played_at = 0;   // 遊んだ日時（UNIX 秒）
     // 譜面と判定に効くオプション（再生のときはこれに合わせ、終わったら元に戻す）
     int random = 0, gauge = 0, ln_mode = 0, hs_fix = 0, effect = 0;
-    bool assist = false, gas = false;
+    bool seven_key = false, gas = false;
     // 見た目のオプション（再生でも同じ見え方にする）
     int hi_speed = 100, lane_cover = 0, lane_cover_v = 0;
     // MOD：プレーに影響する MOD の組み合わせ（play_mod_key）と、遊んだカスタムゲージの鍵（無ければ空）

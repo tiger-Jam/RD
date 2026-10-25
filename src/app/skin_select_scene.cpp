@@ -23,8 +23,11 @@ public:
     ~SkinPreview() {
         if (tex_) SDL_DestroyTexture(tex_);
         if (thumb_) SDL_DestroyTexture(thumb_);
+        if (full_) SDL_DestroyTexture(full_);
     }
     SDL_Texture* texture() const { return tex_; }
+    // 次の select で必ず読み直す（スキンのファイルを書き換えたとき）
+    void invalidate() { path_.clear(), type_ = -1; }
 
     // 選んでいるスキンが変わったら読み直す
     void select(const SkinEntry* e, int type) {
@@ -56,8 +59,16 @@ public:
         auto sk = std::make_unique<Lr2Skin>();
         std::string err;
         if (!load_lr2_skin(app_.lr2_root, e->path, h, ctx_.load_options(), *sk, err)) return;
-        if (!h.has_resolution) sk->width = 640, sk->height = 480;
+        if (!h.has_resolution) guess_resolution(*sk);  // 本体と同じく、解像度の書いていないスキンは中身から推定する
         renderer_.upload(*sk);
+        // スキンはスキン本来の大きさの絵に描いてから、プレビューの枠の大きさに縮めて貼る
+        float fw = 0, fh = 0;
+        if (full_) SDL_GetTextureSize(full_, &fw, &fh);
+        if (!full_ || fw != sk->width || fh != sk->height) {
+            if (full_) SDL_DestroyTexture(full_);
+            full_ = SDL_CreateTexture(app_.renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, sk->width, sk->height);
+            if (full_) SDL_SetTextureScaleMode(full_, SDL_SCALEMODE_LINEAR);
+        }
         skin_ = std::move(sk);
         ctx_.skin = skin_.get();
     }
@@ -75,8 +86,10 @@ public:
         if (thumb_) {
             SDL_FRect d{0, 0, tw, th};
             SDL_RenderTexture(r, thumb_, nullptr, &d);
-        } else if (skin_) {
-            SDL_SetRenderLogicalPresentation(r, skin_->width, skin_->height, SDL_LOGICAL_PRESENTATION_STRETCH);
+        } else if (skin_ && full_) {
+            SDL_SetRenderTarget(r, full_);
+            SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+            SDL_RenderClear(r);
             double t = (SDL_GetTicksNS() - start_ns_) / 1e6;
             if (!timers_.on(1) && t > skin_->startinput) timers_.set(1, t);
             if (!timers_.on(40) && t > skin_->loadstart + skin_->loadend) timers_.set(40, t);
@@ -95,7 +108,12 @@ public:
             if (type_ <= 4) renderer_.draw_play(*skin_, st);
             else if (type_ == 7 || type_ == 15) renderer_.draw_result(*skin_, st);
             else renderer_.draw_select(*skin_, st);
-            SDL_SetRenderLogicalPresentation(r, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+            // 縦横の比を保って枠に収める（16:9 のスキンを 4:3 の枠に出すときは、上下に黒い帯）
+            SDL_SetRenderTarget(r, tex_);
+            const float k = std::min(tw / skin_->width, th / skin_->height);
+            const float dw = skin_->width * k, dh = skin_->height * k;
+            SDL_FRect d{(tw - dw) / 2, (th - dh) / 2, dw, dh};
+            SDL_RenderTexture(r, full_, nullptr, &d);
         }
         SDL_SetRenderTarget(r, prev_target);
     }
@@ -105,6 +123,7 @@ private:
     SkinRenderer renderer_;
     SDL_Texture* tex_ = nullptr;
     SDL_Texture* thumb_ = nullptr;
+    SDL_Texture* full_ = nullptr;  // スキン本来の大きさの描き先
     std::unique_ptr<Lr2Skin> skin_;
     PlayContext ctx_;
     SkinTimers timers_;
@@ -116,6 +135,13 @@ private:
 }  // namespace
 
 bool run_skin_select(App& app, SkinCatalog& catalog) {
+    // 入るたびにスキンの一覧を集め直す（LR2files/Theme に新しいスキンを入れたら、曲を読み直さずに選べる）
+    auto rescan = [&] {
+        const int type = catalog.selected_type();
+        catalog.scan(app.lr2_root);
+        catalog.select_type(type, app.cfg);
+    };
+    rescan();
     SelectContext ctx;
     ctx.cfg = &app.cfg;
     ctx.catalog = &catalog;
@@ -165,6 +191,13 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
                 SDL_ConvertEventToRenderCoordinates(app.renderer, &e);
             if (e.type == SDL_EVENT_MOUSE_MOTION) mouse_x = e.motion.x, mouse_y = e.motion.y, mouse_moved_ms = t;
             // ESC・右クリックで閉じる（#FADEOUT のあと選曲へ）
+            // F8：スキンの一覧と、選んでいるスキンのプレビューを読み直す（スキンを足したり書き換えたりしたとき。曲は読み直さない）
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F8 && !e.key.repeat) {
+                rescan();
+                preview.invalidate();
+                app.mixer.play_system(kSysOptionChange);
+                std::printf("スキンの一覧を読み直した\n");
+            }
             if ((e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) ||
                 (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_RIGHT))
                 if (!timers.on(2)) timers.set(2, t);

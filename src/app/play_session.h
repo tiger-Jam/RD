@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 
+#include "game/graph.h"
 #include "app/app.h"
 #include "app/course.h"
 #include "game/judge.h"
@@ -22,6 +23,8 @@ struct CourseRun {
     bool alive = false;      // このステージを生きて終えた（次があれば進める）
     bool finished = false;   // このステージのノーツを全部処理した
     bool abandoned = false;  // リザルトを出さずに選曲へ戻る（1 ノーツも判定しなかったなど）
+    // ステージごとのゲージなどの推移と、ステージの長さ（ms）。コースリザルトのグラフは、これをつないで描く
+    std::vector<std::pair<PlayGraph, int>> graphs;
 };
 
 struct PlayOptions {
@@ -33,6 +36,9 @@ struct PlayOptions {
     bool decide_sound = true;  // 決定の音を鳴らす（決定画面を出したときは、そちらで鳴らしているので鳴らさない）
     CourseRun* course = nullptr;  // コースの 1 ステージとして遊ぶ
     bool replay = false;  // 保存してあるリプレイを再生する（記録もリトライもしない。オプションは終わったら戻す）
+    // 選曲画面の譜面の情報（あれば、譜面のファイルを裏で読んでいる間も、これでプレー画面の読み込み中の絵を出しておく。
+    // 冷えた HDD では、決定してから譜面を読み終えるまで数秒かかることがある）
+    const ChartRecord* record = nullptr;
 };
 
 enum class PlayExit { Back, Quit };

@@ -1,6 +1,7 @@
 #include "chart/chart.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 namespace bmj {
@@ -19,9 +20,87 @@ double Chart::pos_at(int64_t time_us) const {
     return s->pos + s->speed * static_cast<double>(time_us - s->time_us);
 }
 
+std::vector<Chart::Beat> Chart::metronome_beats() const {
+    // 拍の数（曲の時刻 t までに進んだ拍）と、その逆（b 拍目の時刻）。STOP の間と BPM が 0 以下の間は進まない
+    struct Piece {
+        int64_t t0, t1;
+        double b0, rate;  // rate は拍/マイクロ秒
+    };
+    std::vector<Piece> pieces;
+    const int64_t end = std::max<int64_t>(end_us, 0);
+    double b = 0;
+    if (scroll.empty()) {
+        pieces.push_back({0, end, 0, initial_bpm > 0 ? initial_bpm / 60e6 : 0});
+    } else {
+        if (scroll.front().time_us > 0) {
+            const double r = initial_bpm > 0 ? initial_bpm / 60e6 : 0;
+            pieces.push_back({0, scroll.front().time_us, 0, r});
+            b = r * static_cast<double>(scroll.front().time_us);
+        }
+        for (size_t i = 0; i < scroll.size(); ++i) {
+            const ScrollSeg& s = scroll[i];
+            const int64_t t1 = i + 1 < scroll.size() ? scroll[i + 1].time_us : std::max(end, s.time_us);
+            const double r = s.stop || s.bpm <= 0 ? 0.0 : s.bpm / 60e6;
+            pieces.push_back({s.time_us, t1, b, r});
+            b += r * static_cast<double>(t1 - s.time_us);
+        }
+    }
+    auto beats_at = [&](int64_t t) {
+        for (size_t i = pieces.size(); i-- > 0;)
+            if (t >= pieces[i].t0) return pieces[i].b0 + pieces[i].rate * static_cast<double>(std::min(t, pieces[i].t1) - pieces[i].t0);
+        return 0.0;
+    };
+    auto time_at = [&](double beat) -> int64_t {
+        for (const Piece& p : pieces) {
+            const double b1 = p.b0 + p.rate * static_cast<double>(p.t1 - p.t0);
+            if (p.rate > 0 && beat < b1 + 1e-9) return p.t0 + static_cast<int64_t>(std::llround((beat - p.b0) / p.rate));
+        }
+        return end;
+    };
+    std::vector<Beat> out;
+    auto add = [&](int64_t t, bool head) {
+        if (t < 0 || t > end) return;
+        if (!out.empty() && t - out.back().time_us < 30000) return;
+        out.push_back({t, head});
+    };
+    constexpr size_t kMaxBeats = 20000;
+    if (bars.empty()) {
+        const double last = beats_at(end);
+        for (int k = 0; k <= last + 1e-9 && out.size() < kMaxBeats; ++k) add(time_at(k), k % 4 == 0);
+        return out;
+    }
+    std::vector<int64_t> heads;
+    for (const BarLine& bl : bars) heads.push_back(bl.time_us);
+    std::sort(heads.begin(), heads.end());
+    heads.erase(std::unique(heads.begin(), heads.end()), heads.end());
+    for (size_t i = 0; i < heads.size() && out.size() < kMaxBeats; ++i) {
+        const double b0 = beats_at(heads[i]);
+        const double b1 = i + 1 < heads.size() ? beats_at(heads[i + 1]) : beats_at(end) + 1e-6;
+        add(heads[i], true);
+        for (int k = 1; b0 + k < b1 - 1e-6 && out.size() < kMaxBeats; ++k) add(time_at(b0 + k), false);
+    }
+    return out;
+}
+
 double Chart::bpm_at(int64_t time_us) const {
     const ScrollSeg* s = seg_at(scroll, time_us);
     return s ? s->bpm : initial_bpm;
+}
+
+void Chart::drop_scratch() {
+    std::vector<Note> keep;
+    keep.reserve(notes.size());
+    for (const Note& n : notes) {
+        if (n.lane != 0) {
+            keep.push_back(n);
+            continue;
+        }
+        if (n.kind != NoteKind::Normal && n.kind != NoteKind::Long) continue;
+        if (n.sound) bgm.push_back({n.time_us, n.sound});
+        if (n.kind == NoteKind::Long && n.end_sound) bgm.push_back({n.end_us, n.end_sound});
+    }
+    notes = std::move(keep);
+    layout = KeyLayout::K7;
 }
 
 void Chart::make_constant_speed() {

@@ -13,8 +13,10 @@ namespace bmj {
 
 struct SkinImage {
     int w = 0, h = 0;
-    std::vector<uint8_t> rgba;  // 空なら読み込めていない
+    std::vector<uint8_t> rgba;  // 空なら読み込めていない（GPU に送ったあとで捨てたときも空。そのときは path から読み直せる）
     std::string path;
+    uint8_t trans[3] = {0, 0, 0};  // 読んだときの透過色（読み直すときに使う）
+    bool use_trans = false;
     std::string movie;  // 動画（mpg・avi・wma・ogv）なら、そのファイル。描くときに無音で繰り返し流す（LR2: skinload:974）
 };
 
@@ -173,6 +175,10 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
 
 // 画像を1枚読む。use_trans なら、アルファの無い画像の trans 色を透明にする（DxLibと同じ）
 bool load_skin_image(const std::string& path, SkinImage& img, const uint8_t trans[3], bool use_trans);
+// 捨てた画像を、読んだときのファイルと透過色で読み直す（画素を持っていれば何もしない）
+bool reload_skin_image(SkinImage& img);
+// GPU に送ったあとの画像の画素を捨てる（大きさとファイルは残す）。同じ画像を二重に持たないため
+void release_skin_pixels(Lr2Skin& sk);
 
 // DSTを時刻で評価する（LR2: SetDSTdrawByTime）。time は timer の経過ms（タイマー停止中は -1）
 SkinDraw eval_dst(const SkinDst& dst, double time);

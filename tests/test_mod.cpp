@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <fstream>
 
 #include "chart/bms_parser.h"
 #include "game/judge.h"
@@ -20,25 +21,97 @@ TEST(mod_official_manifests) {
     std::vector<std::string> errors;
     auto mods = scan_mods(std::string(BMJ_SOURCE_DIR) + "/mods", true, &errors);
     CHECK(errors.empty());
-    const ModManifest *exhard = nullptr, *judge = nullptr, *gas = nullptr;
-    for (const ModManifest& m : mods) {
+    ModManifest *exhard = nullptr, *assist = nullptr, *custom = nullptr, *judge = nullptr, *gas = nullptr;
+    for (ModManifest& m : mods) {
         CHECK(m.official);
         CHECK(!m.hash.empty());
         if (m.id == "exhard") exhard = &m;
-        if (m.id == "judge-sample") judge = &m;
+        if (m.id == "assist-easy") assist = &m;
+        if (m.id == "custom-gauge") custom = &m;
+        if (m.id == "custom-judge") judge = &m;
         if (m.id == "gas") gas = &m;
     }
-    CHECK(exhard && gas && judge);
-    if (!exhard || !gas || !judge) return;
+    CHECK(exhard && assist && custom && gas && judge);
+    if (!exhard || !assist || !custom || !gas || !judge) return;
     CHECK_EQ(exhard->gauges.size(), size_t(1));
+    CHECK(exhard->gauges[0].id == "exhard" && exhard->gauges[0].frame == 7 && exhard->gauges[0].lamp == "exhard");
+    CHECK_EQ(exhard->lamps.size(), size_t(1));
+    CHECK(assist->gauges[0].frame == 8 && assist->gauges[0].colors == 2);
+    CHECK(custom->gauges.empty() && custom->lamps.empty());  // 自作の分は詳細の設定で作る
+    CHECK_EQ(custom->settings.size(), size_t(2));
+    CHECK(custom->gauge_label == "CUSTOM" && custom->gauge_frame == 9);
+    CHECK_EQ(gas->gas_order.size(), size_t(3));
     CHECK(!exhard->affects_play());  // ゲージは評価だけ：記録を分けない
     CHECK(gas->gas && !gas->affects_play());
-    CHECK(judge->affects_play());    // 判定は記録を分ける
-    CHECK_EQ(judge->judges[0].pgreat[1], 22);
     CHECK(play_mod_key({exhard, gas}).empty());
-    CHECK(play_mod_key({judge}).rfind("judge-sample@1#", 0) == 0);
+    // メトロノーム：音のファイルがあり、プレーには影響しない（記録を分けない）
+    for (ModManifest& m : mods)
+        if (m.id == "metronome") {
+            CHECK(m.metronome && std::filesystem::exists(m.metronome_accent) && std::filesystem::exists(m.metronome_beat));
+            CHECK((m.touches & static_cast<uint32_t>(ModTouch::Sound)) && !m.affects_play());
+            m.metronome_volume = 35;
+            const std::string f = (std::filesystem::temp_directory_path() / "bmj_metro.json").string();
+            CHECK(save_mod_settings(m, f));
+            ModManifest n = m;
+            n.metronome_volume = 0;
+            apply_mod_settings(n, f);
+            CHECK_EQ(n.metronome_volume, 35);
+            std::filesystem::remove(f);
+        }
+    // カスタム判定：遊ぶ判定を選ぶまでは、判定を変えず記録も分けない
+    CHECK(judge->judges.empty() && !judge->affects_play() && play_mod_key({judge}).empty());
+    judge->judges = standard_judge_samples();
+    for (size_t i = 0; i < judge->judges.size(); ++i) judge->judges[i].id = "judge" + std::to_string(i + 1);  // 設定画面で足すと付く id
+    judge->judge_use = judge->judges[1].id;  // VERY HARD と同じ幅
+    CHECK(judge->affects_play());
+    const std::string key = play_mod_key({judge});
+    CHECK(key.rfind("custom-judge@judge#", 0) == 0);
+    // 7k モードは MOD の組み合わせごとに別の記録
+    CHECK(seven_key_record_key("") == "7k");
+    CHECK(seven_key_record_key(key) == "7k," + key);
+    judge->judges[1].name = "別の名前";          // 名前を変えても同じ記録
+    CHECK(play_mod_key({judge}) == key);
+    judge->judges[1].great[1] = 25;               // 幅を変えたら別の記録
+    CHECK(play_mod_key({judge}) != key);
+    judge->judges[1].great[1] = 24;               // 戻せば前の記録
+    CHECK(play_mod_key({judge}) == key);
+    // 本体の判定も直接選べる（#RANK に関係なくその幅）。同じ幅の自作の判定とは同じ記録
+    judge->judge_use = "VERY HARD";
+    CHECK(judge->active_judge() && judge->active_judge()->good[0] == 40 && !judge->active_judge()->rank_scaled);
+    CHECK(play_mod_key({judge}) == key);
+    judge->judge_use = "#RANK どおり";  // 選択肢にない見本（id が見本の名前のもの）は選べない
+    CHECK(!judge->active_judge());
+    judge->judge_use = judge->judges[1].id;
     CHECK(mod_conflicts({judge, judge}).size() >= 2);  // 同じ id と、判定の MOD が 2 つ
     CHECK(mod_conflicts({exhard, gas}).empty());
+}
+
+// ゲージのランプを引く：同じ MOD のランプ、ほかの MOD のランプ（「MOD/id」）、本体のランプ。番号の付くゲージの名前とコマ
+TEST(mod_resolve_gauge_lamps) {
+    std::vector<std::string> errors;
+    auto mods = scan_mods(std::string(BMJ_SOURCE_DIR) + "/mods", true, &errors);
+    ModManifest* custom = nullptr;
+    for (ModManifest& m : mods)
+        if (m.id == "custom-gauge") custom = &m;
+    CHECK(custom);
+    if (!custom) return;
+    CustomLampDef purple;
+    purple.id = "purple", purple.name = "PURPLE", purple.color = 0x8040ff, purple.rank = 4.2, purple.as = 3;
+    custom->lamps = {purple};
+    CustomGaugeDef a, b, c;
+    a.id = "a", a.lamp = "purple";
+    b.id = "b", b.lamp = "exhard/exhard";
+    c.id = "c", c.lamp = "EASY", c.survival = false;
+    custom->gauges = {a, b, c};
+    resolve_gauge_lamps(mods);
+    const auto& g = custom->gauges;
+    CHECK(g[0].name == "CUSTOM1" && g[0].frame == 9 && g[2].name == "CUSTOM3" && g[2].frame == 11);
+    CHECK(g[0].lamp_key == "custom-gauge/purple" && g[0].lamp_as == 4 && g[0].lamp_color == 0x8040ffu);  // 4.2 のすぐ下は HARD
+    CHECK_EQ(g[0].lamp_rank, 4.2);
+    CHECK(g[1].lamp_key == "exhard/exhard" && g[1].lamp_as == 4 && g[1].lamp_color == 0xffd800u);
+    CHECK(g[2].lamp_key.empty() && g[2].lamp_as == 2);  // 本体の EASY：カスタムランプの記録は残さない
+    for (const ModManifest& m : mods)
+        if (m.id == "exhard") CHECK(m.gauges[0].lamp_key == "exhard/exhard" && m.gauges[0].name == "EX-HARD");
 }
 
 // カスタムゲージ：裏で全部計算し、選んだものはそれで遊び、ランプは lamp_as で見せる
@@ -110,4 +183,153 @@ TEST(mod_custom_judge) {
         CHECK_EQ(j.events().size(), size_t(1));
         if (!j.events().empty()) CHECK_EQ(j.events()[0].judge, cs.judge);
     }
+}
+
+// GAS：決めた順番の先頭で始め、尽きたら次へ。曲の終わりにクリアの線に届いていなければ、クリアできた一番上のゲージ
+TEST(mod_gas_chain) {
+    std::string bms = "#BPM 120\n#RANK 2\n#TOTAL 200\n#WAV01 a.wav\n";
+    for (int m = 1; m <= 5; ++m) bms += "#00" + std::to_string(m) + "11:01010101\n";
+    Chart c = mod_chart(bms);
+    auto play = [&](std::vector<int> chain, int misses) {
+        JudgeConfig cfg;
+        cfg.gas_chain = chain;
+        JudgeEngine j(c, cfg);
+        for (size_t i = 0; i < c.notes.size(); ++i)
+            if (static_cast<int>(i) >= misses) j.press(c.notes[i].lane, c.notes[i].time_us);
+        j.advance(c.notes.back().time_us + mod_ms(1000));
+        j.gas_settle();
+        return j;
+    };
+    {
+        JudgeEngine j = play({kHard, kGroove, kEasy}, 0);  // 全部 PGREAT：HARD のまま
+        CHECK_EQ(j.gauge_type(), kHard);
+    }
+    {
+        // 1 つ見逃す：HAZARD が尽きて次へ。20 ノーツでは HARD も 1 つで尽きる（LR2 の式）ので GROOVE まで落ちる
+        JudgeEngine j = play({kDeath, kHard, kGroove}, 1);
+        CHECK_EQ(j.gauge_type(), kGroove);
+        CHECK(!j.failed());
+    }
+    {
+        JudgeEngine j = play({kHard, kGroove, kEasy}, 12);  // 半分以上見逃す：HARD が尽き、GROOVE も 80% に届かない
+        CHECK(j.gauge_type() != kHard);
+    }
+}
+
+// 詳細の設定：書いて読めば同じ（GAS の順番、カスタムゲージ、カスタムランプ）
+TEST(mod_settings_roundtrip) {
+    std::vector<std::string> errors;
+    auto mods = scan_mods(std::string(BMJ_SOURCE_DIR) + "/mods", true, &errors);
+    ModManifest *cg = nullptr, *gas = nullptr;
+    for (ModManifest& m : mods) {
+        if (m.id == "custom-gauge") cg = &m;
+        if (m.id == "gas") gas = &m;
+    }
+    CHECK(cg && gas);
+    if (!cg || !gas) return;
+    const std::string dir = (std::filesystem::temp_directory_path() / "bmj_mod_settings").string();
+    CustomLampDef lamp;
+    lamp.id = "l1", lamp.name = "紫", lamp.color = 0x8040ff, lamp.rank = 4.2, lamp.as = 3;
+    lamp.colors = 2, lamp.color2 = 0xffffff, lamp.blink_ms = 400;
+    CHECK(lamp.color_at(100) == 0x8040ffu && lamp.color_at(500) == 0xffffffu);  // 0.4 秒ごとに入れ替わる
+    CHECK_EQ(standard_gauge_samples().size(), size_t(6));
+    CHECK_EQ(standard_lamp_samples().size(), size_t(6));
+    CustomGaugeDef a, b;
+    a.id = "g1", a.delta[kPoor].fixed = -20, a.colors = 2, a.color = 0x112233, a.color_low = 0x445566, a.lamp = "l1";
+    b.id = "g2", b.survival = false, b.delta[kGreat].total = 0.75, b.lamp = "CLEAR";
+    cg->lamps = {lamp}, cg->gauges = {a, b};
+    CHECK(cg->standard_lamps[3].colors == 0);  // 本体のランプは、変えなければスキンの絵のまま
+    cg->standard_lamps[3].colors = 2, cg->standard_lamps[3].color = 0x123456, cg->standard_lamps[3].color2 = 0x654321;
+    CustomLampDef exh_color;
+    exh_color.colors = 1, exh_color.color = 0x00ffff;
+    cg->lamp_colors["exhard/exhard"] = exh_color;
+    cg->standard_gauges[kGroove].colors = 2, cg->standard_gauges[kGroove].color_low = 0x00ff00;
+    gas->gas_order = {"custom-gauge/g1", "HARD", "EASY"};
+    CHECK(save_mod_settings(*cg, dir + "/cg.json"));
+    CHECK(save_mod_settings(*gas, dir + "/gas.json"));
+    ModManifest cg2 = *cg, gas2 = *gas;
+    cg2.gauges.clear(), cg2.lamps.clear(), gas2.gas_order.clear(), cg2.lamp_colors.clear();
+    cg2.standard_lamps = skin_standard_lamps();
+    cg2.standard_gauges = {};
+    apply_mod_settings(cg2, dir + "/cg.json");
+    apply_mod_settings(gas2, dir + "/gas.json");
+    CHECK_EQ(cg2.gauges.size(), size_t(2));
+    CHECK_EQ(cg2.lamps.size(), size_t(1));
+    if (cg2.gauges.size() == 2 && cg2.lamps.size() == 1) {
+        CHECK_EQ(cg2.gauges[0].delta[kPoor].fixed, -20.0);
+        CHECK_EQ(cg2.gauges[1].delta[kGreat].total, 0.75);
+        CHECK(cg2.gauges[0].colors == 2 && cg2.gauges[0].color == 0x112233u && cg2.gauges[0].color_low == 0x445566u);
+        CHECK(cg2.gauges[0].lamp == "l1" && cg2.gauges[1].lamp == "CLEAR");
+        CHECK(cg2.gauges[1].survival == false);
+        CHECK(cg2.lamps[0].name == "紫" && cg2.lamps[0].color == 0x8040ffu && cg2.lamps[0].as == 4);  // 絵は強さ 4.2 のすぐ下の HARD
+        CHECK(cg2.lamps[0].colors == 2 && cg2.lamps[0].color2 == 0xffffffu && cg2.lamps[0].blink_ms == 400);
+        CHECK_EQ(cg2.lamps[0].rank, 4.2);
+    }
+    CHECK(cg2.standard_lamps[3].colors == 2 && cg2.standard_lamps[3].color == 0x123456u && cg2.standard_lamps[3].color2 == 0x654321u);
+    CHECK(cg2.standard_lamps[0].colors == 0);
+    CHECK(cg2.standard_gauges[kGroove].colors == 2 && cg2.standard_gauges[kGroove].color_low == 0x00ff00u);
+    CHECK(cg2.standard_gauges[kHard].colors == 0);  // 変えていないゲージはスキンの絵のまま
+    CHECK(cg2.lamp_colors.count("exhard/exhard") && cg2.lamp_colors["exhard/exhard"].color == 0x00ffffu);
+    // 使っているときだけ、EX-HARD の MOD のランプの色に重なる
+    std::vector<ModManifest> set = {cg2};
+    for (const ModManifest& x : mods)
+        if (x.id == "exhard") set.push_back(x);
+    apply_lamp_colors(set, {"exhard"});
+    CHECK(set[1].lamps[0].color == 0xffd800u);
+    apply_lamp_colors(set, {"custom-gauge", "exhard"});
+    CHECK(set[1].lamps[0].color == 0x00ffffu);
+    CHECK(gas2.gas_order == gas->gas_order);
+    // カスタム判定：判定の一覧と遊ぶ判定
+    for (ModManifest& x : mods)
+        if (x.id == "custom-judge") {
+            x.judges = standard_judge_samples();
+            x.judges[2].id = "mine", x.judges[2].good[1] = 77, x.judges[2].rank_scaled = true;
+            x.judge_use = "mine";
+            CHECK(save_mod_settings(x, dir + "/cj.json"));
+            ModManifest y = x;
+            y.judges.clear(), y.judge_use.clear();
+            apply_mod_settings(y, dir + "/cj.json");
+            CHECK(y.judges.size() == x.judges.size() && y.judge_use == "mine");
+            CHECK(y.active_judge() && y.active_judge()->good[1] == 77 && y.active_judge()->rank_scaled);
+        }
+    // 前の形（ゲージの中にランプを書いたもの）も読める：ランプはゲージと同じ id で一覧に入る
+    {
+        std::filesystem::create_directories(dir);
+        std::ofstream f(dir + "/old.json");
+        f << R"({"gauges": [{"id": "x", "name": "X", "lamp": {"name": "XL", "color": "#123456", "rank": 4.4, "as": 4}}]})";
+    }
+    ModManifest old = *cg;
+    old.lamps.clear();
+    apply_mod_settings(old, dir + "/old.json");
+    CHECK(old.gauges.size() == 1 && old.gauges[0].lamp == "x");
+    CHECK(old.lamps.size() == 1 && old.lamps[0].id == "x" && old.lamps[0].name == "XL" && old.lamps[0].color == 0x123456u);
+    std::filesystem::remove_all(dir);
+}
+
+// メトロノームの拍：BPM と STOP から数え、小節線を頭にする（3/4 の小節は 3 拍）
+TEST(metronome_beats) {
+    // BPM 120（1 拍 500 ms）。0 小節目は 4/4、1 小節目は 3/4（#00102:0.75）、2 小節目の頭にノーツ
+    Chart c = mod_chart("#BPM 120\n#WAV01 a.wav\n#00102:0.75\n#00211:01\n");
+    auto b = c.metronome_beats();
+    CHECK(b.size() >= 8);
+    if (b.size() >= 8) {
+        CHECK(b[0].head && b[0].time_us == 0);
+        CHECK(!b[1].head && b[1].time_us == 500000);
+        CHECK(b[4].head && b[4].time_us == 2000000);  // 1 小節目の頭
+        CHECK(!b[6].head && b[6].time_us == 3000000);
+        CHECK(b[7].head && b[7].time_us == 3500000);  // 3 拍で次の小節（2 小節目）
+    }
+    // STOP の間は拍が進まない：#STOP01 192（1 小節＝4 拍ぶん止まる → 2000 ms）を 1 小節目の頭に
+    Chart s = mod_chart("#BPM 120\n#WAV01 a.wav\n#STOP01 192\n#00109:01\n#00211:01\n");
+    auto sb = s.metronome_beats();
+    bool found = false;
+    for (const auto& x : sb)
+        if (x.head && x.time_us == 2000000) found = true;
+    CHECK(found);
+    // 1 小節目の 2 拍目は、止まっていた 2000 ms のあと
+    for (const auto& x : sb)
+        if (!x.head && x.time_us > 2000000 && x.time_us < 5000000) {
+            CHECK_EQ(x.time_us, int64_t(4500000));
+            break;
+        }
 }

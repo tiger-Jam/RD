@@ -18,6 +18,16 @@
 
 namespace bmj {
 
+namespace {
+
+// float か 16 ビットか、持っている方で鳴らす
+bool mix_sample(const Sample& s, double& pos, double step, bool loop, const float* gain, float scale, float* out, uint32_t n) {
+    if (!s.pcm16.empty()) return mix_resampled(s.pcm16.data(), s.frames(), pos, step, loop, gain, scale, out, n);
+    return mix_resampled(s.pcm.data(), s.frames(), pos, step, loop, gain, scale, out, n);
+}
+
+}  // namespace
+
 Mixer::Mixer() = default;
 Mixer::~Mixer() { close(); }
 
@@ -200,7 +210,7 @@ void Mixer::apply_sound_fx(const SoundFx& fx) {
 void Mixer::start_voice(uint16_t sound, double pos, bool key) {
     if (!samples_ || sound >= samples_->size()) return;
     const Sample& s = (*samples_)[sound];
-    if (s.pcm.empty()) return;
+    if (s.empty()) return;
     // 同じキー音が鳴っている最中に鳴らし直したら、前のものは止める
     for (Voice& v : voices_) {
         if (v.sample && v.sound == sound) v.sample = nullptr;
@@ -232,7 +242,7 @@ void Mixer::run_system_command(int32_t cmd) {
             if (v.sample && v.id == id) v.sample = nullptr;
         return;
     }
-    if (id >= static_cast<int>(sys_samples_.size()) || sys_samples_[id].pcm.empty()) return;
+    if (id >= static_cast<int>(sys_samples_.size()) || sys_samples_[id].empty()) return;
     // 同じ音を鳴らし直したら前のものは止める（キー音と同じ）
     SysVoice* slot = nullptr;
     for (SysVoice& v : sys_voices_) {
@@ -354,8 +364,8 @@ void Mixer::render_chunk(float* out, uint32_t n, bool running) {
     for (SysVoice& v : sys_voices_) {
         if (!v.sample) continue;
         const bool key_side = v.id < 32 && (key_mask >> v.id & 1u);
-        if (!mix_resampled(v.sample->pcm.data(), v.sample->frames(), v.pos, step, v.loop,
-                           v.loop ? loop_curve_.data() : fade_curve_.data(), key_side ? gk : gb, key_side ? key : bgm, n))
+        if (!mix_sample(*v.sample, v.pos, step, v.loop, v.loop ? loop_curve_.data() : fade_curve_.data(), key_side ? gk : gb,
+                        key_side ? key : bgm, n))
             v.sample = nullptr;
     }
 
@@ -369,8 +379,7 @@ void Mixer::render_chunk(float* out, uint32_t n, bool running) {
         }
         for (Voice& v : voices_) {
             if (!v.sample) continue;
-            if (!mix_resampled(v.sample->pcm.data(), v.sample->frames(), v.pos, step, false, fade_curve_.data(),
-                               v.key ? gk : gb, v.key ? key : bgm, n))
+            if (!mix_sample(*v.sample, v.pos, step, false, fade_curve_.data(), v.key ? gk : gb, v.key ? key : bgm, n))
                 v.sample = nullptr;
         }
         song_pos_ = end;

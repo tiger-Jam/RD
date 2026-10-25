@@ -56,8 +56,6 @@ struct JudgeConfig {
     int gauge_type = kGroove;
     bool gas = false;
     bool autoplay = false;
-    // 皿の自動演奏（LR2 の ASSIST）。皿のノーツは判定せず、時刻が来たら数だけ進めて音を鳴らす（スコア・コンボ・ゲージには入らない）
-    bool assist_scratch = false;
     // コース（0 エキスパート 1 ノンストップ 2 段位、-1 は単曲）。2 ステージ目からは前のステージのゲージとコンボを引き継ぐ
     int course = -1;
     bool carry = false;
@@ -70,6 +68,9 @@ struct JudgeConfig {
     // カスタムゲージ（評価の MOD。仕様書14章）。全部を裏で計算し、custom_play が 0 以上ならそのゲージで遊ぶ（コースでは使わない）
     std::vector<CustomGaugeDef> custom_gauges;
     int custom_play = -1;
+    // GAS の順番（GAUGE で「GAS」を選んだとき）。0〜5 は本体のゲージ、6 以上はカスタムゲージ（6 + custom_gauges の番号）。
+    // 先頭のゲージで始め、尽きたら次へ移る。曲の終わりにクリアの線に届いていなければ、クリアできた一番上のゲージを取る
+    std::vector<int> gas_chain;
     // カスタム判定（判定の MOD）。無ければ LR2 の判定幅
     std::optional<CustomJudgeDef> custom_judge;
 };
@@ -100,7 +101,9 @@ public:
         return cfg_.custom_gauges[custom_play()].survival ? kHard : kGroove;
     }
     // カスタムゲージ
-    int custom_play() const { return cfg_.course < 0 ? cfg_.custom_play : -1; }
+    int custom_play() const { return cfg_.course < 0 ? cur_custom_ : -1; }
+    // GAS：曲の終わりに、クリアできた一番上のゲージに決める（リザルトの前に呼ぶ）
+    void gas_settle();
     int custom_count() const { return static_cast<int>(chp_.size()); }
     double custom_hp(int i) const { return chp_[i]; }
     // そのカスタムゲージで、曲の終わりにクリアの条件を満たしているか
@@ -116,8 +119,6 @@ public:
     // LNの始点を押して保持中か
     bool ln_holding(size_t index) const { return active_[index] > 0; }
     bool lane_held(int lane) const { return held_[lane]; }
-    // 皿の自動演奏のレーンか（描画で #SRC_AUTO_NOTE などの絵を使う。全体のオートプレイでは使わない。LR2: Play.cpp:575）
-    bool is_assist_lane(int lane) const { return lane_auto(lane); }
     // そのレーンでLNを押し続けている最中か
     bool lane_ln_holding(int lane) const {
         const Lane& l = lanes_[lane];
@@ -129,9 +130,7 @@ private:
         std::vector<size_t> notes;  // chart.notes の添字（通常・LN・地雷）
         size_t cur = 0;
         uint16_t note_val = 0;      // 押したときに鳴らすキー音（LR2: noteVal）
-        size_t sound_cur = 0;       // 自動演奏のレーン：次に始点の音を鳴らすノーツ
     };
-    bool lane_auto(int lane) const { return cfg_.assist_scratch && lane == 0; }
     int demote(int judge) const {
         if (cfg_.no_great && (judge == kGreat || judge == kGood)) return kBad;
         if (cfg_.no_good && judge == kGood) return kBad;
@@ -157,6 +156,12 @@ private:
     JudgeWindows win_;
     GaugeSet gauge_;
     int gauge_type_;
+    int cur_custom_ = -1;   // 遊んでいるカスタムゲージ（GAS で移ることがある）
+    size_t gas_pos_ = 0;    // GAS の順番の、いまの位置
+    bool gas_entry_failed(int e) const;
+    bool gas_entry_cleared(int e) const;
+    void gas_set(int e);
+    void gas_step();
     std::vector<double> chp_;                    // カスタムゲージの値
     std::vector<std::array<double, 6>> ctable_;  // カスタムゲージの判定ごとの増減
     PlayStats stats_;

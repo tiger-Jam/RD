@@ -3,11 +3,17 @@
 
 #include <SDL3/SDL.h>
 
+#include <atomic>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "app/config.h"
 #include "audio/mixer.h"
+#include "db/difficulty_table.h"
 #include "db/folder_watch.h"
 #include "db/song_db.h"
 #include "mod/mod.h"
@@ -16,6 +22,19 @@
 #include "skin/skin_renderer.h"
 
 namespace bmj {
+
+// #RESOLUTION の無いスキンの解像度を、画面全体を覆う DST から推定する
+void guess_resolution(Lr2Skin& sk);
+
+// 起動のときに始めた難易度表の確かめ（取りに行くのはその日の最初だけ）。応答の遅いサイトがあっても起動の画面では待ちきらず、
+// 残りは裏で続ける。間に合わなかった表が新しくなったら、選曲画面が一覧を作り直す
+struct TableUpdates {
+    std::mutex mu;
+    std::vector<std::optional<DifficultyTable>> got;  // 登録の順。終わったものから入る
+    std::atomic<int> remaining{0};
+    std::atomic<bool> cut{false};           // 起動の画面が待つのをやめた（このあとに終わったものは「遅れて」）
+    std::atomic<bool> late_changed{false};  // 遅れて終わった表に、新しくなったものがある
+};
 
 struct App {
     SDL_Window* window = nullptr;
@@ -39,14 +58,26 @@ struct App {
     std::vector<const ModManifest*> active_mods() const;
     // 使っている MOD のカスタムゲージ（鍵は「MOD の id/ゲージの id」）
     std::vector<std::pair<std::string, const CustomGaugeDef*>> custom_gauges() const;
+    // 使っている MOD のカスタムランプ（鍵は「MOD の id/ランプの id」）
+    std::map<std::string, const CustomLampDef*> custom_lamps() const;
+    // 本体のランプ（1 FAILED … 6 PERFECT）を染める色（0xff000000 | RGB。0 ならスキンの絵のまま）。ms はその時刻（点滅）
+    uint32_t standard_lamp_tint(int lamp, double ms) const;
+    // 本体のゲージ（kGroove …）の色の上書き（使っている MOD のうち最初に変えているもの。無ければ nullptr）
+    const GaugeColors* standard_gauge_colors(int gauge_type) const;
     // ゲージを前後に替える（LR2 のゲージ 6 つのあとに、使っている MOD のカスタムゲージが続く）
     void cycle_gauge(int dir);
     // 遊んでいるゲージの名前（カスタムゲージならその名前。LR2 のゲージなら空）
     std::string custom_gauge_name() const;
-    // 使っている MOD のうち、プレーに影響するものの組み合わせの記録の番号（0 は MOD 無し。初めてなら曲データベースに足す）
-    int mod_profile();
+    // GAS の MOD を使っていれば、落ちていくゲージの順番（使っていなければ空）。GAUGE で「GAS」を選んだときに使う
+    std::vector<std::string> gas_order() const;
+    // 使っているメトロノームの MOD（無ければ nullptr）
+    const ModManifest* metronome() const;
+    // 使っている MOD のうち、プレーに影響するものの組み合わせの記録の番号（0 は MOD 無し。初めてなら曲データベースに足す）。
+    // seven_key なら 7k モードの記録の番号（MOD の組み合わせごとに別）
+    int mod_profile(bool seven_key = false);
     int view_w = 640, view_h = 480;
     double refresh_hz = 60.0;
+    std::shared_ptr<TableUpdates> table_updates;  // 起動のときに始めた難易度表の確かめ（無ければ始めていない）
     bool updated_at_start = false;  // 起動の画面で曲データベースと難易度表を更新した（選曲画面では読み直さない）
     double last_draw_ms = -1, last_present_ms = 0;  // 開発用の計測
     uint64_t scene_end_ns = 0;  // 前の画面を抜けた時刻（次の画面が最初の絵を出すまでの時間を測る）

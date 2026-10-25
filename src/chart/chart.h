@@ -103,6 +103,14 @@ struct Chart {
 
     // 時刻からスクロール位置を求める（描画用）
     double pos_at(int64_t time_us) const;
+    // メトロノームの拍（曲の時刻と、小節の頭か）。拍は BPM と STOP から数える（CONSTANT で速さを変えても BPM はそのまま）。
+    // 小節の頭は小節線の時刻（小節の長さが違えば、その小節の拍の数だけ）。小節線が無い譜面は 4 拍ごと。
+    // 30 ms より詰まった拍（極端に速い BPM）は飛ばす
+    struct Beat {
+        int64_t time_us = 0;
+        bool head = false;
+    };
+    std::vector<Beat> metronome_beats() const;
     double bpm_at(int64_t time_us) const;
     // 判定対象のノーツ数（LNモードLN：LN1本＝1）
     int judgeable_notes() const;
@@ -113,6 +121,9 @@ struct Chart {
     // BMS 以外のインポーター用の仕上げ。scroll に time_us・bpm・scroll・stop を入れて時刻順に並べてから呼ぶ。
     // 区間の速さと位置を決め、ノーツと小節線の位置を付け、主 BPM・TOTAL（未定義なら LR2 の既定式）・曲の終わりを決める
     void finish_import();
+    // 皿のノーツを除く（7k モード）。普通のノーツと LN の音は、BGM と同じく時刻どおりに鳴らす（LN の終点の音も）。
+    // 地雷と見えないノーツは捨てる。除いたあとは皿の無い譜面になる
+    void drop_scratch();
     // 一定速度にする（HS-FIX の CONSTANT）。BPM とスクロール速度の変化を無視し、BPM 150 の速さで流す。停止では止まる。
     // ノーツと小節線の位置も付け直す
     void make_constant_speed();

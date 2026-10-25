@@ -1,9 +1,12 @@
 {
-  // GAS：遊んでいるゲージが落ちたら、裏で計算している一段下のゲージに切り替えて最後まで遊ぶ
+  // GAS：GAUGE で「GAS」を選ぶと、順番の先頭のゲージで始め、尽きたら次のゲージへ移って最後まで遊ぶ。
+  // 曲の終わりにクリアの線に届いていなければ、クリアできた一番上のゲージになる。順番は起動の設定画面（MOD の詳細）で変える
   "id": "gas",
   "name": "GAS",
-  "version": "1",
+  "version": "2",
   "author": "BMjoy",
-  "description": "ゲージが尽きたら一段下のゲージに切り替えて続ける",
-  "gas": true
+  "description": "ゲージが尽きたら、決めた順番の次のゲージに切り替えて続ける（GAUGE で GAS を選んだとき）",
+  "gas": true,
+  "settings": [{ "type": "gauge_order", "name": "ゲージの順番" }],
+  "gas_order": ["HARD", "GROOVE", "EASY"]
 }

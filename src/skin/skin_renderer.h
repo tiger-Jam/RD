@@ -51,6 +51,7 @@ struct SelectBar {
     int level_index = -1;    // #SRC_BAR_LEVEL の添字（-1 なら描かない）
     int level = 0;
     int lamp = 0;            // クリアランプ（#SRC_BAR_LAMP の添字）
+    uint32_t lamp_tint = 0;  // カスタムランプの色（0xff000000 | RGB。0 ならスキンの絵のまま）
 };
 struct SelectSkinState {
     int count = 0;           // 一覧の数
@@ -75,6 +76,23 @@ struct PlaySkinState {
     std::function<bool(int, int&, int&, int&)> slider;    // 種類 → 値, 最小, 最大
     std::function<std::string(int)> text; // LR2の文字列ID → 文字列
     std::function<int(int)> button;       // ボタンの種類 → いまの値（コマ番号になる）
+    // ボタンの種類 → 絵の代わりに出す文字（空なら絵）。スキンの絵に無い値（GAS・カスタムゲージ）の名前を出す
+    std::function<std::string(int)> button_label;
+    // ボタンの種類 → スキンにあれば使うコマ（無ければ -1）。そのコマがスキンの絵にあれば、button_label の文字の代わりに使う（GAS の 7 コマ目）
+    std::function<int(int)> button_extra_frame;
+    // ボタンの種類と、button_extra_frame のコマで出すか → 染める色（0xff000000 | RGB。0 なら絵のまま）
+    std::function<uint32_t(int, bool)> button_tint;
+    // 数字が桁に入りきらないとき、LR2 のように上の桁を切らずに、枠の中で文字の幅を詰めて全部の桁を出す（選曲画面のフォルダの合計）
+    bool grow_digits = false;
+    // 数字のあとに続けて描くもの（数字の ID → 並び。空なら何も足さない）。位置はその数字の描く位置からのずれ（スキンの画素）。
+    // digits > 0 なら同じ数字の絵でその桁数の数字、image.valid ならその絵の切り出しを等倍で
+    //（選曲画面のフォルダの「遊んだ譜面の数 / 持っている譜面の数（割合%）」）
+    struct NumberExtra {
+        int value = 0, digits = 0;
+        SkinSrc image;
+        float dx = 0, dy = 0;
+    };
+    std::function<std::vector<NumberExtra>(int)> number_after;
 
     const Chart* chart = nullptr;
     const JudgeEngine* judge = nullptr;
@@ -93,6 +111,8 @@ struct PlaySkinState {
     int combo_draw = 0;
     double gauge_hp = 0;         // 表示用のゲージ（%）
     bool gauge_survival = false;
+    // カスタムゲージの色（0xff000000 | RGB。0 ならスキンの絵のまま）。上はクリアの線より上（落ちたら終わりのゲージは全部）、下は線より下
+    uint32_t gauge_tint = 0, gauge_tint_low = 0;
     float scratch_angle = 0;     // 皿の回転（度）
     // BGA（LR2: bgaLayer1 / bgaLayer2 / missLayer）。番号は #BMP のID、-1 は無し
     const std::vector<SDL_Texture*>* bga = nullptr;
@@ -177,8 +197,15 @@ private:
     std::map<int, SDL_Texture*> overrides_;
     // 合成方法 10（描画元の色を反転する）用に、色を反転したテクスチャを必要になったときに作る
     std::vector<const SkinImage*> images_;
+    // ボタンのコマの中で、文字（明るい画素）がある縦の範囲（上の行と高さ）。絵の代わりに名前を書くときの大きさに使う
+    std::map<std::array<int, 5>, std::pair<float, float>> ink_;
+    std::pair<float, float> ink_rows(const SkinSrc& src, int frame);
     std::map<SDL_Texture*, SDL_Texture*> inverted_;
     SDL_Texture* inverted(SDL_Texture* t);
+    // 色を抜いたテクスチャ（明るさ = RGB の一番大きい値）。カスタムゲージ・ランプの色に染めるのに使う
+    std::map<int, SDL_Texture*> gray_;
+    SDL_Texture* gray_tex(int gr);
+    uint32_t tint_ = 0;  // 0 でなければ、add() で積む物を色を抜いた絵にして、この色（0xff000000 | RGB）を掛ける
     std::vector<SDL_Texture*> textures_;
     // スキンの #IMAGE の動画（画像の番号 → デコーダ）。シーンの始まりから無音で繰り返す
     std::map<int, std::unique_ptr<VideoDecoder>> movies_;

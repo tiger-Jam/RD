@@ -92,6 +92,11 @@ struct RawHid::Impl {
         auto ppd = reinterpret_cast<PHIDP_PREPARSED_DATA>(pp.data());
         HIDP_CAPS caps;
         if (HidP_GetCaps(ppd, &caps) != HIDP_STATUS_SUCCESS) return nullptr;
+        // ジョイスティック・ゲームパッド（と多軸のコントローラー）として名乗る機器だけ
+        //（ノート PC のタッチパッドなども HID で軸を持っているので、名乗りで除く）
+        if (caps.UsagePage != HID_USAGE_PAGE_GENERIC ||
+            (caps.Usage != HID_USAGE_GENERIC_JOYSTICK && caps.Usage != HID_USAGE_GENERIC_GAMEPAD && caps.Usage != 0x08))
+            return nullptr;
         // ボタンの数
         USHORT nb = caps.NumberInputButtonCaps;
         std::vector<HIDP_BUTTON_CAPS> bcaps(nb);

@@ -97,8 +97,12 @@ public:
                    const std::string& only_under = {});
 
     std::vector<ChartRecord> all_charts() const;
+    // 1 つのフォルダの譜面だけ（同じ曲の差分。プレー画面の難易度ごとのレベルに使う）
+    std::vector<ChartRecord> charts_in_folder(const std::string& folder) const;
     // 曲の一覧を消す（スコアは残す）。次の読み直しで全部登録し直す（LR2: 曲データベースの再作成）
     bool clear_charts();
+    // 曲フォルダ root の下の譜面が 1 つでも曲データベースにあるか（まだ一度も読んでいない曲フォルダを見つける）
+    bool has_charts_under(const std::string& root) const;
     // 譜面の難易度（1〜5）とレベルを書き換える（選曲の F3。譜面ファイルが変わって読み直すと元に戻る）
     void set_chart_tag(const std::string& path, int difficulty, int playlevel);
     // 曲名などを書き換える（選曲のタグエディター。譜面ファイルが変わって読み直すと元に戻る）
@@ -116,6 +120,12 @@ public:
     // カスタムゲージのランプ（遊んだカスタムゲージごとの一番よいもの。1 FAILED、2 クリア、3 フルコンボ、4 PERFECT）
     void save_custom_lamp(const std::string& sha256, int ln_mode, int profile, const std::string& gauge, int lamp);
     std::unordered_map<std::string, int> custom_lamps(const std::string& sha256, int ln_mode, int profile) const;
+    // カスタムランプの記録を全部（選曲画面の一覧に出す）。gauge はランプの鍵、lamp は 1 FAILED 2 クリア 3 FULL COMBO 4 PERFECT
+    struct CustomLampRow {
+        std::string sha256, gauge;
+        int lamp = 0;
+    };
+    std::vector<CustomLampRow> all_custom_lamps(int ln_mode, int profile) const;
     void set_favorite(const std::string& md5, int value);
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）
     void save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo);
@@ -127,6 +137,8 @@ public:
     // LR2のスコアデータベース（LR2files/Database/Score/<名前>.db）を取り込む。取り込んだ件数を返す（失敗なら -1）。
     // 手元に無い譜面のスコアも MD5 のまま残し、表示するときに BMjoy の記録と合わせて良いほうを使う
     int import_lr2_scores(const std::string& lr2_score_db, std::string* error = nullptr);
+    // LR2 の曲データベース（song.db）のお気に入り（favorite 1 = FAVORITE、2 = IGNORE）を写す。写した数（読めなければ -1）
+    int import_lr2_favorites(const std::string& lr2_song_db);
     // LR2 の曲データベース（song.db）から譜面の情報を取り込む。譜面ファイルは開かず、更新日時と大きさだけを読む。
     // 7 鍵の譜面は仮の記録（sha256 の欄が "md5:<md5>"）として入れ、それ以外の譜面は「読まない譜面」として覚える。
     // 取り込んだ 7 鍵の譜面の数を返す（失敗は -1）

@@ -27,8 +27,8 @@ std::array<int, kLaneCount> lane_table(int option, int last_key, Lr2Random& rng)
 // ノーツ1つずつ鍵盤を選び直す（S-RANDOM / SCATTER / CONVERGE）。
 // 同じ時刻にすでに置いた鍵盤は避け（全部埋まっていたらあきらめて重ねる）、LN の途中や同じ時刻のノーツがある鍵盤には置かない。
 // SCATTER は、直前の時刻に使った鍵盤も「埋まっている」とみなす（同じ鍵盤の連打が来ない）。
-// CONVERGE は、まず皿に置けるか試す
-void shuffle_each(std::vector<Note>& notes, int option, int last_key, Lr2Random& rng) {
+// CONVERGE は、まず皿に置けるか試す（scratch が偽なら試さない）
+void shuffle_each(std::vector<Note>& notes, int option, int last_key, Lr2Random& rng, bool scratch) {
     struct Last {
         bool any = false;
         int64_t time = 0, end = -1;  // 最後に置いたノーツの時刻と、LN なら終点
@@ -46,7 +46,7 @@ void shuffle_each(std::vector<Note>& notes, int option, int last_key, Lr2Random&
             }
         }
         if (n.lane >= kFirstKey && n.lane <= last_key) {
-            bool converge = option == kConverge;
+            bool converge = option == kConverge && scratch;
             int lane = n.lane;
             // 置ける鍵盤が無いときに止まらないよう、試す回数に上限を付ける
             for (int tries = 0; tries < 1000; ++tries) {
@@ -101,7 +101,7 @@ int key_count(const Chart& chart) {
     return 5;
 }
 
-void apply_random_option(Chart& chart, int option, Lr2Random& rng) {
+void apply_random_option(Chart& chart, int option, Lr2Random& rng, bool scratch) {
     if (option <= kRandomOff || option > kConverge) return;
     std::vector<Note>& notes = chart.notes;
     std::stable_sort(notes.begin(), notes.end(), [](const Note& a, const Note& b) {
@@ -109,7 +109,7 @@ void apply_random_option(Chart& chart, int option, Lr2Random& rng) {
     });
     const int last_key = key_count(chart);
     std::array<int, kLaneCount> table = lane_table(option, last_key, rng);
-    if (option >= kSRandom) shuffle_each(notes, option, last_key, rng);
+    if (option >= kSRandom) shuffle_each(notes, option, last_key, rng, scratch);
     for (Note& n : notes)
         if (n.kind != NoteKind::Invisible) n.lane = static_cast<uint8_t>(table[n.lane]);
     drop_overlaps(notes);

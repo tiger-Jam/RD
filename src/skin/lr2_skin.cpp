@@ -317,6 +317,8 @@ struct Loader {
         DecodeJob j;
         if (need_size && !peek_image(path, img, j.bytes)) return false;
         if (!need_size) img.path = path;
+        std::memcpy(img.trans, tr, 3);
+        img.use_trans = use_trans;
         j.font = font, j.index = index, j.path = path, j.use_trans = use_trans, j.warning = std::move(warning);
         std::memcpy(j.trans, tr, 3);
         jobs.push_back(std::move(j));
@@ -399,8 +401,17 @@ struct Loader {
                 // LR2 は画面が変わっても画像を捨てずに持っていて、CONTINUE の番号は前のスキンの画像をそのまま使う
                 // （WMIX のリザルトは、プレイスキンのゲージの色の画像をグラフに使う）
                 const int index = image_count++;
-                if (previous && index < static_cast<int>(previous->images.size()) && index < static_cast<int>(sk.images.size()))
+                if (previous && index < static_cast<int>(previous->images.size()) && index < static_cast<int>(sk.images.size())) {
                     sk.images[index] = previous->images[index];
+                    // 前のスキンが画素を捨てていたら、同じファイルを同じ透過色で読み直す
+                    SkinImage& img = sk.images[index];
+                    if (img.rgba.empty() && img.movie.empty() && !img.path.empty()) {
+                        const std::string path = img.path;
+                        const uint8_t tr[3] = {img.trans[0], img.trans[1], img.trans[2]};
+                        const bool ut = img.use_trans;
+                        if (!queue_image(path, img, -1, index, tr, ut, "画像が読めない: " + path)) sk.warnings.push_back("画像が読めない: " + path);
+                    }
+                }
                 return;
             }
             const int index = image_count++;
@@ -728,7 +739,24 @@ struct Loader {
 }  // namespace
 
 bool load_skin_image(const std::string& path, SkinImage& img, const uint8_t trans[3], bool use_trans) {
+    std::memcpy(img.trans, trans, 3);
+    img.use_trans = use_trans;
     return load_image_file(path, img, trans, use_trans);
+}
+
+bool reload_skin_image(SkinImage& img) {
+    if (!img.rgba.empty()) return true;
+    if (img.path.empty() || !img.movie.empty()) return false;
+    const uint8_t tr[3] = {img.trans[0], img.trans[1], img.trans[2]};
+    return load_image_file(img.path, img, tr, img.use_trans);
+}
+
+void release_skin_pixels(Lr2Skin& sk) {
+    for (SkinImage& img : sk.images)
+        if (!img.path.empty()) std::vector<uint8_t>().swap(img.rgba);
+    for (ImageFont& f : sk.image_fonts)
+        for (SkinImage& img : f.images)
+            if (!img.path.empty()) std::vector<uint8_t>().swap(img.rgba);
 }
 
 std::string resolve_lr2_path(const std::string& lr2_root, const std::string& path, bool allow_wildcard) {

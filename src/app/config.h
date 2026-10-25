@@ -60,7 +60,7 @@ struct AppConfig {
     int effect = 0;
     // 配置（LR2: random）。0=OFF 1=MIRROR 2=RANDOM 3=S-RANDOM 4=SCATTER 5=CONVERGE
     int random = 0;
-    bool assist = false;  // 皿の自動演奏（LR2: assist。AUTO SCRATCH）
+    bool seven_key = false;  // 7k モード：7 鍵の譜面の皿のノーツを除いて遊ぶ（記録は 7k+s と別）
     int gauge = 0;                 // GaugeType
     bool gas = false;
     // ターゲット（LR2: target）。0=既定（2P 側は動かさない） 1=自己ベスト 2=AAA 3=AA 4=A 5=割合（6〜8 の IR は無い）
@@ -109,6 +109,9 @@ struct AppConfig {
     // 選曲のスクロール（LR2: speedfirst / speednext。ms）
     int select_speed_first = 300, select_speed_next = 70;
     bool preview = true;  // 選曲中に、カーソルの曲を頭から鳴らす（LR2: select.preview。既定は有り）
+    bool sound_16bit = false;  // キー音を 16 ビットで持つ（float の半分のメモリ。音は変わらない）
+    // メモリを節約する：GPU に送ったスキンの画像の画素を捨てる・フォルダを開くときに中身を写さない（見た目は変わらない）
+    bool low_memory = true;
     // Windows で SDL の DirectInput を使うか。既定では使わず、コントローラーは Raw Input で直接読む
     // （DirectInput の機器の列挙に数十秒かかる環境があるため）
     bool joystick_directinput = false;
@@ -128,20 +131,26 @@ std::string config_path();
 std::vector<SkinCustomChoice> parse_skin_custom(const std::string& val);
 std::string format_skin_custom(const std::vector<SkinCustomChoice>& sel);
 
-// 曲データベースの置き場所（同じフォルダの songs.db）
+// 置き場は LR2 と同じく、実行ファイルの横の LR2files の中（util/data_dir.h）。
+// 設定（LR2files/Config/config.txt）は config_path()
+// 曲データベースと記録（LR2files/Database/songs.db）
 std::string song_db_path();
-// 難易度表を手元に保存しておくフォルダ
+// 難易度表を手元に保存しておくフォルダ（LR2files/Database/Table）
 std::string table_cache_dir();
-// LR2 から引き継いだ段位・コース（LR2 の曲データベースの grade・expert の表を写したもの）
+// LR2 から引き継いだ段位・コース（LR2files/Database/lr2_courses.txt。LR2 の曲データベースの grade・expert の表を写したもの）
 std::string lr2_courses_path();
-// 譜面のリプレイのファイル（設定フォルダの replay/<sha256>.bjr）
+// 譜面のリプレイのファイル（LR2files/Replay/<sha256>.bjr）
 std::string replay_path(const std::string& sha256);
-// 全プレーの入力の記録（設定フォルダの inputlog/<sha256>/<日時>.bjr）
+// 全プレーの入力の記録（LR2files/Replay/InputLog/<sha256>/<日時>.bjr）
 std::string input_log_path(const std::string& sha256, int64_t played_at);
-// MOD の置き場所：公式（実行ファイルの横の mods/）と利用者のもの（設定フォルダの mods/）。
-// MOD が書いてよいのは設定フォルダの moddata/<MOD の id>/ だけ
+// MOD の置き場所：公式（実行ファイルの横の mods/）と利用者のもの（LR2files/Mods/）。
+// MOD が書いてよいのは LR2files/Mods/ModData/<MOD の id>/ だけ
 std::string official_mods_dir();
 std::string user_mods_dir();
 std::string mod_data_dir(const std::string& id);
+// MOD の詳細の設定（LR2files/Mods/ModData/<MOD の id>/settings.json）
+std::string mod_settings_path(const std::string& id);
+// ゲージで「GAS」を選んだときの custom_gauge の値（カスタムゲージの鍵は「MOD/ゲージ」なので重ならない）
+inline constexpr const char* kGasKey = "gas";
 
 }  // namespace bmj

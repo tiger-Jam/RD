@@ -5,8 +5,10 @@
 //   on_play_end(result)   リザルトに入るとき（結果と全部のゲージ）
 //   on_draw(state)        プレー中、毎フレーム（「見た目」を宣言した MOD だけ。bmj.draw_rect / bmj.draw_text で描く）
 //   build_folders(charts) 選曲の一覧を作るとき（「操作」を宣言した MOD だけ。フォルダの表を返す）
+//   folder_bars(folder)   フォルダを開いたとき（「操作」を宣言した MOD だけ。フォルダの名前の下に出すバーを返す）
+//   pick_chart(req)       folder_bars のバーを決定したとき（遊ぶ譜面の sha256 を返す）
 // 使えるのは Lua の base（ファイルを読む関数を除く）・table・string・math・utf8・coroutine と bmj の表だけ。
-// ファイルに書けるのは設定フォルダの moddata/<MOD の id>/ の下だけ
+// ファイルに書けるのは LR2files/Mods/ModData/<MOD の id>/ の下だけ
 #pragma once
 
 #include <array>
@@ -84,7 +86,7 @@ public:
     ModScripts();
     ~ModScripts();
     // スクリプトを持つ MOD を読む。読めなかったものは errors に入り、使わない。
-    // data_root は MOD が書いてよい場所の親（設定フォルダの moddata。MOD ごとに <id>/ を切る）
+    // data_root は MOD が書いてよい場所の親（LR2files/Mods/ModData。MOD ごとに <id>/ を切る）
     void load(const std::vector<const ModManifest*>& mods, const std::string& data_root);
     bool empty() const { return scripts_.empty(); }
     void play_start(const ModPlayInfo& info);
@@ -105,6 +107,23 @@ private:
 std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& mods, const std::vector<ChartRecord>& charts,
                                          const std::unordered_map<std::string, ScoreRecord>& scores,
                                          const std::string& data_root, std::vector<std::string>* errors = nullptr);
+
+// フォルダの中の、フォルダの名前の下に出すバー（folder_bars の戻り値。ランダムセレクトなど）
+struct ModBar {
+    std::string mod_id, key, title;
+    bool roulette = false;  // カーソルを置いている間、曲名の枠に一覧の曲名を次々に出す
+};
+
+// フォルダを開いたときに、「操作」を宣言した MOD の folder_bars を呼んでバーを集める
+std::vector<ModBar> mod_folder_bars(const std::vector<const ModManifest*>& mods, const std::string& folder, int charts,
+                                    const std::string& data_root, std::vector<std::string>* errors = nullptr);
+
+// バーを決定したときに、その MOD の pick_chart を呼んで遊ぶ譜面（sha256）を決める。決めなければ空。
+// shown はルーレットのバーで、決定したときに曲名の枠に出ていた譜面（sha256）
+std::string mod_pick_chart(const ModManifest& m, const ModBar& bar, const std::string& folder,
+                           const std::vector<const ChartRecord*>& charts,
+                           const std::unordered_map<std::string, ScoreRecord>& scores, const std::string& data_root,
+                           std::string* error = nullptr, const std::string& shown = {});
 
 // MOD がファイルに書いてよい名前か（相対で、.. や絶対パスを含まない）
 bool mod_file_name_ok(const std::string& name);

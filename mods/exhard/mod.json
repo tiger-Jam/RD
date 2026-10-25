@@ -1,18 +1,23 @@
 {
+  // EX-HARD：HARD より減りが大きく、落ちたら終わりのゲージ（数値は beatoraja の EX-HARD）
   "id": "exhard",
   "name": "EX-HARD",
-  "version": "1",
+  "version": "2",
   "author": "BMjoy",
-  "description": "HARD より減りが大きく、残りが少なくても減りが緩まないゲージ",
+  "description": "GAUGE に EX-HARD を足す",
   "gauges": [
     {
       "id": "exhard",
       "name": "EX-HARD",
+      "frame": 7,
       "initial": 100,
       "survival": true,
       "delta": { "pgreat": 0.15, "great": 0.06, "good": 0, "bad": -8, "poor": -16, "empty_poor": -8 },
       "mine": 1.0,
-      "lamp": { "name": "EX-HARD", "color": "#ffd800", "rank": 4.5, "as": 4 }
+      "colors": 1,
+      "color": "#ffd800",
+      "lamp": "exhard"
     }
-  ]
+  ],
+  "lamps": [{ "id": "exhard", "name": "EX-HARD", "color": "#ffd800", "rank": 4.5 }]
 }

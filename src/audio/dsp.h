@@ -130,6 +130,9 @@ private:
 
 // 1 つの音（ステレオの pcm）を step 倍の速さで読み、gain[i] * scale 倍して out に足す。pos は読み位置（フレーム。
 // 負ならその分だけ遅れて始まる）で、n フレーム分進める。鳴り終わったら false（loop なら頭に戻る）
+// 16 ビットで持っている音（値は ±32767 を ±1 として読む）
+bool mix_resampled(const int16_t* pcm, int64_t frames, double& pos, double step, bool loop, const float* gain, float scale,
+                   float* out, uint32_t n);
 bool mix_resampled(const float* pcm, int64_t frames, double& pos, double step, bool loop, const float* gain, float scale,
                    float* out, uint32_t n);
 

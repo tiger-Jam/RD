@@ -106,14 +106,19 @@ TEST(song_db_import_lr2) {
                      "scorehash TEXT,ghost TEXT,clear_sd INTEGER,clear_ex INTEGER,op_best INTEGER, rseed INTEGER, complete INTEGER)",
                  nullptr, nullptr, nullptr);
     std::string ins = "INSERT INTO score(hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount) VALUES('" +
-                      md5 + "', 4, 1, 1, 3, 2, 10, 7), ('ffffffffffffffffffffffffffffffff', 2, 0, 0, 0, 0, 1, 1)";
+                      md5 + "', 4, 1, 1, 3, 2, 10, 7), ('ffffffffffffffffffffffffffffffff', 2, 0, 0, 0, 0, 1, 1), "
+                            "('0000000000200000000000000000519" + "0" + md5 + "', 3, 5, 5, 9, 9, 2, 1)";
     sqlite3_exec(db, ins.c_str(), nullptr, nullptr, nullptr);
     sqlite3_close(db);
 
     SongDb sdb;
     CHECK(sdb.open((dir / "songs.db").string()));
     sdb.scan({(dir / "songs").string()}, 1);
-    CHECK_EQ(sdb.import_lr2_scores(lr2), 2);
+    CHECK_EQ(sdb.import_lr2_scores(lr2), 3);
+    // 読んだ曲フォルダの下には譜面がある。まだ読んでいない曲フォルダには無い
+    CHECK(sdb.has_charts_under((dir / "songs").string()));
+    CHECK(!sdb.has_charts_under((dir / "other").string()));
+    CHECK(!sdb.has_charts_under((dir / "song").string()));  // 名前の頭が同じだけの別のフォルダ
     auto charts = sdb.all_charts();
     CHECK_EQ(charts.size(), size_t(1));
     ScoreRecord sc;
@@ -129,7 +134,11 @@ TEST(song_db_import_lr2) {
     CHECK_EQ(sc.exscore, 4);
     CHECK_EQ(sc.bp, 0);
     CHECK_EQ(sc.playcount, 11);
-    CHECK_EQ(sdb.all_scores().size(), size_t(1));  // 手元に無い譜面の分は表示には出ない
+    CHECK_EQ(sdb.all_scores().size(), size_t(2));  // 手元に無い譜面の分は表示には出ない（コースは出る）
+    // コースの記録は、作者の欄を除いた BMjoy のコースのハッシュで引ける
+    CHECK(sdb.get_score("00000000002" + std::string(21, '0') + md5, sc));
+    CHECK_EQ(sc.clear, 3);
+    CHECK_EQ(sc.exscore, 15);
     sdb.close();
     fs::remove_all(dir);
 }
@@ -301,4 +310,18 @@ TEST(custom_folder_query) {
     d.command = "no_such_column = 1";
     d.max_tracks = 0;
     CHECK(q.run(d, &err).empty() && !err.empty());
+    // 結果は覚えておき（裏のスレッドで先に集めた分を画面の処理が読む）、記録を書き換えたら捨てる
+    std::vector<std::string> got;
+    d.command = "clear = 5";
+    CHECK(q.cached(d, got) && got == std::vector<std::string>{"m0"});
+    d.command = "level >= 0";
+    d.max_tracks = 1;
+    CHECK(!q.cached(d, got));  // 1 曲を無作為に選ぶフォルダは覚えない
+    d.command = "clear = 5";
+    d.max_tracks = 0;
+    ScoreRecord r;
+    r.clear = 5;
+    q.update_score(charts[1], r);
+    CHECK(!q.cached(d, got));
+    CHECK(q.run(d).size() == 2);
 }

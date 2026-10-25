@@ -1,5 +1,7 @@
 #include "skin/skin_renderer.h"
 
+#include "util/dev.h"
+
 #include "game/gauge.h"
 
 #include <algorithm>
@@ -49,6 +51,7 @@ SDL_Texture* SkinRenderer::create_texture(const SkinImage& img) { return make_te
 SkinRenderer::~SkinRenderer() {
     for (SDL_Texture* t : textures_) if (t) SDL_DestroyTexture(t);
     for (auto& [k, v] : inverted_) if (v) SDL_DestroyTexture(v);
+    for (auto& [k, v] : gray_) if (v) SDL_DestroyTexture(v);
     for (auto& v : font_textures_)
         for (SDL_Texture* t : v) if (t) SDL_DestroyTexture(t);
 }
@@ -58,7 +61,10 @@ void SkinRenderer::upload(const Lr2Skin& skin) {
     textures_.clear();
     for (auto& [k, v] : inverted_) SDL_DestroyTexture(v);
     inverted_.clear();
+    for (auto& [k, v] : gray_) if (v) SDL_DestroyTexture(v);
+    gray_.clear();
     images_.clear();
+    ink_.clear();
     movies_.clear();
     for (const SkinImage& img : skin.images) {
         SDL_Texture* t = make_texture(r_, img);
@@ -81,12 +87,27 @@ void SkinRenderer::upload(const Lr2Skin& skin) {
     }
 }
 
+SDL_Texture* SkinRenderer::gray_tex(int gr) {
+    if (auto it = gray_.find(gr); it != gray_.end()) return it->second;
+    SDL_Texture* out = nullptr;
+    if (gr >= 0 && gr < static_cast<int>(images_.size()) && images_[gr] && images_[gr]->movie.empty() && !overrides_.count(gr)) {
+        SkinImage copy = *images_[gr];
+        reload_skin_image(copy);  // GPU に送ったあとで画素を捨てていたら、ファイルから読み直す
+        for (size_t p = 0; p + 3 < copy.rgba.size(); p += 4)
+            copy.rgba[p] = copy.rgba[p + 1] = copy.rgba[p + 2] = std::max({copy.rgba[p], copy.rgba[p + 1], copy.rgba[p + 2]});
+        out = make_texture(r_, copy);
+    }
+    gray_[gr] = out;
+    return out;
+}
+
 SDL_Texture* SkinRenderer::inverted(SDL_Texture* t) {
     if (auto it = inverted_.find(t); it != inverted_.end()) return it->second;
     SDL_Texture* inv = nullptr;
     for (size_t i = 0; i < textures_.size(); ++i) {
         if (textures_[i] != t || !images_[i]) continue;
         SkinImage copy = *images_[i];
+        reload_skin_image(copy);  // GPU に送ったあとで画素を捨てていたら、ファイルから読み直す
         for (size_t p = 0; p + 3 < copy.rgba.size(); p += 4)
             copy.rgba[p] = 255 - copy.rgba[p], copy.rgba[p + 1] = 255 - copy.rgba[p + 1], copy.rgba[p + 2] = 255 - copy.rgba[p + 2];
         inv = make_texture(r_, copy);
@@ -99,6 +120,31 @@ SDL_Texture* SkinRenderer::inverted(SDL_Texture* t) {
 void SkinRenderer::set_image_override(int gr, SDL_Texture* tex) {
     if (tex) overrides_[gr] = tex;
     else overrides_.erase(gr);
+}
+
+std::pair<float, float> SkinRenderer::ink_rows(const SkinSrc& src, int frame) {
+    const SDL_FRect fr = frame_rect(src, frame);
+    const std::array<int, 5> key{src.gr, static_cast<int>(fr.x), static_cast<int>(fr.y), static_cast<int>(fr.w), static_cast<int>(fr.h)};
+    if (auto it = ink_.find(key); it != ink_.end()) return it->second;
+    std::pair<float, float> out{0.0f, fr.h};
+    if (src.gr >= 0 && src.gr < static_cast<int>(images_.size()) && images_[src.gr]) {
+        SkinImage copy;
+        const SkinImage* img = images_[src.gr];
+        if (img->rgba.empty()) copy = *img, reload_skin_image(copy), img = &copy;  // 画素を捨てていたら読み直す
+        int top = -1, bottom = -1;
+        for (int y = static_cast<int>(fr.y); y < static_cast<int>(fr.y + fr.h) && y < img->h; ++y)
+            for (int x = static_cast<int>(fr.x); x < static_cast<int>(fr.x + fr.w) && x < img->w; ++x) {
+                const uint8_t* p = &img->rgba[(static_cast<size_t>(y) * img->w + x) * 4];
+                if (p[3] > 64 && std::max({p[0], p[1], p[2]}) > 110) {
+                    if (top < 0) top = y;
+                    bottom = y;
+                    break;
+                }
+            }
+        if (top >= 0) out = {static_cast<float>(top) - fr.y, static_cast<float>(bottom - top + 1)};
+    }
+    ink_[key] = out;
+    return out;
 }
 
 SDL_Texture* SkinRenderer::image_tex(int gr) const {
@@ -155,6 +201,14 @@ void SkinRenderer::add(const SkinSrc& src, SkinDraw d, double t) {
     if (!d.visible || !src.valid || src.w == 0 || src.h == 0) return;
     SDL_Texture* tex = image_tex(src.gr);
     if (!tex) return;
+    if (tint_) {
+        if (SDL_Texture* g = gray_tex(src.gr)) {
+            tex = g;
+            d.r = d.r * static_cast<int>((tint_ >> 16) & 0xff) / 255;
+            d.g = d.g * static_cast<int>((tint_ >> 8) & 0xff) / 255;
+            d.b = d.b * static_cast<int>(tint_ & 0xff) / 255;
+        }
+    }
     Item it;
     it.sort = d.sort;
     it.tex = tex;
@@ -205,6 +259,12 @@ void SkinRenderer::add_numbers(const SkinSrc& src, const SkinDst& dst, const Pla
     char buf[32];
     std::string s;
     int digits = src.op[2];
+    if (st.grow_digits && count_digit(number) > digits) {
+        // スキンが決めた枠（桁数 × 1 文字の幅）の中に収まるよう、1 文字の幅を詰める（枠の外の絵に重ならないように）
+        const int need = count_digit(number);
+        d.w = d.w * digits / need;
+        digits = need;
+    }
     if (src.op[1] == 0) {
         std::snprintf(buf, sizeof(buf), "%10d", std::abs(number));
         s = buf;
@@ -336,19 +396,10 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
             note_l += st.adjust.note_y;
             const float nx = static_cast<float>(st.adjust.note_x), szx = static_cast<float>(st.adjust.size_x),
                         szy = static_cast<float>(st.adjust.size_y);
-            // 皿の自動演奏のレーンは AUTO 用の絵（スキンに無ければふだんの絵）
-            bool assist = judge.is_assist_lane(lane);
-            auto pick = [&](const std::array<SkinSrc, 20>& a, const std::array<SkinSrc, 20>& b) -> const SkinSrc& {
-                return assist && a[lane].valid ? a[lane] : b[lane];
-            };
             if (n.kind == NoteKind::Mine) {
-                add_play_area(pick(skin.auto_mine, skin.mine), dst, st, nx, static_cast<float>(note_y), 255, szx, szy);
+                add_play_area(skin.mine[lane], dst, st, nx, static_cast<float>(note_y), 255, szx, szy);
             } else if (!is_ln) {
-                add_play_area(pick(skin.auto_note, skin.note), dst, st, nx, static_cast<float>(note_y), 255, szx, szy);
-            } else if (assist && skin.auto_ln_start[lane].valid) {
-                bool on = n.pos <= st.render_beat && end_pos > st.render_beat;
-                add_ln(skin.auto_ln_start[lane], skin.auto_ln_end[lane], skin.auto_ln_body[lane], dst, st,
-                       static_cast<float>(note_y), static_cast<float>(note_l), on ? 5 : 0, nx, szx, szy);
+                add_play_area(skin.note[lane], dst, st, nx, static_cast<float>(note_y), 255, szx, szy);
             } else {
                 int active;
                 if (st.autoplay) active = (n.pos <= st.render_beat && end_pos > st.render_beat) ? 5 : 0;
@@ -392,6 +443,15 @@ void SkinRenderer::add_gauge(const SkinObject& o, const PlaySkinState& st) {
         it.tex = tex;
         it.src = frame_rect(o.src, std::min(f, count - 1));
         it.d = d;
+        // カスタムゲージの色：コマの 0・2 はクリアの線より上（落ちたら終わりのゲージは全部）、1・3 は線より下の色
+        if (const uint32_t tint = (f - cyc) % 2 ? st.gauge_tint_low : st.gauge_tint) {
+            if (SDL_Texture* g = gray_tex(o.src.gr)) {
+                it.tex = g;
+                it.d.r = d.r * static_cast<int>((tint >> 16) & 0xff) / 255;
+                it.d.g = d.g * static_cast<int>((tint >> 8) & 0xff) / 255;
+                it.d.b = d.b * static_cast<int>(tint & 0xff) / 255;
+            }
+        }
         items_.push_back(it);
         d.x += o.src.op[0];
         d.y += o.src.op[1];
@@ -455,9 +515,11 @@ void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
         add_notes(skin, st);
         if (st.show_judge) add_judge_combo(skin, st);
     }
+    // 判定ラインも LIFT の分だけ上げる（OpenLR2 と同じ）
     if (!skin.judgeline[0].dst.empty())
         add_play_area(skin.judgeline[0].src, skin.judgeline[0].dst, st, static_cast<float>(st.adjust.note_x),
-                      static_cast<float>(st.adjust.note_y), -1, static_cast<float>(st.adjust.size_x), static_cast<float>(st.adjust.size_y));
+                      static_cast<float>(st.adjust.note_y) - st.lift_px, -1, static_cast<float>(st.adjust.size_x),
+                      static_cast<float>(st.adjust.size_y));
     add_common(skin, st);
     flush(skin);
     adjust_ = SkinAdjust{};
@@ -471,7 +533,9 @@ void SkinRenderer::add_gauge_chart(const Lr2Skin& skin, const PlaySkinState& st)
     if (!st.graph || lo.src.op[0] <= 0 || lo.dst.empty()) return;
     const PlayGraph& g = *st.graph;
     int gauge = std::clamp(st.graph_gauge, 0, kGaugeCount - 1);
-    bool groove = gauge == kGroove || gauge == kEasy;
+    // GROOVE/EASY は 80% で描き分ける。コースの中では GROOVE/EASY も落ちたら終わりのゲージなので、HARD と同じく分けない
+    // （遊んでいる間のゲージの色とそろえる）
+    bool groove = (gauge == kGroove || gauge == kEasy) && !st.gauge_survival;
     double t0 = st.timers->lapse(0, st.now_ms);
     int length = static_cast<int>(st.chart_length(lo.src.op[0], t0));
     int step = std::max(1, static_cast<int>(lo.dst.keys.front().w));
@@ -484,13 +548,18 @@ void SkinRenderer::add_gauge_chart(const Lr2Skin& skin, const PlaySkinState& st)
             const SkinObject& o = (groove && val < 80) ? lo : hi;
             int y = o.src.op[1] * val / -100;
             if (last != y) {
+                tint_ = groove && val < 80 ? st.gauge_tint_low : st.gauge_tint;
                 add_object(o, st, static_cast<float>(i), static_cast<float>(y));
+                tint_ = 0;
                 last = y;
             }
             val += val < g.hp[gauge][axis] ? 1 : -1;
         }
-        const SkinObject& o = (groove && g.hp[gauge][axis] < 80) ? lo : hi;
+        const bool low = groove && g.hp[gauge][axis] < 80;
+        const SkinObject& o = low ? lo : hi;
+        tint_ = low ? st.gauge_tint_low : st.gauge_tint;
         add_object(o, st, static_cast<float>(i), static_cast<float>(o.src.op[1] * g.hp[gauge][axis] / -100));
+        tint_ = 0;
     }
 }
 
@@ -601,7 +670,9 @@ void SkinRenderer::add_bars(const Lr2Skin& skin, const PlaySkinState& st) {
         }
         // スキンに無い番号のランプ（PERFECT）は FULL COMBO の絵で出す
         int lamp = bar.lamp >= 0 && bar.lamp < 10 && !b.lamp[bar.lamp].src.valid ? skin_lamp(bar.lamp) : bar.lamp;
+        tint_ = bar.lamp_tint;
         if (lamp >= 0 && lamp < 10 && b.lamp[lamp].src.valid) add_object(b.lamp[lamp], st, d.x, d.y);
+        tint_ = 0;
     }
 }
 
@@ -671,6 +742,21 @@ void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
         if (dark == 2) return timer == 2 || timer == 3 || timer == 48 || timer == 49 || (timer >= 50 && timer < 70) || timer == 140;
         return true;
     };
+    // LIFT：判定ラインの上で光るもの（ボム・ホールドの光・判定ラインの光）と、レーンの上に伸びるキービームも上げる。
+    // キーを押したときの画像でも、判定ラインより下にある小さいもの（鍵盤の絵）は上げない（OpenLR2 と同じ）
+    const float judge_y = skin.judgeline[0].dst.keys.empty() ? 0.0f : skin.judgeline[0].dst.keys.back().y;
+    auto lift_of = [&](const SkinObject& o) -> float {
+        if (st.lift_px <= 0 || o.dst.keys.empty()) return 0;
+        const int t = o.dst.timer;
+        if (t == 48 || (t >= 50 && t < 60) || (t >= 70 && t < 80)) return -st.lift_px;
+        if ((t >= 100 && t < 110) || (t >= 120 && t < 130)) {
+            const float h0 = o.dst.keys.front().h, hn = o.dst.keys.back().h;
+            const bool small = std::abs(h0) < 100 && std::abs(hn) < 100;
+            if (small && !skin.judgeline[0].dst.keys.empty() && o.dst.keys.front().y >= judge_y) return 0;
+            return -st.lift_px;
+        }
+        return 0;
+    };
     for (const SkinObject& o : skin.image_objs) {
         if (!dst_on(o.dst, st) || !dark_image(o.dst.timer)) continue;
         if (o.dst.op[3] == 1) {
@@ -679,7 +765,7 @@ void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
             d.angle = st.scratch_angle;
             add(o.src, d, src_time(o.src, o.dst, st));
         } else {
-            add_object(o, st, 0, 0);
+            add_object(o, st, 0, lift_of(o));
         }
     }
     // BGA（LR2: Main.cpp:2045）。ミスした直後はPOORの層だけ、それ以外は一番下の層と重ねる層
@@ -699,9 +785,35 @@ void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
         if (dark == 2 || !dst_on(o.dst, st) || !o.src.valid || o.src.w == 0 || o.src.h == 0) continue;
         SkinDraw d = eval_dst(o.dst, st.timers->lapse(o.dst.timer, st.now_ms));
         if (!d.visible) continue;
+        const int extra = st.button_extra_frame ? st.button_extra_frame(o.src.op[0]) : -1;
+        const bool has_extra = extra >= 0 && extra < o.src.graphcount();
+        if (st.button_label && !has_extra) {
+            // スキンの絵に無い値：同じ場所に名前を書く（書体は曲名のバーのもの）
+            const std::string label = st.button_label(o.src.op[0]);
+            if (!label.empty()) {
+                Item it;
+                it.sort = d.sort;
+                it.is_text = true;
+                it.str = label;
+                it.font = skin.bar.title[0].src.font;
+                it.align = 1;
+                // ボタンの絵の中の文字と同じ大きさ・高さに書く。曲名の書体は字の上下に余白があるので、
+                // 字の高さの 2.4 倍の大きさで書くと、大文字の高さがそろう（W-MIX の下の欄で合わせた値）
+                const int frame = std::clamp(st.button ? st.button(o.src.op[0]) : 0, 0, o.src.graphcount() - 1);
+                const auto [ink_top, ink_h] = ink_rows(o.src, frame);
+                const float fh = frame_rect(o.src, frame).h;
+                const float scale = fh > 0 ? d.h / fh : 1.0f;
+                it.d = d;
+                it.d.x = d.x + d.w / 2;
+                it.d.h = ink_h * scale * 2.4f;
+                it.d.y = d.y + (ink_top + ink_h / 2) * scale - it.d.h / 2;
+                items_.push_back(it);
+                continue;
+            }
+        }
         SDL_Texture* tex = image_tex(o.src.gr);
         if (!tex) continue;
-        int v = st.button ? st.button(o.src.op[0]) : 0;
+        int v = has_extra ? extra : st.button ? st.button(o.src.op[0]) : 0;
         int count = o.src.graphcount();
         v = std::clamp(v, 0, count - 1);
         Item it;
@@ -709,6 +821,15 @@ void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
         it.tex = tex;
         it.src = frame_rect(o.src, v);
         it.d = d;
+        // 染める（足したコマの白い字をゲージの色に、今回のクリアをランプの色に）
+        if (const uint32_t tint = st.button_tint ? st.button_tint(o.src.op[0], has_extra) : 0) {
+            if (SDL_Texture* g = gray_tex(o.src.gr)) {
+                it.tex = g;
+                it.d.r = d.r * static_cast<int>((tint >> 16) & 0xff) / 255;
+                it.d.g = d.g * static_cast<int>((tint >> 8) & 0xff) / 255;
+                it.d.b = d.b * static_cast<int>(tint & 0xff) / 255;
+            }
+        }
         items_.push_back(it);
     }
     for (const SkinObject& o : skin.sliders) {
@@ -727,9 +848,48 @@ void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
         }
         add_object(o, st, sx, sy);
     }
+    // LIFT のカバー：スキンに LIFT のスライダー（27）が無ければ、レーンカバー（スライダー 4）の絵を、
+    // 上げた判定ラインから元の判定ラインまでのところに敷く（SUDDEN+ と同じ絵。はみ出す分は切る）
+    bool has_lift_slider = false;
+    for (const SkinObject& o : skin.sliders) has_lift_slider = has_lift_slider || o.src.op[2] == 27;
+    if (st.lift_px > 0 && dark != 2 && !has_lift_slider && !skin.judgeline[0].dst.keys.empty()) {
+        for (const SkinObject& o : skin.sliders) {
+            if (o.src.op[2] != 4 || o.dst.keys.empty()) continue;
+            SkinDraw d = eval_dst(o.dst, st.timers->lapse(o.dst.timer, st.now_ms));
+            if (!d.visible) continue;
+            // 判定ラインの絵の下の端から下を覆う（判定ラインはカバーの上に見える）
+            const float bottom = judge_y + skin.judgeline[0].dst.keys.back().h + static_cast<float>(st.adjust.note_y),
+                        top = bottom - st.lift_px;
+            d.y = top;
+            clip_top_ = top, clip_bottom_ = bottom;
+            add(o.src, d, src_time(o.src, o.dst, st));
+            clip_top_ = clip_bottom_ = -1;
+            break;
+        }
+    }
     for (const SkinObject& o : skin.numbers) {
         if (dark == 2 || !dst_on(o.dst, st)) continue;
         add_numbers(o.src, o.dst, st, st.number ? st.number(o.src.op[0]) : -1, 0, 0);
+        if (o.src.op[0] == 14) {
+            // 開発用：レーンカバーの数字を描いた値が変わったら書き出す（BMJ_DEBUG_INPUT）
+            static const bool debug = dev_env("BMJ_DEBUG_INPUT") != nullptr;
+            static int last = -1000;
+            const int v = st.number ? st.number(14) : -1;
+            if (debug && v != last) std::printf("カバーの数字を %d で描いた（%.1f ms）\n", v, st.now_ms), std::fflush(stdout), last = v;
+        }
+        if (!st.number_after) continue;
+        for (const PlaySkinState::NumberExtra& e : st.number_after(o.src.op[0])) {
+            if (e.digits > 0) {
+                SkinSrc s = o.src;
+                s.op[2] = e.digits;
+                add_numbers(s, o.dst, st, e.value, e.dx, e.dy);
+            } else if (e.image.valid) {
+                SkinDraw d = eval_dst(o.dst, st.timers->lapse(o.dst.timer, st.now_ms));
+                d.x += e.dx, d.y += e.dy;
+                d.w = static_cast<float>(e.image.w), d.h = static_cast<float>(e.image.h);
+                add(e.image, d, 0);
+            }
+        }
     }
     for (const SkinText& t : skin.texts) {
         if (!dst_on(t.dst, st) || !st.text) continue;

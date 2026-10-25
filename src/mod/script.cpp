@@ -1,10 +1,12 @@
 #include "mod/script.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <random>
 
 // Lua は C++ として組んでいる（CMakeLists.txt）ので、extern "C" の lua.hpp ではなく素のヘッダを読む
 #include "lauxlib.h"
@@ -155,6 +157,16 @@ private:
                                         {LUA_UTF8LIBNAME, luaopen_utf8},    {LUA_COLIBNAME, luaopen_coroutine}};
         for (const luaL_Reg& l : libs) {
             luaL_requiref(L_, l.name, l.func, 1);
+            lua_pop(L_, 1);
+        }
+        // math.random の種。Lua の既定は時刻（秒）とアドレスなので、同じ秒に作り直した環境では同じ並びになる
+        {
+            std::random_device rd;
+            lua_getglobal(L_, LUA_MATHLIBNAME);
+            lua_getfield(L_, -1, "randomseed");
+            lua_pushinteger(L_, static_cast<lua_Integer>(rd()));
+            lua_pushinteger(L_, static_cast<lua_Integer>(rd()));
+            lua_call(L_, 2, 0);
             lua_pop(L_, 1);
         }
         // ファイルを読んで動かす関数と、バイトコードを読める load は外す
@@ -335,6 +347,25 @@ void set_bool(lua_State* L, const char* k, bool v) {
     lua_setfield(L, -2, k);
 }
 
+// 譜面 1 つの表：{ sha256, md5, title, …, clear, exscore, bp, playcount }（記録が無ければ clear = 0）
+void push_chart(lua_State* L, const ChartRecord& c, const std::unordered_map<std::string, ScoreRecord>& scores) {
+    lua_createtable(L, 0, 26);
+    set_str(L, "sha256", c.sha256), set_str(L, "md5", c.md5), set_str(L, "path", c.path), set_str(L, "folder", c.folder);
+    set_str(L, "title", c.title), set_str(L, "subtitle", c.subtitle), set_str(L, "artist", c.artist);
+    set_str(L, "genre", c.genre);
+    set_int(L, "playlevel", c.playlevel), set_int(L, "difficulty", c.difficulty), set_int(L, "notes", c.notes);
+    set_int(L, "ln", c.ln), set_int(L, "rank", c.rank), set_int(L, "total", c.total), set_int(L, "keys", c.keys);
+    set_num(L, "bpm_min", c.bpm_min), set_num(L, "bpm_max", c.bpm_max), set_num(L, "bpm_main", c.bpm_main);
+    set_int(L, "length_ms", c.length_ms), set_bool(L, "scratch", c.scratch), set_int(L, "added", c.added);
+    auto it = scores.find(c.sha256);
+    if (it != scores.end()) {
+        set_int(L, "clear", it->second.clear), set_int(L, "exscore", it->second.exscore);
+        set_int(L, "bp", it->second.bp), set_int(L, "playcount", it->second.playcount);
+    } else {
+        set_int(L, "clear", 0);
+    }
+}
+
 std::unique_ptr<ModScript> open_script(const ModManifest& m, const std::string& data_root, std::string& err) {
     auto s = std::make_unique<ModScript>(m, (fs::path(data_root) / fs::u8path(m.id)).string());
     if (!s->load(m.script, err)) return nullptr;
@@ -488,25 +519,10 @@ std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& 
         }
         if (!s->has("build_folders")) continue;
         bool ok = s->run("build_folders", [&](lua_State* L) {
-            // 譜面の一覧：{ sha256, md5, title, …, clear, exscore, bp, playcount }（記録が無ければ clear = 0）
             lua_createtable(L, static_cast<int>(charts.size()), 0);
             lua_Integer i = 0;
             for (const ChartRecord& c : charts) {
-                lua_createtable(L, 0, 26);
-                set_str(L, "sha256", c.sha256), set_str(L, "md5", c.md5), set_str(L, "path", c.path), set_str(L, "folder", c.folder);
-                set_str(L, "title", c.title), set_str(L, "subtitle", c.subtitle), set_str(L, "artist", c.artist);
-                set_str(L, "genre", c.genre);
-                set_int(L, "playlevel", c.playlevel), set_int(L, "difficulty", c.difficulty), set_int(L, "notes", c.notes);
-                set_int(L, "ln", c.ln), set_int(L, "rank", c.rank), set_int(L, "total", c.total), set_int(L, "keys", c.keys);
-                set_num(L, "bpm_min", c.bpm_min), set_num(L, "bpm_max", c.bpm_max), set_num(L, "bpm_main", c.bpm_main);
-                set_int(L, "length_ms", c.length_ms), set_bool(L, "scratch", c.scratch), set_int(L, "added", c.added);
-                auto it = scores.find(c.sha256);
-                if (it != scores.end()) {
-                    set_int(L, "clear", it->second.clear), set_int(L, "exscore", it->second.exscore);
-                    set_int(L, "bp", it->second.bp), set_int(L, "playcount", it->second.playcount);
-                } else {
-                    set_int(L, "clear", 0);
-                }
+                push_chart(L, c, scores);
                 lua_rawseti(L, -2, ++i);
             }
         }, kStepsFolders, [&](lua_State* L) {
@@ -525,6 +541,79 @@ std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& 
         if (!ok && errors) errors->push_back(s->error());
     }
     return out;
+}
+
+
+std::vector<ModBar> mod_folder_bars(const std::vector<const ModManifest*>& mods, const std::string& folder, int charts,
+                                    const std::string& data_root, std::vector<std::string>* errors) {
+    std::vector<ModBar> out;
+    for (const ModManifest* m : mods) {
+        if (m->script.empty() || !(m->touches & static_cast<uint32_t>(ModTouch::Control))) continue;
+        std::string err;
+        auto s = open_script(*m, data_root, err);
+        if (!s) {
+            if (errors) errors->push_back(err);
+            continue;
+        }
+        if (!s->has("folder_bars")) continue;
+        bool ok = s->run("folder_bars", [&](lua_State* L) {
+            // { title = フォルダの名前, charts = 中の譜面の数 }
+            lua_createtable(L, 0, 2);
+            set_str(L, "title", folder), set_int(L, "charts", charts);
+        }, kStepsPerCall, [&](lua_State* L) {
+            // 戻り値はバーの配列 { { key = "…", title = "…", roulette = true }, … }
+            if (!lua_istable(L, -1)) return;
+            lua_Integer n = std::min<lua_Integer>(static_cast<lua_Integer>(lua_rawlen(L, -1)), 8);
+            for (lua_Integer k = 1; k <= n; ++k) {
+                if (lua_rawgeti(L, -1, k) == LUA_TTABLE) {
+                    ModBar b;
+                    b.mod_id = m->id;
+                    if (lua_getfield(L, -1, "key") == LUA_TSTRING) b.key = lua_tostring(L, -1);
+                    lua_pop(L, 1);
+                    if (lua_getfield(L, -1, "title") == LUA_TSTRING) b.title = lua_tostring(L, -1);
+                    lua_pop(L, 1);
+                    lua_getfield(L, -1, "roulette");
+                    b.roulette = lua_toboolean(L, -1);
+                    lua_pop(L, 1);
+                    if (!b.title.empty()) out.push_back(std::move(b));
+                }
+                lua_pop(L, 1);
+            }
+        });
+        if (!ok && errors) errors->push_back(s->error());
+    }
+    return out;
+}
+
+std::string mod_pick_chart(const ModManifest& m, const ModBar& bar, const std::string& folder,
+                           const std::vector<const ChartRecord*>& charts,
+                           const std::unordered_map<std::string, ScoreRecord>& scores, const std::string& data_root,
+                           std::string* error, const std::string& shown) {
+    std::string err, picked;
+    auto s = open_script(m, data_root, err);
+    if (!s) {
+        if (error) *error = err;
+        return {};
+    }
+    bool ok = s->run("pick_chart", [&](lua_State* L) {
+        // { key = バーの key, folder = フォルダの名前, charts = { 譜面, … }, shown = ルーレットに出ていた譜面の sha256 }
+        //（譜面は今の一覧に見えているもの。shown はルーレットのバーのときだけ）
+        lua_createtable(L, 0, 4);
+        set_str(L, "key", bar.key), set_str(L, "folder", folder);
+        if (!shown.empty()) set_str(L, "shown", shown);
+        lua_createtable(L, static_cast<int>(charts.size()), 0);
+        lua_Integer i = 0;
+        for (const ChartRecord* c : charts) {
+            push_chart(L, *c, scores);
+            lua_rawseti(L, -2, ++i);
+        }
+        lua_setfield(L, -2, "charts");
+    }, kStepsFolders, [&](lua_State* L) {
+        // 戻り値は遊ぶ譜面の sha256（nil なら何もしない）
+        if (lua_type(L, -1) == LUA_TSTRING) picked = lua_tostring(L, -1);
+    });
+    if (!ok && error) *error = s->error().empty() ? m.id + ": pick_chart が無い" : s->error();
+    return picked;
 }
 
 }  // namespace bmj

@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <set>
 
 #include "mod/script.h"
 #include "test.h"
@@ -138,5 +139,35 @@ TEST(mod_script_official_judge_log) {
     CHECK_EQ(files, 1);
     CHECK(text.find("\"A, \"\"B\"\"\"") != std::string::npos);
     CHECK(text.find("PGREAT,-3,FAST,1,2") != std::string::npos);
+    fs::remove_all(data, ec);
+}
+
+// 公式のランダムセレクト：譜面のあるフォルダにだけバーを出し、決定すると渡した譜面から 1 つを選ぶ
+TEST(mod_script_official_random_select) {
+    ModManifest m;
+    CHECK(load_mod_manifest(std::string(BMJ_SOURCE_DIR) + "/mods/random-select", m));
+    fs::path data = fs::temp_directory_path() / "bmj_mod_test_random";
+    std::vector<std::string> errors;
+    auto bars = mod_folder_bars({&m}, "★18", 3, data.string(), &errors);
+    CHECK(errors.empty());
+    CHECK_EQ(bars.size(), size_t(1));
+    CHECK(mod_folder_bars({&m}, "フォルダだけ", 0, data.string()).empty());
+    if (bars.size() != 1) return;
+    CHECK(bars[0].title == "?????" && bars[0].roulette && bars[0].mod_id == "random-select");
+    std::vector<ChartRecord> charts(3);
+    charts[0].sha256 = "a", charts[1].sha256 = "b", charts[2].sha256 = "c";
+    std::vector<const ChartRecord*> view{&charts[0], &charts[1], &charts[2]};
+    std::set<std::string> seen;
+    for (int i = 0; i < 50; ++i) {
+        std::string err;
+        std::string sha = mod_pick_chart(m, bars[0], "★18", view, {}, data.string(), &err);
+        CHECK(err.empty());
+        seen.insert(sha);
+    }
+    CHECK(seen == (std::set<std::string>{"a", "b", "c"}));  // 50 回で 3 つとも出る（毎回同じではない）
+    CHECK(mod_pick_chart(m, bars[0], "空", {}, {}, data.string()).empty());
+    // ルーレットに出ていた譜面を遊ぶ
+    CHECK(mod_pick_chart(m, bars[0], "★18", view, {}, data.string(), nullptr, "b") == "b");
+    std::error_code ec;
     fs::remove_all(data, ec);
 }

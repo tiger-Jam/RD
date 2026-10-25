@@ -3,6 +3,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -19,6 +20,8 @@ public:
     };
     // size は文字の高さ（ピクセル）、thick は DxLib の太さ（0〜9）
     Tex get(int size, int thick, const std::string& s);
+    // 前に呼んでからこれまでに新しく作った文字列の数と、作るのにかかった時間（ms）。遅いフレームの内訳に使う
+    static void take_made(int& count, double& ms);
     // align: 0=左, 1=中央, 2=右。max_w を超えるときは横に縮める（LR2の文字と同じ）
     float draw(float x, float y, int size, SDL_Color c, const std::string& s, int align = 0, float max_w = 0, int thick = 4);
     void clear();
@@ -34,6 +37,9 @@ private:
     const std::vector<uint8_t>* font_data(int thick);
     SDL_Renderer* r_;
     std::map<std::string, Tex> cache_;
+    std::map<std::string, uint64_t> used_;  // 最後に使った順番（多すぎたら古いものから捨てる）
+    uint64_t tick_ = 0;
+    void evict();
     std::map<std::string, std::vector<uint8_t>> files_;
     std::string font_path_;
     int font_face_ = 0;  // .ttc の中の何番目の書体か（font_path_ を指定したときだけ）

@@ -303,7 +303,7 @@ BMjoy 側の略記：`ks` = src/app/keyconfig_skin_scene.cpp、`ke` = src/app/ke
 | gauge | 0=GROOVE（0〜5） | `gauge` 0〜5 | 同じ | configsave:1057 / config.h:51 |
 | random | 0=OFF（0〜5） | `random` 0〜5 | 同じ | configsave:1058 / config.h:49 |
 | effect | 0（OFF / HID / SUD / HID+SUD） | `effect` 0〜3 | 同じ | configsave:1059 / config.h:47 |
-| autoscratch | 0 | `assist`（bool） | 同じ | configsave:1068 / config.h:50 |
+| autoscratch | 0 | 無い（AUTO SCRATCH が無い）。代わりに `seven_key`（7k モード。LR2 からは取り込まない） | 違う | configsave:1068 / config.h |
 | autokey | 0 | 無し | BMjoyに無い [?] | configsave:1069 |
 | shuttertype / shutter | 0 / 0（0〜100） | `lane_cover` / `lane_cover_v` | 同じ | configsave:1064,1070, skinobject:2564 / config.h:32 |
 | autojudgeadjust | 0（OFF / ON / SILENT） | `auto_adjust` 0〜2 | 同じ | configsave:1072 / config.h:25 |

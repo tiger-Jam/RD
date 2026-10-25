@@ -30,7 +30,7 @@ bool save_replay(const std::string& path, const Replay& r) {
         f << "ln_mode = " << r.ln_mode << "\n";
         f << "hs_fix = " << r.hs_fix << "\n";
         f << "effect = " << r.effect << "\n";
-        f << "assist = " << (r.assist ? 1 : 0) << "\n";
+        f << "seven_key = " << (r.seven_key ? 1 : 0) << "\n";
         f << "gas = " << (r.gas ? 1 : 0) << "\n";
         f << "hi_speed = " << r.hi_speed << "\n";
         f << "lane_cover = " << r.lane_cover << "\n";
@@ -80,7 +80,7 @@ bool load_replay(const std::string& path, Replay& r) {
         else if (k == "ln_mode") r.ln_mode = iv;
         else if (k == "hs_fix") r.hs_fix = iv;
         else if (k == "effect") r.effect = iv;
-        else if (k == "assist") r.assist = iv != 0;
+        else if (k == "seven_key") r.seven_key = iv != 0;
         else if (k == "gas") r.gas = iv != 0;
         else if (k == "hi_speed") r.hi_speed = iv;
         else if (k == "lane_cover") r.lane_cover = iv;

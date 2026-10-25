@@ -82,19 +82,21 @@ bool SelectContext::option(int op) const {
     case 46: return true;   // 難易度フィルタ有効
     case 50: return true;   // オフライン
     case 52: return true;   // EXTRA モード OFF
-    case 54: return !cfg->assist;
-    case 55: return cfg->assist;
+    case 54: return true;   // 皿の自動演奏 OFF（BMjoy には無い）
+    case 55: return false;
     case 56: return true;  // 2P のアシスト OFF
-    // スコアが残るか（LR2: CheckScoreSaveConditon）。皿の自動演奏・CONSTANT・SCATTER・CONVERGE はランプだけ
+    // スコアが残るか（LR2: CheckScoreSaveConditon）。CONSTANT・SCATTER・CONVERGE はランプだけ
     case 60: case 61: {
         // 曲を遅くして遊ぶときも残らない（ピッチの FREQ・SPEED）
-        bool no_score = cfg->assist || cfg->hs_fix == 4 || cfg->random >= 4 || cfg->sound_fx.play_rate() < 1.0;
+        // メトロノームを鳴らすときも残らない
+        bool no_score = no_record || cfg->hs_fix == 4 || cfg->random >= 4 || cfg->sound_fx.play_rate() < 1.0;
         return no_score == (op == 60);
     }
     case 62: case 63: case 64: case 65: case 66: {
         // 取れるランプの上限（LR2: CheckClearLampChallenge）。上の 4 つは EASY 止まり
         int lamp = gauge_lamp(cfg->gauge);
-        if (cfg->assist || cfg->hs_fix == 4 || cfg->random >= 4) lamp = std::min(lamp, 1);
+        if (cfg->hs_fix == 4 || cfg->random >= 4) lamp = std::min(lamp, 1);
+        if (no_record) lamp = 0;  // メトロノーム：ランプも残らない
         return lamp == op - 62;
     }
     case 100: case 101: case 102: case 103: case 104: case 105: return (song || course) && lamp == op - 100;
@@ -152,11 +154,25 @@ bool SelectContext::option(int op) const {
     return false;
 }
 
+// コースのノーツ数（持っていないステージは数えられないので、持っているステージの合計）
+int SelectContext::course_notes() const {
+    int n = 0;
+    if (course)
+        for (const CourseStage& st : course->stages)
+            if (st.chart) n += notes_of(*st.chart);
+    return n;
+}
+
 int SelectContext::number(int id) const {
     if (int v; course_number(course, id, v)) return v;
     const bool song = chart && is_song(type);
-    const ScoreRecord* s = song ? score : nullptr;
-    int notes = song ? notes_of(*chart) : 0;
+    // コースのバーにも、コースの記録（EX スコア・判定の数・BP・回数など）を曲と同じ番号で出す
+    const bool course_bar = type == 8 && course;
+    const bool folder = !song && !course_bar && folder_score;
+    const ScoreRecord* s = song || course_bar ? score : folder ? folder_score : nullptr;
+    int notes = song ? notes_of(*chart) : course_bar ? course_notes() : folder ? folder_notes : 0;
+    // フォルダでは EX スコア・最大 EX・スコア率・ノーツ数・最大コンボ・BP は出さない（数字を描かない）
+    if (folder && id >= 71 && id <= 76) return -1;
     std::time_t now = std::time(nullptr);
     std::tm tm{};
 #ifdef _WIN32
@@ -179,16 +195,45 @@ int SelectContext::number(int id) const {
     case 42: case 96: return song ? chart->playlevel : 0;
     case 45: case 46: case 47: case 48: case 49: return song ? diff_level[id - 45] : -1;
     case 71: return s ? s->exscore : 0;
-    case 72: return notes * 2;
-    case 73: return s && notes > 0 ? s->exscore * 100 / (notes * 2) : 0;
-    case 74: return notes;
-    case 75: return s ? s->max_combo : 0;
+    // フォルダの最大 EX とスコア率は、遊んだ譜面のノーツ数で出す
+    case 72: return (folder ? folder_played_notes : notes) * 2;
+    case 73: {
+        const int n = folder ? folder_played_notes : notes;
+        return s && n > 0 ? static_cast<int>(static_cast<int64_t>(s->exscore) * 100 / (n * 2)) : 0;
+    }
+    case 74: return folder ? folder_played_notes : notes;  // フォルダは遊んだ譜面のノーツ数（EX の分母とそろえる）
+    case 75: return s && !folder ? s->max_combo : 0;  // 最大コンボは足しても意味が無いので、フォルダでは 0
     case 76: return s && s->bp >= 0 ? s->bp : 0;
     case 77: return s ? s->playcount : 0;
     case 78: return s ? s->clearcount : 0;
     case 79: return s ? s->playcount - s->clearcount : 0;
-    case 80: case 81: case 82: case 83: case 84: return s ? s->judge[id - 80] : 0;  // ベストの PG〜PR の数
-    case 85: case 86: case 87: case 88: case 89: return s && notes > 0 ? s->judge[id - 85] * 100 / notes : 0;  // 同じく割合
+    // ベストの PG〜PR の数。フォルダの合計は桁が足りないので出さない（割合だけ出す）
+    case 80: case 81: case 82: case 83: case 84: return folder ? -1 : s ? s->judge[id - 80] : 0;
+    case 85: case 86: case 87: case 88: case 89: {  // 同じく割合
+        if (folder) {
+            // フォルダは、判定の数の合計に対する割合を、足して 100% になるように丸める（端数の大きい順に 1% ずつ足す）。
+            // ノーツ数で割ると、途中で落ちた記録（残りのノーツに判定が無い）や、判定の内訳が無い記録のぶん 100% に届かない
+            int64_t sum = 0;
+            for (int j = 0; j < 5; ++j) sum += s->judge[j];
+            if (sum <= 0) return 0;
+            std::array<int, 5> pct{};
+            std::array<int64_t, 5> rem{};
+            int left = 100;
+            for (int j = 0; j < 5; ++j) {
+                pct[j] = static_cast<int>(s->judge[j] * int64_t{100} / sum);
+                rem[j] = s->judge[j] * int64_t{100} % sum;
+                left -= pct[j];
+            }
+            for (; left > 0; --left) {
+                int best = 0;
+                for (int j = 1; j < 5; ++j)
+                    if (rem[j] > rem[best]) best = j;
+                pct[best]++, rem[best] = -1;
+            }
+            return pct[id - 85];
+        }
+        return s && notes > 0 ? static_cast<int>(static_cast<int64_t>(s->judge[id - 85]) * 100 / notes) : 0;
+    }
     case 30: return player.playcount;
     case 31: return player.clear;
     case 32: return player.fail;
@@ -212,6 +257,7 @@ int SelectContext::number(int id) const {
 
 std::string SelectContext::text(int id) const {
     if (catalog && (id == 50 || id == 51 || (id >= 100 && id <= 114))) return catalog->text(id, *cfg);
+    if (!title_override.empty() && (id == 10 || id == 12)) return title_override;
     if (std::string v; course_text(course, id, v)) return v;
     if (course) {
         // コースのバー：タイトルの枠にコース名。遊べないときはアーティストの枠にその旨
@@ -220,6 +266,7 @@ std::string SelectContext::text(int id) const {
         if (id >= 10 && id <= 18) return {};
     }
     const bool song = chart && is_song(type);
+    if (!song && id >= 10 && id <= 15) return bar_text[id - 10];
     auto opt = [&](const char* key, int i) { return names ? names->get(key, i) : std::string(); };
     switch (id) {
     case 1: {
@@ -258,13 +305,18 @@ std::string SelectContext::text(int id) const {
     case 64: return opt("RANDOM", 0);
     case 65: return custom_gauge_name.empty() ? opt("GAUGE", cfg->gauge) : custom_gauge_name;
     case 66: return opt("GAUGE", 0);
-    case 67: return opt("ASSIST", cfg->assist ? 1 : 0);
+    case 67: return cfg->seven_key ? "7K" : "7K+S";  // ASSIST の欄は 7k モード
     case 68: return opt("ASSIST", 0);
     case 69: return opt("BATTLE", 0);
     case 70: return opt("FLIP", 0);
     case 71: return opt("SCOREGRAPH", cfg->score_graph ? 1 : 0);
     case 72: return opt("GHOST", cfg->ghost);
-    case 73: return opt("LANECOVER", cfg->lane_cover ? 1 : 0);
+    // LANE COVER の欄は LIFT も合わせて出す（BMjoy では、この欄で SUDDEN+ と LIFT を順に切り替える）
+    case 73: {
+        const std::string sud = opt("LANECOVER", 1).empty() ? "ON" : opt("LANECOVER", 1);
+        if (cfg->lift) return cfg->lane_cover ? sud + " + LIFT" : "LIFT";
+        return opt("LANECOVER", cfg->lane_cover ? 1 : 0);
+    }
     case 74: return cfg->hs_fix == 5 ? "MAINBPM" : opt("HSFIX", cfg->hs_fix);
     case 75: return opt("BGASIZE", cfg->bga_size);
     case 76: return opt("BGADRAW", cfg->bga);
@@ -304,10 +356,13 @@ int SelectContext::button(int t) const {
     case 32: return cfg->sound_fx.pitch_on ? 1 : 0;
     case 33: return cfg->sound_fx.pitch_type;
     case 40: return custom_gauge_frame >= 0 ? custom_gauge_frame : cfg->gauge;
+    case kJudgeButton: return judge_frame;
+    case kMetronomeButton: return no_record ? 1 : 0;  // メトロノームを使っているか
     case 41: return 0;
     case 46: return cfg->lane_cover ? 1 : 0;
+    case 331: return cfg->lift ? 1 : 0;  // LIFT（beatoraja・OpenLR2 の拡張のボタン）
     case 42: return cfg->random;
-    case 44: return cfg->assist ? 1 : 0;
+    case 44: return cfg->seven_key ? 1 : 0;  // 7k モード（0 = 7K+S 1 = 7K）
     case 50: return cfg->effect;
     case 51: return 0;
     case 55: return cfg->hs_fix;
@@ -353,7 +408,11 @@ bool SelectContext::bargraph(int t, double& val, double& max) const {
     switch (t) {
     case 3: val = song ? chart->playlevel : 0, max = levelbar_max(); return true;
     case 5: case 6: case 7: case 8: case 9: val = song ? diff_level[t - 5] : 0, max = levelbar_max(); return true;
-    case 47: val = song && score ? score->exscore : 0, max = song ? notes_of(*chart) * 2 : 0; return true;
+    case 47:
+        if (!song && folder_score) val = 0, max = 0;  // フォルダでは EX のバーを出さない
+        else if (type == 8 && course) val = score ? score->exscore : 0, max = course_notes() * 2;
+        else val = song && score ? score->exscore : 0, max = song ? notes_of(*chart) * 2 : 0;
+        return true;
     default: return false;
     }
 }

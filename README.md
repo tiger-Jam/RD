@@ -30,7 +30,7 @@ build\RelWithDebInfo\BMjoybody.exe --lr2-root C:\path\to\LR2
 
 ### Mac から Windows 機でビルド・起動する
 
-`ssh win` で入れる Windows 機があれば、Mac から操作できる（Windows 側は `%USERPROFILE%\bmjoy_mac_build` を使う）。
+`ssh win` で入れる Windows 機があれば、Mac から操作できる（Windows 側は `%USERPROFILE%\BMjoy-beta20261022` を使う）。
 
 ```
 tools/win.sh sync               # いまの作業ツリーを送ってビルド

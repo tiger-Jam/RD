@@ -25,6 +25,13 @@ namespace bmj {
 
 namespace {
 
+// 「.」で始まる名前（取ってくる道具の作業用フォルダ・隠しフォルダ）。曲として読まない
+bool hidden_name(const fs::path& p) {
+    const std::string n = p.filename().string();
+    return n.size() > 1 && n[0] == '.' && n != "..";
+}
+
+
 const char* kSchema = R"SQL(
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS chart(
@@ -35,6 +42,7 @@ CREATE TABLE IF NOT EXISTS chart(
     mtime INTEGER, size INTEGER, banner TEXT, stagefile TEXT, backbmp TEXT, ln_free INTEGER DEFAULT 0, keys INTEGER DEFAULT 7);
 CREATE INDEX IF NOT EXISTS chart_md5 ON chart(md5);
 CREATE INDEX IF NOT EXISTS chart_sha256 ON chart(sha256);
+CREATE INDEX IF NOT EXISTS chart_folder ON chart(folder);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
 CREATE TABLE IF NOT EXISTS chart_added(path TEXT PRIMARY KEY, added INTEGER);
 CREATE TABLE IF NOT EXISTS favorite(md5 TEXT PRIMARY KEY, value INTEGER);
@@ -208,6 +216,15 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
 
 SongDb::~SongDb() { close(); }
 
+bool SongDb::has_charts_under(const std::string& root) const {
+    if (!db_ || root.empty()) return false;
+    std::string prefix = root;
+    if (prefix.back() != '/' && prefix.back() != '\\') prefix += static_cast<char>(fs::path::preferred_separator);
+    Stmt st(db_, "SELECT 1 FROM chart WHERE substr(path, 1, ?) = ? LIMIT 1");
+    st.i64(1, static_cast<int64_t>(prefix.size())).text(2, prefix);
+    return st.step();
+}
+
 bool SongDb::clear_charts() {
     if (!db_) return false;
     return sqlite3_exec(db_, "DELETE FROM chart; DELETE FROM skipped;", nullptr, nullptr, nullptr) == SQLITE_OK;
@@ -308,6 +325,11 @@ bool SongDb::open(const std::string& path) {
                      "UPDATE chart SET mtime = 0;",
                      nullptr, nullptr, nullptr);
     }
+    // EX-HARD・ASSIST EASY は「カスタムゲージ」MOD の中から、それぞれの公式 MOD に移った（2026-10-24）。前の鍵の記録を移す
+    sqlite3_exec(db_,
+                 "UPDATE OR REPLACE custom_lamp SET gauge = 'exhard/exhard' WHERE gauge = 'custom-gauge/exhard';"
+                 "UPDATE OR REPLACE custom_lamp SET gauge = 'assist-easy/assist-easy' WHERE gauge = 'custom-gauge/assist-easy';",
+                 nullptr, nullptr, nullptr);
     return true;
 }
 
@@ -342,6 +364,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
     std::error_code ec;
     for (const std::string& d : only_under.empty() ? dirs : std::vector<std::string>{only_under}) {
         for (auto& e : fs::directory_iterator(d, ec)) {
+            if (hidden_name(e.path())) continue;
             if (e.is_directory(ec)) roots.push_back(e.path());
             else if (is_chart_file(e.path())) roots.push_back(e.path());
         }
@@ -365,6 +388,10 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
             }
             for (auto it = fs::recursive_directory_iterator(roots[i], fs::directory_options::skip_permission_denied, ec2);
                  !ec2 && it != fs::recursive_directory_iterator(); it.increment(ec2)) {
+                if (hidden_name(it->path())) {
+                    if (it->is_directory(ec2)) it.disable_recursion_pending();
+                    continue;
+                }
                 if (!it->is_regular_file(ec2) || !is_chart_file(it->path())) continue;
                 local.push_back({it->path().string(), {mtime_of(*it), static_cast<int64_t>(it->file_size(ec2))}});
             }
@@ -471,6 +498,27 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
     return stats;
 }
 
+std::vector<ChartRecord> SongDb::charts_in_folder(const std::string& folder) const {
+    std::vector<ChartRecord> out;
+    if (!db_) return out;
+    std::string cols = kChartColumns;
+    std::string sql = "SELECT ";
+    for (size_t i = 0, j; i < cols.size(); i = j + 1) {
+        j = cols.find(',', i);
+        if (j == std::string::npos) j = cols.size();
+        std::string c(trim(std::string_view(cols).substr(i, j - i)));
+        sql += (i ? ", chart." : "chart.") + c;
+    }
+    sql += ", COALESCE(a.added, 0) FROM chart LEFT JOIN chart_added a ON a.path = chart.path WHERE chart.folder = ?";
+    Stmt st(db_, sql.c_str());
+    st.text(1, folder);
+    while (st.step()) {
+        out.push_back(read_chart_row(st));
+        out.back().added = st.col_i64(27);
+    }
+    return out;
+}
+
 std::vector<ChartRecord> SongDb::all_charts() const {
     std::vector<ChartRecord> out;
     if (!db_) return out;
@@ -484,6 +532,11 @@ std::vector<ChartRecord> SongDb::all_charts() const {
         sql += (i ? ", chart." : "chart.") + c;
     }
     sql += ", COALESCE(a.added, 0) FROM chart LEFT JOIN chart_added a ON a.path = chart.path";
+    {
+        // 先に数を数えて場所を取っておく（足しながら広げると、7 万件で倍近い場所を取ったままになる）
+        Stmt cnt(db_, "SELECT count(*) FROM chart");
+        if (cnt.step()) out.reserve(static_cast<size_t>(cnt.col_i64(0)));
+    }
     Stmt st(db_, sql.c_str());
     while (st.step()) {
         out.push_back(read_chart_row(st));
@@ -519,6 +572,15 @@ std::unordered_map<std::string, int> SongDb::custom_lamps(const std::string& sha
     Stmt st(db_, "SELECT gauge, lamp FROM custom_lamp WHERE sha256 = ? AND ln_mode = ? AND profile = ?");
     st.text(1, sha256).i64(2, ln_mode).i64(3, profile);
     while (st.step()) out[st.col_text(0)] = static_cast<int>(st.col_i64(1));
+    return out;
+}
+
+std::vector<SongDb::CustomLampRow> SongDb::all_custom_lamps(int ln_mode, int profile) const {
+    std::vector<CustomLampRow> out;
+    if (!db_) return out;
+    Stmt st(db_, "SELECT sha256, gauge, lamp FROM custom_lamp WHERE ln_mode = ? AND profile = ?");
+    st.i64(1, ln_mode).i64(2, profile);
+    while (st.step()) out.push_back({st.col_text(0), st.col_text(1), static_cast<int>(st.col_i64(2))});
     return out;
 }
 
@@ -586,7 +648,7 @@ void merge_score(ScoreRecord& r, int clear, int ex, int bp, int combo, int play,
 }
 
 // 譜面ごとの記録。種類を決めていない LN のある譜面は ln_mode の記録、それ以外は 0 の記録を読む。
-// 曲データベースに無いキー（コース）の記録と、LR2 から取り込んだ記録（LN で遊んだもの）も合わせる
+// 曲データベースに無いキー（コース）の記録と、LR2 から取り込んだ記録（LN で遊んだもの・コース）も合わせる
 // with_ghost なら、最後にゴーストの欄も付ける（一覧では使わないので、1 譜面を読むときだけ）
 std::string merged_scores_sql(int ln_mode, bool with_ghost = false, int profile = 0) {
     std::string m = std::to_string(ln_mode);
@@ -606,6 +668,11 @@ SELECT s.sha256, s.clear, s.exscore, s.bp, s.max_combo, s.playcount, s.clearcoun
        s.pg, s.gr, s.gd, s.bd, s.pr, s.op_history, s.rseed, s.op_best)SQL" + gs + R"SQL(
   FROM score s
  WHERE s.judge_profile = )SQL" + p + R"SQL( AND s.ln_mode = 0 AND NOT EXISTS (SELECT 1 FROM chart c WHERE c.sha256 = s.sha256)
+UNION ALL
+SELECT l.md5, l.clear, l.exscore, l.bp, l.max_combo, l.playcount, l.clearcount, 0, 1,
+       l.pg, l.gr, l.gd, l.bd, l.pr, l.op_history, l.rseed, l.op_best)SQL" + gl + R"SQL(
+  FROM lr2_score l
+ WHERE )SQL" + p + R"SQL( = 0 AND length(l.md5) > 32
 UNION ALL
 SELECT c.sha256, l.clear, l.exscore, l.bp, l.max_combo, l.playcount, l.clearcount, 0, 1,
        l.pg, l.gr, l.gd, l.bd, l.pr, l.op_history, l.rseed, l.op_best)SQL" + gl + R"SQL(
@@ -659,6 +726,27 @@ bool SongDb::get_score(const std::string& sha256, ScoreRecord& out, int ln_mode,
     return found;
 }
 
+int SongDb::import_lr2_favorites(const std::string& lr2_song_db) {
+    if (!db_) return -1;
+    sqlite3* src = nullptr;
+    if (sqlite3_open_v2(lr2_song_db.c_str(), &src, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        sqlite3_close(src);
+        return -1;
+    }
+    std::vector<std::pair<std::string, int>> favs;
+    {
+        Stmt st(src, "SELECT hash, favorite FROM song WHERE favorite IN (1, 2) AND length(hash) = 32");
+        while (st.s && st.step()) {
+            std::string md5 = st.col_text(0);
+            for (char& c : md5) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            favs.push_back({md5, static_cast<int>(st.col_i64(1))});
+        }
+    }
+    sqlite3_close(src);
+    for (const auto& [md5, v] : favs) set_favorite(md5, v);
+    return static_cast<int>(favs.size());
+}
+
 int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* error) {
     if (!db_) return -1;
     sqlite3* src = nullptr;
@@ -672,10 +760,11 @@ int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* erro
         // LR2の score 表（LR2_songmanage.cpp:2696）。EXスコアは PGREAT×2 + GREAT
         // 判定の内訳とオプションの履歴もあれば取り込む（無い版もあるので、無ければ 0）
         // 自己ベストのときの乱数の種・オプション・ゴーストも取り込む
+        // コースの記録（32 文字の頭＋ステージの md5）も取り込む
         Stmt full(src, "SELECT hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount, good, bad, poor, op_history, "
-                       "rseed, op_best, ghost FROM score WHERE length(hash) = 32");
+                       "rseed, op_best, ghost FROM score WHERE length(hash) >= 32 AND length(hash) % 32 = 0");
         Stmt basic(src, full.s ? "SELECT 1" : "SELECT hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount, "
-                                              "0, 0, 0, 0, -1, 0, '' FROM score WHERE length(hash) = 32");
+                                              "0, 0, 0, 0, -1, 0, '' FROM score WHERE length(hash) >= 32 AND length(hash) % 32 = 0");
         Stmt& rd = full.s ? full : basic;
         if (!rd.s) {
             if (error) *error = "LR2のスコアデータベースではない: " + lr2_score_db;
@@ -688,6 +777,8 @@ int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* erro
         while (rd.step()) {
             std::string md5 = rd.col_text(0);
             for (char& c : md5) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            // コースの頭は種類（11 文字目）だけを残す。作者などは BMjoy のコースのハッシュ（course.cpp）に無い
+            if (md5.size() > 32) md5 = std::string(10, '0') + md5[10] + std::string(21, '0') + md5.substr(32);
             int ex = static_cast<int>(rd.col_i64(2) * 2 + rd.col_i64(3));
             wr.text(1, md5).i64(2, rd.col_i64(1)).i64(3, ex).i64(4, rd.col_i64(4)).i64(5, rd.col_i64(5))
                 .i64(6, rd.col_i64(6)).i64(7, rd.col_i64(7)).i64(8, rd.col_i64(2)).i64(9, rd.col_i64(3)).i64(10, rd.col_i64(8))

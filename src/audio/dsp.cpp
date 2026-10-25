@@ -359,8 +359,11 @@ void PitchShifter::process(float* lr, uint32_t n) {
 
 // ---- ミキサーの中の計算 ----
 
-bool mix_resampled(const float* pcm, int64_t frames, double& pos, double step, bool loop, const float* gain, float scale,
-                   float* out, uint32_t n) {
+namespace {
+
+template <typename T>
+bool mix_resampled_t(const T* pcm, int64_t frames, double& pos, double step, bool loop, const float* gain, float scale,
+                     float* out, uint32_t n) {
     if (frames <= 0) return false;
     const double len = static_cast<double>(frames);
     for (uint32_t i = 0; i < n; ++i, pos += step) {
@@ -372,13 +375,27 @@ bool mix_resampled(const float* pcm, int64_t frames, double& pos, double step, b
         int64_t p = static_cast<int64_t>(pos);
         float f = static_cast<float>(pos - static_cast<double>(p));
         int64_t q = p + 1 < frames ? p + 1 : (loop ? 0 : p);
-        float l = pcm[p * 2] + (pcm[q * 2] - pcm[p * 2]) * f;
-        float r = pcm[p * 2 + 1] + (pcm[q * 2 + 1] - pcm[p * 2 + 1]) * f;
+        const float lp = static_cast<float>(pcm[p * 2]), lq = static_cast<float>(pcm[q * 2]);
+        const float rp = static_cast<float>(pcm[p * 2 + 1]), rq = static_cast<float>(pcm[q * 2 + 1]);
+        float l = lp + (lq - lp) * f;
+        float r = rp + (rq - rp) * f;
         float g = gain[i] * scale;
         out[i * 2] += l * g;
         out[i * 2 + 1] += r * g;
     }
     return loop || pos < len;
+}
+
+}  // namespace
+
+bool mix_resampled(const float* pcm, int64_t frames, double& pos, double step, bool loop, const float* gain, float scale,
+                   float* out, uint32_t n) {
+    return mix_resampled_t(pcm, frames, pos, step, loop, gain, scale, out, n);
+}
+
+bool mix_resampled(const int16_t* pcm, int64_t frames, double& pos, double step, bool loop, const float* gain, float scale,
+                   float* out, uint32_t n) {
+    return mix_resampled_t(pcm, frames, pos, step, loop, gain, scale / 32767.0f, out, n);
 }
 
 int64_t song_time_at(int64_t base_us, int64_t dt_us, int64_t latency_us, double rate) {

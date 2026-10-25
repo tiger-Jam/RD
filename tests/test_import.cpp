@@ -1,3 +1,5 @@
+#include <SDL3/SDL.h>
+
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -6,6 +8,7 @@
 #include "chart/bmson_parser.h"
 #include "chart/osu_parser.h"
 #include "test.h"
+#include "util/data_dir.h"
 #include "util/hash.h"
 
 using namespace bmj;
@@ -240,4 +243,78 @@ TEST(import_copy_lr2_assets) {
     again.lr2_root = lr2.string();
     CHECK_EQ(copy_lr2_assets(again, dst.string()).files, 0);
     fs::remove_all(root);
+}
+
+// 設定に書くパスは、実行ファイルのフォルダの下なら相対にする（フォルダごと別の PC へ持っていける）
+TEST(portable_paths) {
+    namespace fs = std::filesystem;
+    const std::string base = base_dir();
+    CHECK(!base.empty());
+    const std::string skin = (fs::u8path(base) / "LR2files" / "Theme" / "x" / "play.lr2skin").string();
+    const std::string rel = to_portable(skin);
+    CHECK(rel == (fs::path("LR2files") / "Theme" / "x" / "play.lr2skin").string());
+    CHECK(from_portable(rel) == fs::path(skin).lexically_normal().string());
+    CHECK(to_portable(base) == ".");
+    CHECK(fs::path(from_portable(".")).lexically_normal() == fs::path(base).lexically_normal());
+    // 実行ファイルのフォルダの外は絶対パスのまま
+    const std::string outside = (fs::path(base).parent_path().parent_path() / "elsewhere" / "a.lr2skin").string();
+    CHECK(to_portable(outside) == outside);
+    CHECK(from_portable(outside) == outside);
+    CHECK(to_portable("").empty() && from_portable("").empty());
+}
+
+// LR2 の遊び方などの設定とキーコンフィグを引き継ぐ
+TEST(lr2_settings_and_keyconfig) {
+    namespace fs = std::filesystem;
+    AppConfig cfg;
+    const std::string xml = "<config><system><vsync>1</vsync><inputinterval>20</inputinterval></system>"
+                            "<play><hs>220</hs><hstype>2</hstype><shutter>36</shutter><shuttertype>1</shuttertype>"
+                            "<gauge>1</gauge><random>2</random><judgetime>53</judgetime><target>8</target>"
+                            "<defaulttarget>90</defaulttarget><scoregraph>1</scoregraph></play>"
+                            "<sound><volumemaster>80</volumemaster><eqp3>-5</eqp3></sound>"
+                            "<select><sort>3</sort><difficulty>2</difficulty><folderlamp>1</folderlamp></select></config>";
+    cfg.select_sort = 1;
+    CHECK(import_lr2_settings(xml, cfg) > 10);
+    CHECK_EQ(cfg.hi_speed, 220);
+    CHECK_EQ(cfg.hs_fix, 2);
+    CHECK_EQ(cfg.lane_cover_v, 36);
+    CHECK_EQ(cfg.lane_cover, 1);
+    CHECK_EQ(cfg.gauge, 1);
+    CHECK_EQ(cfg.random, 2);
+    CHECK_EQ(cfg.judge_timing, 53);
+    CHECK_EQ(cfg.target, 0);  // 8 は IR のターゲット（BMjoy には無い）
+    CHECK(cfg.score_graph && cfg.vsync && cfg.folder_lamp);
+    CHECK_EQ(cfg.vol_master, 80);
+    CHECK_EQ(cfg.sound_fx.eq[3], -5);
+    CHECK_EQ(cfg.select_difficulty, 2);
+    CHECK_EQ(cfg.select_sort, 1);  // ソートは写さない（BMjoy は beatoraja の並び）
+    CHECK_EQ(cfg.input_interval, 20);
+
+    fs::path dir = fs::temp_directory_path() / "bmj_test_lr2_keyconfig";
+    fs::create_directories(dir);
+    {
+        std::ofstream f(dir / "keyconfig.xml");
+        f << "<keyconfig><key01><id>260</id><id>260</id><id>30</id></key01>"
+             "<key10><id>257</id><id>42</id></key10><key11><id>258</id></key11>"
+             "<key12><id>16</id><id>268</id><id>551</id></key12><key13><id>297</id></key13></keyconfig>";
+    }
+    KeyConfig k = KeyConfig::lr2_default();
+    CHECK(import_lr2_keyconfig((dir / "keyconfig.xml").string(), k));
+    auto has = [&](int button, Binding::Type t, int index, int dir_ = 0, int device = 0) {
+        for (const Binding& b : k.buttons[button])
+            if (b.type == t && b.index == index && b.dir == dir_ && b.device == device) return true;
+        return false;
+    };
+    CHECK_EQ(k.buttons[kKey1].size(), size_t(2));  // 同じ割り当ては 1 つにまとめる
+    CHECK(has(kKey1, Binding::Type::JoyButton, 0));
+    CHECK(has(kKey1, Binding::Type::Key, SDL_SCANCODE_A));
+    CHECK(has(kScratchA, Binding::Type::JoyAxis, 0, -1));
+    CHECK(has(kScratchA, Binding::Type::Key, SDL_SCANCODE_LSHIFT));
+    CHECK(has(kScratchB, Binding::Type::JoyAxis, 0, 1));
+    CHECK(has(kStart, Binding::Type::Key, SDL_SCANCODE_Q));
+    CHECK(has(kStart, Binding::Type::JoyButton, 8));
+    CHECK(has(kStart, Binding::Type::Midi, 39));
+    CHECK(has(kSelect, Binding::Type::JoyButton, 5, 0, 2));  // 2 台目のパッド（297 = 256 + 32 + 9）
+    CHECK(k.buttons[kKey1 + 1].empty());  // 書かれていないボタンは空にする（LR2 の割り当てに置き換える）
+    fs::remove_all(dir);
 }

@@ -93,23 +93,38 @@ TEST(lane_scatter_no_repeat) {
     }
 }
 
-TEST(lane_assist_scratch) {
-    // 皿の自動演奏：皿のノーツは数だけ進み、スコアにもコンボにも入らない。皿を押しても何も起きない
+TEST(lane_drop_scratch) {
+    // 7k モード：皿のノーツは除いて、音は BGM として鳴らす（LN は終点の音も）。地雷と見えないノーツは捨てる
     Chart c;
     c.notes.push_back(note(0, 1000));
+    c.notes.back().sound = 5;
+    c.notes.push_back(note(0, 2000));
+    c.notes.back().kind = NoteKind::Long, c.notes.back().end_us = 2500 * 1000LL, c.notes.back().sound = 6, c.notes.back().end_sound = 7;
+    c.notes.push_back(note(0, 3000));
+    c.notes.back().kind = NoteKind::Mine;
+    c.notes.push_back(note(0, 3500));
+    c.notes.back().kind = NoteKind::Invisible, c.notes.back().sound = 8;
     c.notes.push_back(note(1, 1000));
-    c.total = 200;
-    JudgeConfig cfg;
-    cfg.assist_scratch = true;
-    JudgeEngine j(c, cfg);
-    j.press(0, 900 * 1000LL);
-    j.press(1, 1000 * 1000LL);
-    j.advance(1100 * 1000LL);
-    CHECK_EQ(j.stats().note_current, 2);
-    CHECK_EQ(j.stats().exscore(), 2);
-    CHECK_EQ(j.stats().combo, 1);
-    CHECK_EQ(j.stats().empty_poor, 0);
-    CHECK(j.is_assist_lane(0));
+    c.drop_scratch();
+    CHECK_EQ(c.notes.size(), size_t(1));
+    CHECK_EQ(int(c.notes[0].lane), 1);
+    CHECK_EQ(c.judgeable_notes(), 1);
+    CHECK_EQ(c.bgm.size(), size_t(3));
+    CHECK(c.layout == KeyLayout::K7);
+    CHECK_EQ(c.bgm[2].time_us, 2500 * 1000LL);
+    CHECK_EQ(int(c.bgm[2].sound), 7);
+}
+
+TEST(lane_converge_without_scratch) {
+    // 7k モードの CONVERGE は皿に置かない
+    for (uint32_t seed = 1; seed < 20; ++seed) {
+        Chart c;
+        for (int i = 0; i < 40; ++i) c.notes.push_back(note(1 + i % 7, 1000 + i * 100));
+        Lr2Random rng(seed);
+        apply_random_option(c, kConverge, rng, false);
+        CHECK_EQ(c.notes.size(), size_t(40));
+        for (const Note& n : c.notes) CHECK(n.lane >= 1 && n.lane <= 7);
+    }
 }
 
 // 5 鍵の譜面（6・7 鍵にノーツが無い）は、1〜5 鍵の中だけで並べ替える（LR2: bmsload:3369）

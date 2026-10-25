@@ -50,6 +50,9 @@ Course make_table_course(const TableCourse& tc, const std::unordered_map<std::st
     // LR2 のコースハッシュの形：32 文字の頭（つなぎ方 10 桁・種類 1 桁・予約・作者 4 文字）＋各ステージの md5
     std::string head(32, '0');
     head[10] = static_cast<char>('0' + c.type);
+    // LR2 に無い制約は予約の欄に入れて、同じ曲の普通の段位と記録を分ける
+    if (c.no_speed) head[12] = '1';
+    if (c.no_good || c.no_great) head[13] = c.no_great ? '2' : '1';
     c.hash = head;
     for (const CourseStage& s : c.stages) c.hash += s.md5.empty() ? s.sha256 : s.md5;
     return c;

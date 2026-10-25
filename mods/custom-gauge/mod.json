@@ -1,0 +1,14 @@
+{
+  // カスタムゲージ：起動の設定画面（MOD の詳細）で、ゲージとランプを足す・直す・消す。
+  // ゲージの名前は並びの順に CUSTOM1〜CUSTOM9（スキンの GAUGE のボタンの絵の 10〜18 コマ目）
+  "id": "custom-gauge",
+  "name": "カスタムゲージ",
+  "version": "2",
+  "author": "BMjoy",
+  "description": "自分でゲージを作る（増減・クリアの線・色・ランプ）。作ったゲージは GAUGE に CUSTOM1〜9 として出る",
+  "settings": [{ "type": "gauges", "name": "ゲージ" }, { "type": "lamps", "name": "ランプ" }],
+  "gauge_label": "CUSTOM",
+  "gauge_frame": 9,
+  "gauges": [],
+  "lamps": []
+}

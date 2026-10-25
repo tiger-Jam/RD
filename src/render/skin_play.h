@@ -41,7 +41,6 @@ struct PlayContext {
     // リザルトで 1P と 2P を入れ替える（#FLIPRESULT。プレイスキンにあり、リザルトスキンに #DISABLEFLIP が無いとき）。
     // 自分のスコアを 2P 側の番号に、ターゲットを 1P 側の番号に出す。更新の比較（170〜178・330〜335）とクリア（90/91）は自分のまま
     bool result_flip = false;
-    bool assist = false;         // 皿の自動演奏（op54/55）
     bool bga_shown = true;       // BGA を出す（op 40 / 41）
     bool has_stagefile = false, has_backbmp = false;  // 画像を読めたか（op 190/191・194/195）
     // 表示用に補間した値（LR2: score_print / HP_print）。負なら補間せず実値を使う（リザルトなど）

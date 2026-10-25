@@ -199,6 +199,11 @@ void CustomFolderQuery::bind_score(sqlite3_stmt* score, const ChartRecord& c, co
 }
 
 void CustomFolderQuery::update_score(const ChartRecord& c, const ScoreRecord& r) {
+    std::lock_guard<std::mutex> db_lock(db_mu_);
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        cache_.clear();
+    }
     if (!db_) return;
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, kInsertScore, -1, &st, nullptr) == SQLITE_OK) {
@@ -208,8 +213,18 @@ void CustomFolderQuery::update_score(const ChartRecord& c, const ScoreRecord& r)
     sqlite3_finalize(st);
 }
 
+bool CustomFolderQuery::cached(const CustomFolderDef& def, std::vector<std::string>& out) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = cache_.find(def.command + "\x1f" + std::to_string(def.max_tracks));
+    if (it == cache_.end()) return false;
+    out = it->second;
+    return true;
+}
+
 std::vector<std::string> CustomFolderQuery::run(const CustomFolderDef& def, std::string* error) const {
     std::vector<std::string> out;
+    if (def.max_tracks != 1 && cached(def, out)) return out;
+    std::lock_guard<std::mutex> db_lock(db_mu_);
     if (!db_) return out;
     std::string sql = "SELECT song.hash, song.favorite FROM song LEFT JOIN score ON song.hash = score.hash WHERE " + def.command;
     // #MAXTRACKS 1 は 1 曲を無作為に選ぶ（LR2: songmanage:2091）。IGNORE の譜面は、IGNORE を集めるフォルダ以外では出さない
@@ -228,6 +243,10 @@ std::vector<std::string> CustomFolderQuery::run(const CustomFolderDef& def, std:
         if (h) out.emplace_back(reinterpret_cast<const char*>(h));
     }
     sqlite3_finalize(st);
+    if (def.max_tracks != 1) {
+        std::lock_guard<std::mutex> lock(mu_);
+        cache_[def.command + "\x1f" + std::to_string(def.max_tracks)] = out;
+    }
     return out;
 }
 

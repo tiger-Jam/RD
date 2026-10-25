@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <unordered_map>
 
@@ -63,11 +64,35 @@ bool mode_shows(int mode, int keys) {
     }
 }
 
+struct Entry;
+
+// フォルダの中身。Entry を写しても中身は共有する（フォルダを開いて並べ替えるたびに、下の階層まで丸ごと写さない）。
+// 共有をやめて写しを持たせるには detach()（メモリを節約しない設定のとき。前と同じ持ち方）
+class EntryChildren {
+public:
+    bool empty() const;
+    size_t size() const;
+    const std::vector<Entry>* ptr() const;
+    std::vector<Entry>& vec();
+    std::vector<Entry>::const_iterator begin() const;
+    std::vector<Entry>::const_iterator end() const;
+    void push_back(Entry e);
+    void push_front(Entry e);
+    const Entry& back() const;
+    void clear();
+    void detach();
+
+private:
+    std::shared_ptr<std::vector<Entry>> p_;
+};
+
 struct Entry {
-    enum class Kind { Folder, Chart, Missing, Course } kind = Kind::Folder;
+    // Header はフォルダの中の一番上に出す、そのフォルダの名前のバー（一番下の項目と一番上の項目の境目）。
+    // ModBar は MOD が足したバー（ランダムセレクトなど。決定すると MOD が遊ぶ譜面を選ぶ）
+    enum class Kind { Folder, Chart, Missing, Course, Header, ModBar } kind = Kind::Folder;
     std::string label, sub, badge;  // badge はレベルの表示（例：sl5）
     const ChartRecord* chart = nullptr;
-    TableChart missing;
+    std::shared_ptr<const TableChart> missing_info;  // 持っていない譜面のとき（ほかの要素は持たない。要素を小さくするため）
     std::shared_ptr<Course> course;  // コースのとき
     bool course_folder = false;      // コースを集めたフォルダ（バーの種類 6）
     // フォルダのバーの種類（LR2 の SRC_BAR_BODY の番号。スキンはこれで色を変える）：1 フォルダ、2 カスタムフォルダ、3 新曲フォルダ。
@@ -79,9 +104,54 @@ struct Entry {
     const CustomFolderDef* custom = nullptr;
     bool custom_loaded = false;
     std::string dir;                 // 曲フォルダの階層のとき、そのフォルダのパス（F8 の読み直し）
-    std::vector<Entry> children;
+    EntryChildren children;
     int owned = 0, total = 0;  // フォルダの中で持っている譜面の数
+    std::shared_ptr<const ModBar> mod_info;  // ModBar のとき
+    const TableChart& missing() const { return missing_info ? *missing_info : no_table_chart(); }
+    const ModBar& mod_bar() const { return mod_info ? *mod_info : no_mod_bar(); }
+    static const TableChart& no_table_chart() {
+        static const TableChart t;
+        return t;
+    }
+    static const ModBar& no_mod_bar() {
+        static const ModBar b;
+        return b;
+    }
 };
+
+const std::vector<Entry>& no_entries() {
+    static const std::vector<Entry> v;
+    return v;
+}
+bool EntryChildren::empty() const { return !p_ || p_->empty(); }
+size_t EntryChildren::size() const { return p_ ? p_->size() : 0; }
+const std::vector<Entry>* EntryChildren::ptr() const { return p_ ? p_.get() : &no_entries(); }
+std::vector<Entry>& EntryChildren::vec() {
+    if (!p_) p_ = std::make_shared<std::vector<Entry>>();
+    return *p_;
+}
+std::vector<Entry>::const_iterator EntryChildren::begin() const { return ptr()->begin(); }
+std::vector<Entry>::const_iterator EntryChildren::end() const { return ptr()->end(); }
+void EntryChildren::push_back(Entry e) { vec().push_back(std::move(e)); }
+void EntryChildren::push_front(Entry e) { vec().insert(vec().begin(), std::move(e)); }
+const Entry& EntryChildren::back() const { return p_->back(); }
+void EntryChildren::clear() {
+    if (p_) p_->clear();
+}
+void EntryChildren::detach() {
+    if (p_) p_ = std::make_shared<std::vector<Entry>>(*p_);
+}
+
+// 記録の番号（MOD の組み合わせごと）。7k モードなら seven_key に 7k の記録の番号（それ以外は -1）
+struct RecordProfile {
+    int normal = 0;
+    int seven_key = -1;
+};
+
+RecordProfile record_profile(SongDb& db, const App& app) {
+    const std::string key = play_mod_key(app.active_mods());
+    return {db.mod_profile(key), app.cfg.seven_key ? db.mod_profile(seven_key_record_key(key)) : -1};
+}
 
 // 曲の一覧（裏で読み直して、できたら差し替える）
 struct Library {
@@ -89,6 +159,33 @@ struct Library {
     std::vector<ChartRecord> charts;
     std::vector<DifficultyTable> tables;
     std::unordered_map<std::string, ScoreRecord> scores;  // sha256 → スコア
+    // sha256 → カスタムランプの鍵 → ランプ（1 FAILED 2 クリア 3 FULL COMBO 4 PERFECT）
+    std::unordered_map<std::string, std::unordered_map<std::string, int>> custom_lamps;
+    RecordProfile profile;
+    // 7k モードのとき、譜面の sha256 → 7k の記録を使うか（皿のある 7 鍵の譜面）。載っていないもの（コース）も 7k の記録
+    std::unordered_map<std::string, bool> seven_key_sha;
+    // その譜面（かコース）の記録の番号
+    int record_profile_of(const std::string& sha256) const {
+        if (profile.seven_key < 0) return profile.normal;
+        auto it = seven_key_sha.find(sha256);
+        return it == seven_key_sha.end() || it->second ? profile.seven_key : profile.normal;
+    }
+    // 記録（スコアとカスタムランプ）を読む。7k モードでは、皿のある 7 鍵の譜面とコースは 7k の記録、ほかはふだんの記録
+    void load_records(const SongDb& db, int ln_mode, RecordProfile p) {
+        profile = p;
+        seven_key_sha.clear();
+        if (p.seven_key >= 0)
+            for (const ChartRecord& c : charts) seven_key_sha.emplace(c.sha256, c.scratch && c.keys == 7);
+        scores.clear();
+        custom_lamps.clear();
+        for (int id : {p.normal, p.seven_key}) {
+            if (id < 0) continue;
+            for (const ScoreRecord& s : db.all_scores(ln_mode, id))
+                if (record_profile_of(s.sha256) == id) scores[s.sha256] = s;
+            for (const SongDb::CustomLampRow& r : db.all_custom_lamps(ln_mode, id))
+                if (record_profile_of(r.sha256) == id) custom_lamps[r.sha256][r.gauge] = r.lamp;
+        }
+    }
     // カスタムフォルダ（.lr2folder）。中身は曲と記録から作った LR2 の形の表で集める
     std::vector<CustomFolderNode> custom_nodes;
     std::shared_ptr<CustomFolderQuery> custom_query;
@@ -96,6 +193,23 @@ struct Library {
     std::vector<ModFolder> mod_folders;
     // md5 → 譜面（カスタムフォルダの中身を集めるときに、初めて要ったら作る）
     std::unordered_map<std::string, const ChartRecord*> md5_index;
+    // 曲フォルダ → その中の譜面（難易度ごとの枠に使う。初めて要ったら作る）
+    std::unordered_map<std::string, std::vector<const ChartRecord*>> by_folder;
+    // 譜面ごとに、同じ sha256 の最初の譜面の番号（フォルダの記録の合計で、同じ譜面を 2 度数えないため）
+    std::vector<int> same_sha;
+    // 表で初めて作ると全部の譜面をなめて止まるので、裏で作れるときは先に作っておく
+    void build_indexes() {
+        if (md5_index.empty())
+            for (const ChartRecord& c : charts) md5_index.emplace(c.md5, &c);
+        if (by_folder.empty())
+            for (const ChartRecord& c : charts) by_folder[c.folder].push_back(&c);
+        if (same_sha.size() != charts.size()) {
+            std::unordered_map<std::string_view, int> first;
+            first.reserve(charts.size());
+            same_sha.resize(charts.size());
+            for (size_t i = 0; i < charts.size(); ++i) same_sha[i] = first.try_emplace(charts[i].sha256, static_cast<int>(i)).first->second;
+        }
+    }
 };
 
 Entry chart_entry_of(const ChartRecord* c, const std::string& badge) {
@@ -109,15 +223,15 @@ Entry chart_entry_of(const ChartRecord* c, const std::string& badge) {
 }
 
 // カスタムフォルダの中身を集める（e は一覧の中のフォルダ。中身を差し替える）
-void load_custom_entry(Library& lib, const Entry& e) {
+// md5 の並びから、カスタムフォルダの中身を作る
+void fill_custom_entry(Library& lib, const Entry& e, const std::vector<std::string>& md5s) {
     Entry& m = const_cast<Entry&>(e);
     m.children.clear();
     m.owned = m.total = 0;
     m.custom_loaded = true;
-    if (!e.custom || !lib.custom_query) return;
     if (lib.md5_index.empty())
         for (const ChartRecord& c : lib.charts) lib.md5_index.emplace(c.md5, &c);
-    for (const std::string& md5 : lib.custom_query->run(*e.custom)) {
+    for (const std::string& md5 : md5s) {
         auto it = lib.md5_index.find(md5);
         if (it == lib.md5_index.end()) continue;
         m.children.push_back(chart_entry_of(it->second, std::to_string(it->second->playlevel)));
@@ -125,15 +239,23 @@ void load_custom_entry(Library& lib, const Entry& e) {
     }
 }
 
+void load_custom_entry(Library& lib, const Entry& e) {
+    if (!e.custom || !lib.custom_query) {
+        fill_custom_entry(lib, e, {});
+        return;
+    }
+    fill_custom_entry(lib, e, lib.custom_query->run(*e.custom));
+}
+
 // カスタムフォルダを読み、中身を集める表を作り直す（曲・記録・お気に入りが変わったとき）
 // MOD のフォルダも、ここで作り直す
-void load_custom(Library& lib, App& app, const std::unordered_map<std::string, int>& favs) {
-    const AppConfig& cfg = app.cfg;
+void load_custom(Library& lib, const std::vector<const ModManifest*>& mods, const std::vector<std::string>& custom_dirs,
+                 const std::unordered_map<std::string, int>& favs) {
     std::vector<std::string> errors;
-    lib.mod_folders = build_mod_folders(app.active_mods(), lib.charts, lib.scores, mod_data_dir(""), &errors);
+    lib.mod_folders = build_mod_folders(mods, lib.charts, lib.scores, mod_data_dir(""), &errors);
     for (const std::string& e : errors) std::printf("MOD のフォルダを作れない：%s\n", e.c_str());
     lib.custom_nodes.clear();
-    for (const std::string& d : cfg.custom_folder_dirs) {
+    for (const std::string& d : custom_dirs) {
         std::vector<CustomFolderNode> n = load_custom_folders(d);
         lib.custom_nodes.insert(lib.custom_nodes.end(), n.begin(), n.end());
     }
@@ -143,6 +265,10 @@ void load_custom(Library& lib, App& app, const std::unordered_map<std::string, i
     }
     auto q = std::make_shared<CustomFolderQuery>();
     if (q->build(lib.charts, lib.scores, favs)) lib.custom_query = q;
+}
+
+void load_custom(Library& lib, App& app, const std::unordered_map<std::string, int>& favs) {
+    load_custom(lib, app.active_mods(), app.cfg.custom_folder_dirs, favs);
 }
 
 // 分類のフォルダの名前。folderinfo.txt があればその #TITLE（LR2: songmanage:1391）、無ければディレクトリ名。
@@ -178,6 +304,16 @@ bool is_sound_slider(int ty) { return ty >= 10 && ty <= 26; }
 int64_t new_song_since(int hours) {
     int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     return now - static_cast<int64_t>(hours) * 3600;
+}
+
+// 判定の欄（ボタン 900）のコマ：0 = OFF、1〜4 = 本体の判定（VERY HARD … EASY）、5〜13 = 一覧の判定（JUDGE1〜9）
+int judge_choice(const ModManifest& m) {
+    const int ns = static_cast<int>(std::size(kStandardJudgeIds));
+    for (int i = 0; i < ns; ++i)
+        if (m.judge_use == kStandardJudgeIds[i]) return i + 1;
+    for (size_t i = 0; i < m.judges.size() && i < 9; ++i)
+        if (m.judges[i].id == m.judge_use) return ns + 1 + static_cast<int>(i);
+    return 0;
 }
 
 SDL_Color lamp_color(int lamp) {
@@ -222,6 +358,10 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
         Entry tf;
         tf.label = t.name.empty() ? t.url : t.name;
         tf.sub = t.warning.empty() ? (t.from_cache ? "手元の版" : "") : t.warning;
+        // 先頭に、表の全部の譜面を 1 つに並べた「全曲」のフォルダを置く（表の順。同じ譜面は 1 回だけ）
+        Entry all;
+        all.label = "全曲";
+        std::set<std::string> all_seen;
         for (const std::string& lv : t.levels) {
             Entry lf;
             lf.badge = t.symbol + lv;
@@ -238,18 +378,24 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
                 } else {
                     Entry m;
                     m.kind = Entry::Kind::Missing;
-                    m.missing = tc;
+                    m.missing_info = std::make_shared<const TableChart>(tc);
                     m.label = tc.title;
                     m.sub = tc.artist;
                     m.badge = lf.badge;
                     lf.children.push_back(m);
                 }
                 lf.total++;
+                if (tc.md5.empty() || all_seen.insert(tc.md5).second) {
+                    all.children.push_back(lf.children.back());
+                    all.owned += lf.children.back().kind == Entry::Kind::Chart;
+                    all.total++;
+                }
             }
             tf.owned += lf.owned;
             tf.total += lf.total;
             tf.children.push_back(std::move(lf));
         }
+        if (!all.children.empty()) tf.children.push_front(std::move(all));
         root.push_back(std::move(tf));
     }
     // コースのフォルダ（LR2 と同じく一番上の階層に、COURSE と 段位認定 を必ず出す）。
@@ -532,12 +678,48 @@ void fill_difficulties(std::vector<ChartRecord>& charts) {
 void load_charts(Library& lib, const SongDb& db, const AppConfig& cfg) {
     lib.roots = cfg.song_dirs;
     lib.charts = db.all_charts();
+    // 登録した曲フォルダそのものが無い（ドライブが無い・別の PC へ持ってきた）ときは、その中の譜面を持っていない扱いにする。
+    // 曲データベースからは消さない（つなぎ直せば戻る）。見るのは曲フォルダの 1 段目だけ（譜面ごとには確かめない）
+    std::vector<std::string> gone;
+    // 止まっている外付けの HDD は、回り始めるまで数秒答えない。無いドライブはすぐに「無い」と答えるので、
+    // 全部の曲フォルダを同時に確かめ、1.5 秒で答えの無いものは「ある」とみなす（起動のたびに HDD が回るのを待たない）
+    std::vector<std::future<bool>> answers;
+    for (const std::string& r : cfg.song_dirs) {
+        auto answer = std::make_shared<std::promise<bool>>();
+        answers.push_back(answer->get_future());
+        std::thread([answer, r] {
+            std::error_code ec;
+            answer->set_value(fs::is_directory(fs::u8path(r), ec));
+        }).detach();
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+    for (size_t i = 0; i < cfg.song_dirs.size(); ++i) {
+        const std::string& r = cfg.song_dirs[i];
+        const bool exists = answers[i].wait_until(deadline) != std::future_status::ready || answers[i].get();
+        if (!exists) {
+            std::string p = fs::u8path(r).lexically_normal().string();
+            if (!p.empty() && p.back() != '/' && p.back() != '\\') p += static_cast<char>(fs::path::preferred_separator);
+            gone.push_back(p);
+            std::printf("曲フォルダが無い（中の譜面は持っていない扱いにする）: %s\n", r.c_str());
+        }
+    }
+    if (!gone.empty()) {
+        const size_t before = lib.charts.size();
+        lib.charts.erase(std::remove_if(lib.charts.begin(), lib.charts.end(),
+                                        [&](const ChartRecord& c) {
+                                            for (const std::string& g : gone)
+                                                if (c.path.size() > g.size() && c.path.compare(0, g.size(), g) == 0) return true;
+                                            return false;
+                                        }),
+                         lib.charts.end());
+        std::printf("無い曲フォルダの譜面 %zu 件を外した\n", before - lib.charts.size());
+    }
     fill_difficulties(lib.charts);
 }
 
 
 // プレイオプションのパネルを開いている間の鍵盤（LR2: Songselect.cpp:1350 SetPlayOption）。
-//   1=鍵盤数の絞り込み 2=RANDOM 3=BATTLE 4=GAUGE 5=HS- 7=HS+ 6=ASSIST 6+7=HIDDEN/SUDDEN 5+7=HS-FIX
+//   1=鍵盤数の絞り込み 2=RANDOM 3=BATTLE 4=GAUGE 5=HS- 7=HS+ 6=7k モード（LR2 は ASSIST） 6+7=HIDDEN/SUDDEN 5+7=HS-FIX
 // BMjoy にまだ無いもの（BATTLE）は何もしない。変えたら true
 bool play_option_keys(App& app, const InputMapper& input, const std::vector<ButtonInput>& buttons) {
     AppConfig& cfg = app.cfg;
@@ -556,7 +738,7 @@ bool play_option_keys(App& app, const InputMapper& input, const std::vector<Butt
     if (pressed[1]) loop(0, 7, 1, cfg.select_mode), changed = true;  // 鍵盤数の絞り込み
     if (pressed[4]) app.cycle_gauge(1), changed = true;  // ゲージ（使っている MOD のカスタムゲージも並ぶ）
     if (pressed[2]) loop(0, 5, 1, cfg.random), changed = true;  // RANDOM
-    if (pressed[6] && !down(7)) cfg.assist = !cfg.assist, changed = true;  // ASSIST（皿の自動演奏）
+    if (pressed[6] && !down(7)) cfg.seven_key = !cfg.seven_key, changed = true;  // 7k モード（ASSIST の場所）
     if ((pressed[6] && held(7)) || (pressed[7] && held(6))) loop(0, 3, -1, cfg.effect), changed = true;
     if (pressed[5] && !down(7) && !down(6)) loop(cfg.hs_min, cfg.hs_max, -cfg.hs_margin, cfg.hi_speed), changed = true;
     if (pressed[7] && !down(5) && !down(6)) loop(cfg.hs_min, cfg.hs_max, cfg.hs_margin, cfg.hi_speed), changed = true;
@@ -596,7 +778,7 @@ void draw_play_option_panel(SDL_Renderer* r, TextCache& text, const AppConfig& c
     static const char* randoms[] = {"OFF", "MIRROR", "RANDOM", "S-RANDOM", "SCATTER", "CONVERGE"};
     Key keys[8] = {{}, {"鍵盤数", "", false}, {"RANDOM", randoms[std::clamp(cfg.random, 0, 5)], true},
                    {"BATTLE", "OFF", false}, {"GAUGE", gauges[std::clamp(cfg.gauge, 0, 5)], true},
-                   {"HI-SPEED −", hs, true}, {"ASSIST", cfg.assist ? "AUTO SCR." : "OFF", true}, {"HI-SPEED ＋", hs, true}};
+                   {"HI-SPEED −", hs, true}, {"MODE", cfg.seven_key ? "7K" : "7K+S", true}, {"HI-SPEED ＋", hs, true}};
     for (int k = 1; k <= 7; ++k) {
         bool black = k % 2 == 0;
         float kx = x + 30 + (k - 1) * 92, ky = y + (black ? 60 : 150);
@@ -632,7 +814,7 @@ struct SelectPrep {
     std::shared_ptr<Library> lib;
     std::vector<Entry> root;
     std::unordered_map<std::string, int> favs;
-    int profile = 0;
+    RecordProfile profile;
 };
 
 std::shared_ptr<SelectPrep> prepare_select(App& app) {
@@ -647,9 +829,10 @@ std::shared_ptr<SelectPrep> prepare_select(App& app) {
         if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
         lib.tables.push_back(std::move(t));
     }
-    p->profile = db.mod_profile(play_mod_key(app.active_mods()));
-    for (const ScoreRecord& s : db.all_scores(app.cfg.ln_mode, p->profile)) lib.scores[s.sha256] = s;
+    p->profile = record_profile(db, app);
+    lib.load_records(db, app.cfg.ln_mode, p->profile);
     p->favs = db.favorites();
+    lib.build_indexes();
     load_custom(lib, app, p->favs);
     p->root = build_tree(lib, new_song_since(app.cfg.title_flash), p->favs);
     return p;
@@ -682,16 +865,138 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     };
     // 下ごしらえ（起動の画面で裏で作ったもの。無ければ上で作った）
     std::shared_ptr<Library> lib = prep ? prep->lib : std::make_shared<Library>();
-    const int profile = prep ? prep->profile : 0;  // MOD の組み合わせごとに記録を分ける
+    // MOD の組み合わせごとに記録を分ける（判定の欄で判定を替えると変わる）。7k モードも別
+    RecordProfile profile = prep ? prep->profile : RecordProfile{};
     std::unordered_map<std::string, int> favs = prep ? std::move(prep->favs) : std::unordered_map<std::string, int>{};
     std::vector<Entry> root = prep ? std::move(prep->root) : std::vector<Entry>{};
     prep.reset();
     lap("一覧");
-    // フォルダランプ（LR2: folderlamp）。フォルダの中の譜面のランプの一番低いもの。記録か一覧が変わったら数え直す
-    std::unordered_map<const Entry*, int> folder_lamps;
+    if (dev_env("BMJ_MEMSTAT")) {
+        // 開発用：一覧のメモリの見積もり（要素の数と、文字列が持つ分）
+        size_t entries = 0, charts_e = 0, missing = 0, folders = 0, str_bytes = 0;
+        auto sbytes = [](const std::string& x) { return x.capacity() > 15 ? x.capacity() + 1 : 0; };
+        std::function<void(const Entry&)> walk = [&](const Entry& e) {
+            ++entries;
+            if (e.kind == Entry::Kind::Chart) ++charts_e;
+            else if (e.kind == Entry::Kind::Missing) ++missing;
+            else ++folders;
+            str_bytes += sbytes(e.label) + sbytes(e.sub) + sbytes(e.badge) + sbytes(e.dir);
+            str_bytes += sbytes(e.missing().md5) + sbytes(e.missing().sha256) + sbytes(e.missing().level) + sbytes(e.missing().title) +
+                         sbytes(e.missing().artist) + sbytes(e.missing().url) + sbytes(e.missing().url_diff);
+            for (const Entry& c : e.children) walk(c);
+        };
+        for (const Entry& e : root) walk(e);
+        size_t rec_str = 0;
+        for (const ChartRecord& c : lib->charts)
+            rec_str += sbytes(c.path) + sbytes(c.folder) + sbytes(c.sha256) + sbytes(c.md5) + sbytes(c.title) + sbytes(c.subtitle) +
+                       sbytes(c.artist) + sbytes(c.subartist) + sbytes(c.genre) + sbytes(c.banner) + sbytes(c.stagefile) +
+                       sbytes(c.backbmp);
+        size_t table_bytes = 0;
+        for (const DifficultyTable& t : lib->tables)
+            for (const TableChart& c : t.charts)
+                table_bytes += sizeof(TableChart) + sbytes(c.md5) + sbytes(c.sha256) + sbytes(c.level) + sbytes(c.title) +
+                               sbytes(c.artist) + sbytes(c.url) + sbytes(c.url_diff);
+        std::printf("メモリ：譜面 %zu 件 × %zu B ＋ 文字列 %.1f MB ／ 一覧の要素 %zu 件（譜面 %zu・未所持 %zu・フォルダ %zu）× %zu B ＋ 文字列 %.1f MB ／ "
+                    "難易度表 %.1f MB ／ 記録 %zu 件\n",
+                    lib->charts.size(), sizeof(ChartRecord), rec_str / 1e6, entries, charts_e, missing, folders, sizeof(Entry),
+                    str_bytes / 1e6, table_bytes / 1e6, lib->scores.size());
+    }
+    // フォルダランプ（LR2: folderlamp）。フォルダの中の譜面のランプの一番低いもの。記録か一覧が変わったら数え直す。
+    // 鍵は「鍵盤数の絞り込み・たどってきたフォルダの名前・そのフォルダの名前」。一覧の要素の場所（ポインタ）で覚えると、
+    // フォルダを出入りして一覧を作り直したときに、別のフォルダが同じ場所に入って、そのランプが出てしまう
+    std::unordered_map<std::string, int> folder_lamps;
+    // 譜面ごとのランプ（lib->charts の並びの順）。フォルダのランプを数えるときに、sha256 の文字列で記録を
+    // 探さずに済むように前もって並べておく（何万もの譜面を見るので、探すたびに文字列を数えると数十 ms かかる）。
+    // 記録や一覧が変わったら空にし、次に要ったときに作り直す
+    std::vector<const ScoreRecord*> chart_clear;  // 譜面ごとの記録（無ければ nullptr）
+    const Library* chart_clear_lib = nullptr;
+    // フォルダの記録の合計（スコアの欄。鍵はフォルダランプと同じ）
+    struct FolderTotal {
+        ScoreRecord sc;
+        int notes = 0, played_notes = 0;
+        int charts = 0, played = 0;  // 持っている譜面の数・遊んだ譜面の数
+    };
+    std::unordered_map<std::string, FolderTotal> folder_totals;
+    std::string folder_totals_pending;  // 中身を集めている途中で数えた合計の鍵（次のフレームで数え直す）
+    std::vector<int> folder_played;  // カーソルのフォルダの「遊んだ譜面の数・持っている数・割合（%）」
+    // カスタムフォルダの中身を、裏の 1 本のスレッドで集める（フォルダランプと合計のため）。
+    // .lr2folder が多いと、画面の処理の中で 1 つずつ SQL を回すと、カーソルを動かすたびに固まる
+    struct CustomPrefetch {
+        std::mutex mu;
+        std::condition_variable cv;
+        std::deque<std::pair<std::shared_ptr<Library>, const CustomFolderDef*>> jobs;
+        std::set<const CustomFolderDef*> queued;
+        bool stop = false;
+        bool running = false;  // 裏で 1 つ集めている最中
+    };
+    auto prefetch = std::make_shared<CustomPrefetch>();
+    std::thread prefetch_thread([p = prefetch] {
+        std::unique_lock<std::mutex> lock(p->mu);
+        for (;;) {
+            p->cv.wait(lock, [&] { return p->stop || !p->jobs.empty(); });
+            if (p->stop) return;
+            auto job = std::move(p->jobs.front());
+            p->jobs.pop_front();
+            p->running = true;
+            lock.unlock();
+            if (job.first->custom_query) job.first->custom_query->run(*job.second);  // 結果は問い合わせの側が覚える
+            lock.lock();
+            p->queued.erase(job.second);
+            p->running = false;
+            p->cv.notify_all();
+        }
+    });
+    // フォルダランプ・合計のために中身が要るカスタムフォルダ。集め終えていれば中身を入れて true、
+    // まだなら裏に頼んで false（そのフレームはランプを出さず、次のフレームでまた見る）。
+    // 開くたびに 1 曲を選び直すフォルダ（#MAXTRACKS 1）は中身を数えない
+    auto custom_ready = [&](const Entry& x) {
+        if (!x.custom || x.custom_loaded) return true;
+        if (x.custom->max_tracks == 1 || !lib->custom_query) return true;
+        std::vector<std::string> md5s;
+        if (lib->custom_query->cached(*x.custom, md5s)) {
+            fill_custom_entry(*lib, x, md5s);
+            return true;
+        }
+        std::lock_guard<std::mutex> lock(prefetch->mu);
+        if (prefetch->queued.insert(x.custom).second) {
+            prefetch->jobs.emplace_back(lib, x.custom);
+            prefetch->cv.notify_one();
+        }
+        return false;
+    };
+    auto folder_lamp_key = [](int mode, const std::string& path, const Entry& e) {
+        return std::to_string(mode) + "\x1f" + path + "\x1f" + e.label;
+    };
+    // 譜面の記録と、lib->charts の中での番号（一覧の外の譜面なら -1）
+    auto chart_score = [&](const ChartRecord* c, int* index = nullptr) -> const ScoreRecord* {
+        if (chart_clear_lib != lib.get() || chart_clear.size() != lib->charts.size()) {
+            chart_clear.assign(lib->charts.size(), nullptr);
+            for (size_t i = 0; i < lib->charts.size(); ++i) {
+                auto sc = lib->scores.find(lib->charts[i].sha256);
+                if (sc != lib->scores.end()) chart_clear[i] = &sc->second;
+            }
+            lib->build_indexes();
+            chart_clear_lib = lib.get();
+        }
+        const ChartRecord* base = lib->charts.data();
+        if (c >= base && c < base + lib->charts.size()) {
+            if (index) *index = static_cast<int>(c - base);
+            return chart_clear[c - base];
+        }
+        if (index) *index = -1;
+        auto sc = lib->scores.find(c->sha256);  // 一覧の外の譜面（無いはずだが念のため）
+        return sc != lib->scores.end() ? &sc->second : nullptr;
+    };
+    auto chart_lamp = [&](const ChartRecord* c) -> int {
+        const ScoreRecord* r = chart_score(c);
+        return r ? r->clear : 0;
+    };
 
     std::mutex mu;
     std::shared_ptr<Library> pending;
+    // pending の一覧の木（裏で作ってあれば。無ければ表へ移すときに作る）。作るのに数百 ms かかるので、
+    // 画面の処理の中で作ると、曲フォルダが増えるたびに選曲画面が止まる
+    std::shared_ptr<std::vector<Entry>> pending_root;
     std::atomic<bool> busy{false};
     std::atomic<bool> stop_worker{false};  // 選曲画面を抜けるときに、裏の読み込みを止める
     std::string status = "";
@@ -702,10 +1007,17 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         if (busy) return;
         if (worker.joinable()) worker.join();
         busy = true;
-        std::vector<DifficultyTable> keep_tables;
-        if (!only_under.empty()) keep_tables = lib->tables;
-        worker = std::thread([&, scan_songs, only_under, keep_tables = std::move(keep_tables), dirs = app.cfg.song_dirs,
-                              urls = app.cfg.tables, ln_mode = app.cfg.ln_mode, profile] {
+        // 難易度表は取り直さないときは今のものを使う。写すのは裏で（何万もの譜面の表を、画面の処理の中で写すと止まる）
+        std::shared_ptr<const Library> keep_from = only_under.empty() ? nullptr : std::shared_ptr<const Library>(lib);
+        worker = std::thread([&, scan_songs, only_under, keep_from, dirs = app.cfg.song_dirs,
+                              urls = app.cfg.tables, ln_mode = app.cfg.ln_mode, profile, mods = app.active_mods(),
+                              custom_dirs = app.cfg.custom_folder_dirs, favs_now = favs, new_since = new_song_since(app.cfg.title_flash)] {
+            // 一覧の木まで裏で作る（表で作ると数百 ms 止まる）
+            auto make_root = [&](Library& l) {
+                l.build_indexes();
+                load_custom(l, mods, custom_dirs, favs_now);
+                return std::make_shared<std::vector<Entry>>(build_tree(l, new_since, favs_now));
+            };
             // 曲データベースは別の接続で書く（書き込みはこのスレッドだけ）
             SongDb wdb;
             ScanStats st;
@@ -715,16 +1027,18 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             next->roots = dirs;
             next->charts = wdb.all_charts();
             fill_difficulties(next->charts);
-            for (const ScoreRecord& s : wdb.all_scores(ln_mode, profile)) next->scores[s.sha256] = s;
-            if (!only_under.empty()) next->tables = keep_tables;
+            next->load_records(wdb, ln_mode, profile);
+            if (keep_from) next->tables = keep_from->tables;
             else
                 for (const std::string& u : urls) next->tables.push_back(update_table(table_cache_dir(), u));
             char buf[160];
             std::snprintf(buf, sizeof(buf), "%d 譜面（追加 %d／変更 %d／削除 %d）%.1f 秒", st.found, st.added, st.updated,
                           st.removed, st.seconds);
+            auto next_root = make_root(*next);
             {
                 std::lock_guard<std::mutex> lock(mu);
                 pending = next;
+                pending_root = next_root;
                 status = buf;
             }
             // LR2 から取り込んだ仮の譜面を、裏で少しずつ読んで本物の情報に置き換える。
@@ -742,11 +1056,13 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     lib2->roots = dirs;
                     lib2->charts = wdb.all_charts();
                     fill_difficulties(lib2->charts);
-                    for (const ScoreRecord& s : wdb.all_scores(ln_mode, profile)) lib2->scores[s.sha256] = s;
+                    lib2->load_records(wdb, ln_mode, profile);
                     lib2->tables = next->tables;
                     std::snprintf(buf, sizeof(buf), "譜面を読んでいます %d / %d", done, total);
+                    auto root2 = make_root(*lib2);
                     std::lock_guard<std::mutex> lock(mu);
                     pending = lib2;
+                    pending_root = root2;
                     status = finished ? "譜面を読み終えた" : buf;
                     last = std::chrono::steady_clock::now();
                 }
@@ -778,10 +1094,23 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         const std::vector<Entry>* list;  // 見せている一覧
         bool lr2_filter = false;         // 曲フォルダの一覧（LR2 の難易度の絞り込みをかける。難易度表などは常に ALL）
         std::string dir;                 // 曲フォルダの一覧なら、そのフォルダのパス
+        int bar_type = 1;                // このフォルダのバーの種類（フォルダの名前のバーに使う）
+        int head = 0;                    // 一覧の頭に足したバー（フォルダの名前・MOD のバー）の数
+    };
+    // MOD がフォルダに足すバー（フォルダの名前と譜面の数ごとに、1 回だけ聞く）
+    std::map<std::pair<std::string, int>, std::vector<ModBar>> mod_bar_cache;
+    auto mod_bars_for = [&](const std::string& folder, int charts) -> const std::vector<ModBar>& {
+        auto [it, fresh] = mod_bar_cache.try_emplace({folder, charts});
+        if (fresh) {
+            std::vector<std::string> errors;
+            it->second = mod_folder_bars(app.active_mods(), folder, charts, mod_data_dir(""), &errors);
+            for (const std::string& er : errors) std::printf("MOD のバーを作れない：%s\n", er.c_str());
+        }
+        return it->second;
     };
     auto make_level = [&](const std::vector<Entry>* full, int cursor, const std::string& name, bool lr2_filter = false,
-                          std::string dir = {}) {
-        Level lv{full, cursor, name, nullptr, full, lr2_filter, std::move(dir)};
+                          std::string dir = {}, int bar_type = 1) {
+        Level lv{full, cursor, name, nullptr, full, lr2_filter, std::move(dir), bar_type};
         // 鍵盤数の絞り込みで譜面が 1 つも出なくなるなら、出る項目まで進める（LR2: songmanage:2590）
         auto keys_of = [](const Entry& e) { return e.kind == Entry::Kind::Chart && e.chart ? e.chart->keys : 7; };
         bool any_song = false;
@@ -854,10 +1183,10 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     });
                 };
                 auto title_of = [](const Entry& e) -> const std::string& {
-                    return e.kind == Entry::Kind::Chart ? e.chart->title : e.kind == Entry::Kind::Missing ? e.missing.title : e.label;
+                    return e.kind == Entry::Kind::Chart ? e.chart->title : e.kind == Entry::Kind::Missing ? e.missing().title : e.label;
                 };
                 auto artist_of = [](const Entry& e) -> const std::string& {
-                    return e.kind == Entry::Kind::Chart ? e.chart->artist : e.kind == Entry::Kind::Missing ? e.missing.artist : e.sub;
+                    return e.kind == Entry::Kind::Chart ? e.chart->artist : e.kind == Entry::Kind::Missing ? e.missing().artist : e.sub;
                 };
                 // 譜面だけを並べ替える（フォルダは元の順のまま前）。曲名・アーティストは持っていない譜面も一緒に並べる。
                 // それ以外（BPM・長さ・レベル・記録）は持っていない譜面を後ろに回し、記録で並べるものは記録の無い譜面も後ろ。同じなら曲名順
@@ -909,11 +1238,48 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             lv.view = v;
             lv.list = v.get();
         }
+        // フォルダの中では、頭にフォルダの名前のバーを置き、その下に MOD のバーを置く。
+        // 一覧は輪なので、一番下の項目の次にフォルダの名前が来て、どこが端か分かる。開いたときのカーソルはフォルダの名前
+        if (full != &root) {
+            auto v = lv.view ? lv.view : std::make_shared<std::vector<Entry>>(*full);
+            int charts = 0;
+            for (const Entry& e : *v) charts += e.kind == Entry::Kind::Chart;
+            std::vector<Entry> head(1);
+            head[0].kind = Entry::Kind::Header;
+            head[0].label = name;
+            head[0].bar_type = bar_type;
+            for (const ModBar& b : mod_bars_for(name, charts)) {
+                Entry e;
+                e.kind = Entry::Kind::ModBar;
+                e.label = b.title;
+                e.bar_type = 0;  // 曲と同じ色
+                e.mod_info = std::make_shared<const ModBar>(b);
+                head.push_back(std::move(e));
+            }
+            lv.head = static_cast<int>(head.size());
+            v->insert(v->begin(), std::make_move_iterator(head.begin()), std::make_move_iterator(head.end()));
+            lv.view = v;
+            lv.list = v.get();
+        }
+        // メモリを節約しない設定では、前と同じく、一覧の写しにフォルダの中身を下の階層まで丸ごと写して持たせる
+        if (lv.view && !app.cfg.low_memory) {
+            std::function<void(Entry&)> deep = [&](Entry& e) {
+                if (e.children.empty()) return;
+                e.children.detach();
+                for (Entry& c : e.children.vec()) deep(c);
+            };
+            for (Entry& e : *lv.view) deep(e);
+        }
         return lv;
     };
     std::vector<Level> stack{make_level(&root, 0, "BMjoy")};
+    // いまの階層までのフォルダの名前（folder_lamp_key に使う）
+    auto level_path = [&] {
+        std::string p;
+        for (const Level& l : stack) p += l.name + "\x1f";
+        return p;
+    };
     // フォルダ → その中の譜面（一覧を差し替えたら作り直す）
-    std::unordered_map<std::string, std::vector<const ChartRecord*>> folder_charts;
     // 選曲 BGM（ループ）は、最初の絵を出してから鳴らす（準備のあいだに音だけが先に鳴らないように）
     bool bgm_pending = true;
     bool autoplay = false;
@@ -926,6 +1292,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     bool space_held = false, force_panel = false, start_was_held = false;
     uint64_t panel_open_ns = 0;
     bool up_held = false, down_held = false;
+    bool back_from_play = false;  // このフレームで遊んで戻ってきた（遊んでいた時間を、遅いフレームとして数えない）
     int prev_hold_dir = 0;
     bool quit = false;
 
@@ -1053,8 +1420,20 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             }
             SkinImage img;
             if (!want.empty()) {
+                // 書かれた名前のファイルが無ければ、拡張子だけ違うものを探す（よくある）
+                fs::path p(want);
+                std::error_code ec;
+                if (!fs::exists(p, ec))
+                    for (const char* ext : {".png", ".jpg", ".bmp", ".PNG", ".JPG", ".BMP"}) {
+                        fs::path q = p;
+                        q.replace_extension(ext);
+                        if (fs::exists(q, ec)) {
+                            p = q;
+                            break;
+                        }
+                    }
                 static const uint8_t black[3] = {0, 0, 0};
-                load_skin_image(want, img, black, false);
+                if (fs::exists(p, ec)) load_skin_image(p.string(), img, black, false);
             }
             lock.lock();
             if (text >= 0) b->folder_text[folder] = text == 1;
@@ -1075,26 +1454,22 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     std::string preview_path;                    // 読んでいる・鳴らしている譜面（空なら何もしていない）
     auto stop_preview = [&](bool restore_bgm) {
         if (preview) {
+            // 止めるだけにして、待たない（カーソルを動かすたびに音の側の処理 2 回ぶん待つと、スクロールがカクつく）。
+            // 音の側が最後に読み終わるまで捨てられないので、裏で少し置いてから捨てる（キー音の大きなメモリを返す手間も裏で）
             app.mixer.stop();
-            app.mixer.wait_callback();
-            preview.reset();
+            std::thread([p = std::move(preview)]() mutable {
+                SDL_Delay(300);
+                p.reset();
+            }).detach();
         }
         preview_path.clear();
         if (restore_bgm) app.mixer.fade_system_loop(1.0f, 1000);
     };
     SDL_Texture* banner_tex = nullptr;
+    // バナーの場所（文字列だけ。ファイルがあるかは裏のスレッドが確かめる。ここで HDD を見ると、毎フレーム待たされる）
     auto banner_path_of = [](const ChartRecord& c) -> std::string {
         if (c.banner.empty()) return {};
-        fs::path p = fs::path(c.folder) / c.banner;
-        std::error_code ec;
-        if (fs::exists(p, ec)) return p.string();
-        // 拡張子だけ違うことがよくある
-        for (const char* ext : {".png", ".jpg", ".bmp", ".PNG", ".JPG", ".BMP"}) {
-            fs::path q = p;
-            q.replace_extension(ext);
-            if (fs::exists(q, ec)) return q.string();
-        }
-        return {};
+        return (fs::path(c.folder) / c.banner).string();
     };
 
     auto current = [&]() -> const Entry* {
@@ -1135,10 +1510,13 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     auto entry_key = [](const Entry& e) -> std::string {
         if (e.kind == Entry::Kind::Chart) return "c:" + e.chart->path;
         if (e.kind == Entry::Kind::Course) return "k:" + e.course->hash;
-        if (e.kind == Entry::Kind::Missing) return "m:" + e.missing.md5 + e.missing.sha256;
+        if (e.kind == Entry::Kind::Missing) return "m:" + e.missing().md5 + e.missing().sha256;
+        if (e.kind == Entry::Kind::Header) return std::string("h:");
+        if (e.kind == Entry::Kind::ModBar) return "x:" + e.mod_bar().mod_id + "/" + e.mod_bar().key;
         return "f:" + e.label;
     };
-    auto rebuild = [&] {
+    // prebuilt：裏で作ってある一覧の木（あればそれを使い、ここでは作らない）
+    auto rebuild = [&](std::shared_ptr<std::vector<Entry>> prebuilt = nullptr) {
         std::vector<std::string> path, keys;
         std::vector<int> cursors;
         for (size_t i = 1; i < stack.size(); ++i) path.push_back(stack[i].name);
@@ -1148,8 +1526,9 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             keys.push_back(n ? entry_key((*lv.list)[std::clamp(lv.cursor, 0, n - 1)]) : "");
         }
         const int old_cursor = stack.back().cursor;
-        root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
-        folder_lamps.clear();
+        if (prebuilt) root = std::move(*prebuilt);
+        else root = build_tree(*lib, new_song_since(app.cfg.title_flash), favs);
+        folder_lamps.clear(), folder_totals.clear(), chart_clear.clear();
         auto place = [&](Level& lv, size_t i) {
             const std::vector<Entry>& list = *lv.list;
             for (size_t k = 0; k < list.size(); ++k)
@@ -1164,10 +1543,12 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         place(stack.back(), 0);
         for (size_t i = 0; i < path.size(); ++i) {
             const std::vector<Entry>& list = *stack.back().list;
-            auto it = std::find_if(list.begin(), list.end(), [&](const Entry& e) { return e.label == path[i]; });
+            auto it = std::find_if(list.begin(), list.end(),
+                                   [&](const Entry& e) { return e.kind == Entry::Kind::Folder && e.label == path[i]; });
             if (it == list.end()) break;
             if (it->custom && !it->custom_loaded) load_custom_entry(*lib, *it);
-            stack.push_back(make_level(&it->children, cursors[i + 1], path[i], it->fs_folder, it->dir));
+            stack.push_back(make_level(it->children.ptr(), cursors[i + 1], path[i], it->fs_folder, it->dir,
+                                       it->course_folder ? 6 : it->bar_type));
             place(stack.back(), i + 1);
         }
         if (stack.size() == path.size() + 1) {
@@ -1178,6 +1559,11 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             snap();
         }
     };
+    double roulette_ms = 0;
+    std::string roulette_title, roulette_sha;  // ルーレットに今出ている譜面
+    std::vector<std::pair<std::string, std::string>> roulette_pool;  // ルーレットに出す曲名と sha256
+    std::mt19937 roulette_rng{std::random_device{}()};
+    bool decide_chart_pending = false;  // MOD のバーが選んだ譜面へカーソルを移した。次のフレームで決定する
     bool start_replay = false;  // 次の決定をリプレイの再生にする（ボタン 19、6 番の鍵盤の長押し）
     bool to_keyconfig = false;    // キーコンフィグへ移るためにフェードアウトしている
     bool to_skin_select = false;  // スキンセレクトへ移るためにフェードアウトしている
@@ -1186,33 +1572,100 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     bool resort_pending = false;  // 記録で並べているときに、記録が変わったので並べ直す（次のフレームで）
     // 遊んだあとに、スコアとプレイヤーの累計を読み直す（refreshed：仮の譜面を読み直したので一覧から作り直す）。
     // played は遊んだ譜面（コースならコースとステージ）の sha256。空なら全部の記録を読み直す
+    // 記録（遊んだ・判定を替えて MOD の組み合わせが変わった）を、裏で読み直して一覧を作り直す。カスタムフォルダの中身も
+    // 裏で集め終えてから差し替える（表で作ると 0.7 秒ほど止まり、フォルダのランプも少しずつしか出ない）。
+    // ほかの読み込みが裏で動いていれば、終わってから始める（records_reload_wanted）
+    bool records_reload_wanted = false;
+    auto reload_records_async = [&] {
+        if (busy) {
+            records_reload_wanted = true;
+            return;
+        }
+        records_reload_wanted = false;
+        if (worker.joinable()) worker.join();
+        busy = true;
+        std::shared_ptr<const Library> base = lib;
+        worker = std::thread([&, base, ln_mode = app.cfg.ln_mode, profile_now = profile, mods = app.active_mods(),
+                              custom_dirs = app.cfg.custom_folder_dirs, favs_now = favs, new_since = new_song_since(app.cfg.title_flash)] {
+            const uint64_t t0 = SDL_GetTicksNS();
+            auto next = std::make_shared<Library>();
+            next->roots = base->roots, next->charts = base->charts, next->tables = base->tables;
+            const uint64_t t1 = SDL_GetTicksNS();
+            SongDb rdb;
+            if (rdb.open(song_db_path())) next->load_records(rdb, ln_mode, profile_now);
+            next->build_indexes();
+            const uint64_t t2 = SDL_GetTicksNS();
+            load_custom(*next, mods, custom_dirs, favs_now);
+            const uint64_t t3 = SDL_GetTicksNS();
+            // カスタムフォルダの中身を集める（問い合わせの結果は表が覚える）のと、一覧の木を作るのは、同時に進める
+            uint64_t t_query = 0;
+            std::thread queries([&next, &t_query] {
+                const uint64_t q0 = SDL_GetTicksNS();
+                if (next->custom_query)
+                    for (const CustomFolderNode& n : next->custom_nodes)
+                        for (const CustomFolderDef& d : n.defs)
+                            if (d.max_tracks != 1) next->custom_query->run(d);
+                t_query = SDL_GetTicksNS() - q0;
+            });
+            auto next_root = std::make_shared<std::vector<Entry>>(build_tree(*next, new_since, favs_now));
+            const uint64_t t_tree = SDL_GetTicksNS() - t3;
+            queries.join();
+            auto ms = [](uint64_t a, uint64_t b) { return (b - a) / 1e6; };
+            std::printf("記録を裏で読み直した：%.0f ms（写す %.0f、記録 %.0f、カスタムフォルダの表 %.0f、中身 %.0f と一覧 %.0f を同時に）\n",
+                        ms(t0, SDL_GetTicksNS()), ms(t0, t1), ms(t1, t2), ms(t2, t3), t_query / 1e6, t_tree / 1e6);
+            std::lock_guard<std::mutex> lock(mu);
+            pending = next;
+            pending_root = next_root;
+            busy = false;
+        });
+    };
     auto reload_after_play = [&](bool refreshed, const std::vector<std::string>& played = {}) {
+        // 表の lib の記録とカスタムフォルダを作り直すので、裏で集めている分は止め、集めている最中の 1 つが終わるのを待つ
+        // （起動の直後に判定の欄を替えると、裏が使っている問い合わせを作り直して落ちていた）
+        if (!refreshed) {
+            std::unique_lock<std::mutex> lock(prefetch->mu);
+            prefetch->jobs.clear();
+            prefetch->queued.clear();
+            prefetch->cv.wait(lock, [&] { return !prefetch->running; });
+        }
         const uint64_t t0 = SDL_GetTicksNS();
         auto ms = [](uint64_t a, uint64_t b) { return (b - a) / 1e6; };
         if (refreshed) {
             auto lib2 = std::make_shared<Library>();
             load_charts(*lib2, app.db, app.cfg);
             lib2->tables = lib->tables;
-            for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib2->scores[s.sha256] = s;
+            lib2->load_records(app.db, app.cfg.ln_mode, profile);
             std::lock_guard<std::mutex> lock(mu);
             pending = lib2;
+            pending_root.reset();
         } else {
             if (played.empty()) {
-                for (const ScoreRecord& s : app.db.all_scores(app.cfg.ln_mode, profile)) lib->scores[s.sha256] = s;
+                lib->load_records(app.db, app.cfg.ln_mode, profile);
             } else {
                 // 遊んだ譜面の記録だけを読み直す（全部を読み直すと、譜面が多いときに選曲画面へ戻るのが遅い）
                 for (const std::string& sha : played) {
                     ScoreRecord r;
-                    if (app.db.get_score(sha, r, app.cfg.ln_mode, profile)) lib->scores[sha] = r;
+                    const int id = lib->record_profile_of(sha);
+                    if (app.db.get_score(sha, r, app.cfg.ln_mode, id)) lib->scores[sha] = r;
+                    lib->custom_lamps[sha] = app.db.custom_lamps(sha, app.cfg.ln_mode, id);
                 }
             }
             const uint64_t t1 = SDL_GetTicksNS();
-            folder_lamps.clear();
+            folder_lamps.clear(), folder_totals.clear(), chart_clear.clear();
             // 記録で集めるフォルダ（カスタムフォルダ・MOD のフォルダ）があるときだけ一覧を作り直す。
             // 無ければ、記録で並べているときに並べ直すだけ
             bool record_folders = !lib->custom_nodes.empty();
             for (const ModManifest* m : app.active_mods())
                 if (!m->script.empty() && (m->touches & static_cast<uint32_t>(ModTouch::Control))) record_folders = true;
+            if (record_folders && !played.empty()) {
+                // 遊んだ譜面の記録はもう入れた。カスタムフォルダと MOD のフォルダは裏で作り直して差し替える
+                //（表で作ると 0.7 秒ほど止まる）
+                reload_records_async();
+                if (sort_mode >= 6) resort_pending = true;
+                std::printf("選曲画面に戻る：記録 %.0f ms（フォルダは裏で作り直す）\n", ms(t0, t1));
+                sctx.player = app.db.player_stats();
+                return;
+            }
             if (record_folders && played.empty()) {
                 load_custom(*lib, app, favs);
             } else if (record_folders) {
@@ -1239,6 +1692,38 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         }
         sctx.player = app.db.player_stats();
     };
+    // メトロノームの欄（ボタン 902）：メトロノームの MOD を使う・使わないを切り替える（MOD が入っていなければ何もしない）。
+    // 記録を残すかどうかの表示（SCORE SAVE）も、これで変わる
+    auto toggle_metronome = [&] {
+        for (const ModManifest& m : app.mods) {
+            if (!m.metronome) continue;
+            auto& en = app.cfg.enabled_mods;
+            auto it = std::find(en.begin(), en.end(), m.id);
+            if (it != en.end()) en.erase(it);
+            else en.push_back(m.id);
+            app.save_config();
+            app.mixer.play_system(kSysOptionChange);
+            return;
+        }
+    };
+    // 判定の欄（ボタン 900）：OFF → VERY HARD … EASY → JUDGE1 … → OFF（dir が負なら逆）。MOD の設定に書き、記録をその判定のものに読み直す
+    auto cycle_judge = [&](int dir) {
+        for (ModManifest& m : app.mods) {
+            if (!m.has_setting("judges") ||
+                std::find(app.cfg.enabled_mods.begin(), app.cfg.enabled_mods.end(), m.id) == app.cfg.enabled_mods.end())
+                continue;
+            // 並び：OFF・本体の判定（VERY HARD … EASY）・一覧の判定（JUDGE1〜9）
+            const int ns = static_cast<int>(std::size(kStandardJudgeIds));
+            const int n = 1 + ns + static_cast<int>(std::min<size_t>(m.judges.size(), 9));
+            const int cur = ((judge_choice(m) + dir) % n + n) % n;
+            m.judge_use = cur == 0 ? std::string() : cur <= ns ? std::string(kStandardJudgeIds[cur - 1]) : m.judges[cur - 1 - ns].id;
+            save_mod_settings(m, mod_settings_path(m.id));
+            profile = record_profile(app.db, app);
+            reload_records_async();
+            app.mixer.play_system(kSysOptionChange);
+            return;
+        }
+    };
     auto decide = [&] {
         const Entry* e = current();
         if (!e) return;
@@ -1246,10 +1731,11 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (e->custom && (!e->custom_loaded || e->custom->max_tracks == 1)) {
                 // 開くたびに 1 曲を選び直すフォルダは、毎回集め直す（LR2: songmanage:2091）
                 load_custom_entry(*lib, *e);
-                folder_lamps.erase(e);
+                folder_lamps.erase(folder_lamp_key(mode_filter, level_path(), *e));
+                folder_totals.erase(folder_lamp_key(mode_filter, level_path(), *e));
             }
             if (e->children.empty()) return;  // 空のフォルダには入らない（LR2 と同じ）
-            stack.push_back(make_level(&e->children, 0, e->label, e->fs_folder, e->dir));
+            stack.push_back(make_level(e->children.ptr(), 0, e->label, e->fs_folder, e->dir, e->course_folder ? 6 : e->bar_type));
             snap();
             app.mixer.play_system(kSysFolderOpen);
         } else if (e->kind == Entry::Kind::Chart || (e->kind == Entry::Kind::Course && e->course->playable())) {
@@ -1257,6 +1743,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             PlayOptions po;
             po.autoplay = autoplay;
             po.replay = start_replay && e->kind == Entry::Kind::Chart;
+            po.record = e->kind == Entry::Kind::Chart ? e->chart : nullptr;
             if (po.replay) po.autoplay = false;
             start_replay = false;
             if (const char* cap = dev_env("BMJ_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
@@ -1284,6 +1771,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 po.decide_sound = !app.decide_skin;
             }
             PlayExit ex = course ? run_course(app, *course, po) : run_play(app, path, po);
+            back_from_play = true;
             replay_checked.clear();  // 遊んでリプレイを残したかもしれない
             // LR2 から取り込んだ仮の譜面を遊んだら、その譜面を読んで本物の情報にする（記録のキーがそろう）
             bool refreshed = false;
@@ -1307,7 +1795,31 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (ex == PlayExit::Quit) quit = true;
         } else if (e->kind == Entry::Kind::Missing) {
             std::lock_guard<std::mutex> lock(mu);
-            status = "この譜面は持っていない：" + e->missing.title;
+            status = "この譜面は持っていない：" + e->missing().title;
+        } else if (e->kind == Entry::Kind::ModBar) {
+            // MOD に、今の一覧に見えている譜面から 1 つ選ばせる。選んだ譜面にカーソルを移して、そのまま決定する
+            const ModManifest* mod = nullptr;
+            for (const ModManifest* m : app.active_mods())
+                if (m->id == e->mod_bar().mod_id) mod = m;
+            if (!mod) return;
+            Level& lv = stack.back();
+            std::vector<const ChartRecord*> charts;
+            for (const Entry& x : *lv.list)
+                if (x.kind == Entry::Kind::Chart && x.chart) charts.push_back(x.chart);
+            std::string err;
+            // ルーレットのバーなら、決定したときに出ていた譜面も渡す
+            const std::string shown = e->mod_bar().roulette && !roulette_title.empty() ? roulette_sha : "";
+            std::string sha = mod_pick_chart(*mod, e->mod_bar(), lv.name, charts, lib->scores, mod_data_dir(""), &err, shown);
+            if (!err.empty()) std::printf("MOD のバー：%s\n", err.c_str());
+            for (size_t i = 0; !sha.empty() && i < lv.list->size(); ++i) {
+                const Entry& x = (*lv.list)[i];
+                if (x.kind == Entry::Kind::Chart && x.chart && x.chart->sha256 == sha) {
+                    lv.cursor = static_cast<int>(i);
+                    snap();
+                    decide_chart_pending = true;
+                    return;
+                }
+            }
         }
     };
     // 難易度の切り替え（LR2: Songselect.cpp の SELECT / →。仕様 4.7）。同じフォルダの、今より上の難易度の譜面へ移る。
@@ -1343,7 +1855,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         }
         difficulty_filter = to;
         Level& lv = stack.back();
-        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir);
+        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir, lv.bar_type);
         // 移った先の譜面にカーソルを合わせる。見えていなければ、同じ曲フォルダの譜面に（カーソルは同じ曲に留まる）
         int same_folder = -1;
         for (size_t i = 0; i < lv.list->size(); ++i) {
@@ -1366,7 +1878,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         std::string label = e ? e->label : "";
         const ChartRecord* chart = e && e->kind == Entry::Kind::Chart ? e->chart : nullptr;
         Level& lv = stack.back();
-        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir);
+        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir, lv.bar_type);
         for (size_t i = 0; i < lv.list->size(); ++i) {
             const Entry& x = (*lv.list)[i];
             if ((chart && x.kind == Entry::Kind::Chart && x.chart == chart) || (!chart && x.label == label)) {
@@ -1398,7 +1910,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         std::function<void(std::vector<Entry>&, bool)> retag = [&](std::vector<Entry>& list, bool in_fs) {
             for (Entry& x : list) {
                 if (in_fs && x.kind == Entry::Kind::Chart && x.chart == &c) x.badge = std::to_string(c.playlevel);
-                retag(x.children, x.fs_folder);
+                if (!x.children.empty()) retag(const_cast<Entry&>(x).children.vec(), x.fs_folder);
             }
         };
         retag(root, false);
@@ -1502,9 +2014,30 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         edit_buf.clear();
         edit_text = 30;
     };
-    // 開発用：BMJ_TIMING があれば、遅かったフレームの内訳を出す
-    const bool frame_timing = dev_env("BMJ_TIMING") != nullptr;
-    uint64_t ft0 = 0, ft_banner = 0, ft_text = 0;
+    // 遅かったフレーム（80 ms 以上）は、内訳をログに残す（カクつき・固まりの原因を、遊んだあとに見られるように）。
+    // 開発用：BMJ_TIMING があれば 50 ms 以上を出す
+    const uint64_t slow_ns = dev_env("BMJ_TIMING") ? 50'000'000 : 80'000'000;
+    uint64_t ft0 = 0, ft_banner = 0, ft_text = 0, ft_events = 0, ft_draw0 = 0, ft_draw = 0;
+    int slow_logged = 0;
+    uint64_t ft_swap = 0, ft_preview = 0;  // 一覧の差し替え・プレビューにかかった時間
+    uint64_t lamp_ns = 0;  // このフレームでフォルダのランプを数えるのにかかった時間と、見た要素の数
+    size_t lamp_nodes = 0;
+    // 開発用：BMJ_SCROLL_TEST があれば、決まった操作（長押し・1 つずつ・フォルダを開く・戻る）を流し、
+    // 1 フレームにかかった時間をまとめて出して終わる
+    const bool scroll_test = dev_env("BMJ_SCROLL_TEST") != nullptr;
+    std::vector<float> frame_ms;
+    double test_t0 = -1, test_next = 0;
+    int test_step = 0, test_count = 0;
+    // 開発用：BMJ_OPEN_TEST があれば、一番上のフォルダを順に開き（中のフォルダも 8 つまで）、開くのにかかった時間と、
+    // 開いてから 1 秒のうちの一番遅いフレームを出して終わる
+    const bool open_test = dev_env("BMJ_OPEN_TEST") != nullptr;
+    std::vector<int> open_pos{0};      // 階層ごとに、次に見る位置
+    std::vector<int> open_done{0};     // 階層ごとに、開いた数
+    bool open_measuring = false;
+    double open_next = 0, open_decide_ms = 0;
+    float open_max = 0;
+    std::string open_label;
+    size_t open_depth = 0;  // 開く前の階層の深さ（開けなかったフォルダを見分ける）
     while (!quit) {
         ft0 = SDL_GetTicksNS();
         SDL_Event e;
@@ -1537,49 +2070,53 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                           : src.op[0] == 2 ? (mouse_y - d.y - d.h / 2) / len : (d.x + d.w / 2 - mouse_x) / len;
                 return std::clamp(r, 0.0f, 1.0f);
             };
-            if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && is_sound_slider(dragging->src.op[2])) {
-                // 音のスライダー：10〜16 = EQ（-12〜12 dB）、17〜19 = 音量 MASTER / KEY / BGM（0〜100）、
-                // 20〜25 = エフェクタ 3 つ × パラメータ 2 つ（0〜100）、26 = ピッチ（-12〜12 半音）
-                const int ty = dragging->src.op[2];
-                const float r = slider_ratio(*dragging);
-                SoundFx& fx = app.cfg.sound_fx;
-                if (ty >= 10 && ty <= 16) fx.eq[ty - 10] = static_cast<int>(std::lround(r * 24)) - 12;
-                else if (ty == 17) app.cfg.vol_master = static_cast<int>(std::lround(r * 100));
-                else if (ty == 18) app.cfg.vol_key = static_cast<int>(std::lround(r * 100));
-                else if (ty == 19) app.cfg.vol_bgm = static_cast<int>(std::lround(r * 100));
-                else if (ty >= 20 && ty <= 25) ((ty - 20) % 2 == 0 ? fx.fx[(ty - 20) / 2].p1 : fx.fx[(ty - 20) / 2].p2) = static_cast<int>(std::lround(r * 100));
-                else fx.pitch = static_cast<int>(std::lround(r * 24)) - 12;
-                app.apply_volume();
-                app.apply_sound_fx();
-            } else if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && dragging->src.op[2] == 7) {
-                // カスタマイズ項目のスクロール
-                const SkinSrc& src = dragging->src;
-                SkinDraw d = eval_dst(dragging->dst, sctx.timers.lapse(dragging->dst.timer, scene_ms()));
-                float len = static_cast<float>(std::max(1, src.op[1]));
-                float r = src.op[0] == 0 ? (d.y + d.h / 2 - mouse_y) / len : src.op[0] == 1 ? (mouse_x - d.x - d.w / 2) / len
-                          : src.op[0] == 2 ? (mouse_y - d.y - d.h / 2) / len : (d.x + d.w / 2 - mouse_x) / len;
-                catalog.set_scroll(static_cast<int>(std::lround(std::clamp(r, 0.0f, 1.0f) * catalog.scroll_max(app.cfg))), app.cfg);
-            } else if (e.type == SDL_EVENT_MOUSE_MOTION && dragging && !stack.back().list->empty()) {
-                // スライダーの位置 → 曲リストの位置（仕様 6.6）。つかんでいる間はそのまま動かす
-                const SkinSrc& src = dragging->src;
-                SkinDraw d = eval_dst(dragging->dst, sctx.timers.lapse(dragging->dst.timer, scene_ms()));
-                float len = static_cast<float>(std::max(1, src.op[1]));
-                float r = 0;
-                switch (src.op[0]) {
-                case 0: r = (d.y + d.h / 2 - mouse_y) / len; break;
-                case 1: r = (mouse_x - d.x - d.w / 2) / len; break;
-                case 2: r = (mouse_y - d.y - d.h / 2) / len; break;
-                default: r = (d.x + d.w / 2 - mouse_x) / len; break;
+            // つかんでいるスライダーを、マウスの位置に合わせる（動かしたとき・押したとき）
+            auto drag_update = [&] {
+                if (dragging && is_sound_slider(dragging->src.op[2])) {
+                    // 音のスライダー：10〜16 = EQ（-12〜12 dB）、17〜19 = 音量 MASTER / KEY / BGM（0〜100）、
+                    // 20〜25 = エフェクタ 3 つ × パラメータ 2 つ（0〜100）、26 = ピッチ（-12〜12 半音）
+                    const int ty = dragging->src.op[2];
+                    const float r = slider_ratio(*dragging);
+                    SoundFx& fx = app.cfg.sound_fx;
+                    if (ty >= 10 && ty <= 16) fx.eq[ty - 10] = static_cast<int>(std::lround(r * 24)) - 12;
+                    else if (ty == 17) app.cfg.vol_master = static_cast<int>(std::lround(r * 100));
+                    else if (ty == 18) app.cfg.vol_key = static_cast<int>(std::lround(r * 100));
+                    else if (ty == 19) app.cfg.vol_bgm = static_cast<int>(std::lround(r * 100));
+                    else if (ty >= 20 && ty <= 25) ((ty - 20) % 2 == 0 ? fx.fx[(ty - 20) / 2].p1 : fx.fx[(ty - 20) / 2].p2) = static_cast<int>(std::lround(r * 100));
+                    else fx.pitch = static_cast<int>(std::lround(r * 24)) - 12;
+                    app.apply_volume();
+                    app.apply_sound_fx();
+                } else if (dragging && dragging->src.op[2] == 7) {
+                    // カスタマイズ項目のスクロール
+                    const SkinSrc& src = dragging->src;
+                    SkinDraw d = eval_dst(dragging->dst, sctx.timers.lapse(dragging->dst.timer, scene_ms()));
+                    float len = static_cast<float>(std::max(1, src.op[1]));
+                    float r = src.op[0] == 0 ? (d.y + d.h / 2 - mouse_y) / len : src.op[0] == 1 ? (mouse_x - d.x - d.w / 2) / len
+                              : src.op[0] == 2 ? (mouse_y - d.y - d.h / 2) / len : (d.x + d.w / 2 - mouse_x) / len;
+                    catalog.set_scroll(static_cast<int>(std::lround(std::clamp(r, 0.0f, 1.0f) * catalog.scroll_max(app.cfg))), app.cfg);
+                } else if (dragging && !stack.back().list->empty()) {
+                    // スライダーの位置 → 曲リストの位置（仕様 6.6）。つかんでいる間はそのまま動かす
+                    const SkinSrc& src = dragging->src;
+                    SkinDraw d = eval_dst(dragging->dst, sctx.timers.lapse(dragging->dst.timer, scene_ms()));
+                    float len = static_cast<float>(std::max(1, src.op[1]));
+                    float r = 0;
+                    switch (src.op[0]) {
+                    case 0: r = (d.y + d.h / 2 - mouse_y) / len; break;
+                    case 1: r = (mouse_x - d.x - d.w / 2) / len; break;
+                    case 2: r = (mouse_y - d.y - d.h / 2) / len; break;
+                    default: r = (d.x + d.w / 2 - mouse_x) / len; break;
+                    }
+                    r = std::clamp(r, 0.0f, 1.0f);
+                    Level& lv = stack.back();
+                    int n = static_cast<int>(lv.list->size());
+                    int64_t v = static_cast<int64_t>(r * (n * 1000 - 1));
+                    list_top = old_bar = now_bar = v;
+                    move_start = move_end = scene_ms();
+                    int cur = static_cast<int>((v + 500) / 1000) % n;
+                    if (cur != lv.cursor) lv.cursor = cur, sctx.timers.set(11, scene_ms()), app.mixer.play_system(kSysScratch);
                 }
-                r = std::clamp(r, 0.0f, 1.0f);
-                Level& lv = stack.back();
-                int n = static_cast<int>(lv.list->size());
-                int64_t v = static_cast<int64_t>(r * (n * 1000 - 1));
-                list_top = old_bar = now_bar = v;
-                move_start = move_end = scene_ms();
-                int cur = static_cast<int>((v + 500) / 1000) % n;
-                if (cur != lv.cursor) lv.cursor = cur, sctx.timers.set(11, scene_ms()), app.mixer.play_system(kSysScratch);
-            }
+            };
+            if (e.type == SDL_EVENT_MOUSE_MOTION && dragging) drag_update();
             if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && dragging &&
                 (dragging->src.op[2] == 7 || is_sound_slider(dragging->src.op[2]))) {
                 dragging = nullptr;
@@ -1681,8 +2218,20 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     } else if (ty == 40) {
                         app.cycle_gauge(dir > 0 ? 1 : -1);
                         app.mixer.play_system(kSysOptionChange);
+                    } else if (ty == kJudgeButton) {
+                        cycle_judge(dir);
+                    } else if (ty == kMetronomeButton) {
+                        toggle_metronome();
                     }
-                    else if (ty == 46) app.cfg.lane_cover = !app.cfg.lane_cover, app.mixer.play_system(kSysOptionChange);
+                    else if (ty == 46) {
+                        // LANE COVER：OFF → SUDDEN+ → LIFT → SUDDEN+ と LIFT → OFF（逆に押せば逆の順）。
+                        // WMIX などには LIFT のボタンが無いので、SUDDEN+ の欄で一緒に選ぶ
+                        int s = (app.cfg.lane_cover ? 1 : 0) + (app.cfg.lift ? 2 : 0);
+                        s = (s + (dir < 0 ? 3 : 1)) % 4;
+                        app.cfg.lane_cover = s & 1, app.cfg.lift = (s & 2) != 0;
+                        app.mixer.play_system(kSysOptionChange);
+                    }
+                    else if (ty == 331) app.cfg.lift = !app.cfg.lift, app.mixer.play_system(kSysOptionChange);
                     else if (ty == 42) loop(app.cfg.random, 0, 5);
                     else if (ty == 17) {
                         // 曲のフォルダの .txt を全部見せる
@@ -1745,7 +2294,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                         app.mixer.play_system(app.mixer.has_system(kSysDifficulty) ? kSysDifficulty : kSysFolderOpen);
                     }
                     else if (ty >= 91 && ty <= 96) change_difficulty(ty - 91);
-                    else if (ty == 44) app.cfg.assist = !app.cfg.assist, app.mixer.play_system(kSysOptionChange);
+                    else if (ty == 44) app.cfg.seven_key = !app.cfg.seven_key, app.mixer.play_system(kSysOptionChange);  // 7k モード
                     else if (ty == 50) loop(app.cfg.effect, 0, 3);
                     else if (ty == 72) loop(app.cfg.bga, 0, 2);  // BGA（ボタンは OFF / ON / AUTOPLAY の 3 つを回す。LR2 と同じ）
                     else if (ty == 75) loop(app.cfg.auto_adjust, 0, 2);  // 判定タイミングの自動調整（OFF / ON / SILENT）
@@ -1840,7 +2389,10 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                         else if (o.src.op[0] == 2) rc.h += len;
                         else rc.x -= len, rc.w += len;
                         if (mx >= rc.x && mx < rc.x + rc.w && my >= rc.y && my < rc.y + rc.h) {
+                            // 押した所まで、すぐにつまみを動かす（つかんで引っ張らなくてよい）
                             dragging = &o;
+                            mouse_x = mx, mouse_y = my;
+                            drag_update();
                             clicked = true;
                             break;
                         }
@@ -1911,6 +2463,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (e.type == SDL_EVENT_KEY_UP && e.key.scancode == SDL_SCANCODE_SPACE) space_held = false;
             input.handle(e);
         }
+        ft_events = SDL_GetTicksNS() - ft0;
         // コントローラ：白鍵で決定、黒鍵で戻る、皿で上下（LR2の選曲画面と同じ）
         uint64_t now = SDL_GetTicksNS();
         std::vector<LaneInput> lanes;
@@ -1983,6 +2536,12 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 change_difficulty();
             }
         }
+        // 起動の画面で待ちきれなかった難易度表が、あとで新しくなっていたら一覧を作り直す（表だけ。曲フォルダは読まない）
+        if (app.table_updates && app.table_updates->remaining == 0 && app.table_updates->late_changed && !busy) {
+            app.table_updates->late_changed = false;
+            std::printf("遅れて新しくなった難易度表があるので、一覧を作り直す\n");
+            refresh(false);
+        }
         // 監視で変わったフォルダを、裏の読み直しが空いているときに 1 つずつ読み直す
         for (std::string& d : watcher.take_changed())
             if (std::find(watched_dirs.begin(), watched_dirs.end(), d) == watched_dirs.end()) watched_dirs.push_back(std::move(d));
@@ -2006,6 +2565,10 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (select_changed) reload_select_skin();
             else set_select_view();
             app.mixer.play_system(kSysSelect, true);
+        }
+        if (decide_chart_pending) {
+            decide_chart_pending = false;
+            decide();
         }
         if (sctx.timers.on(172)) {
             const Entry* e = current();
@@ -2043,17 +2606,31 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         else list_top = old_bar + static_cast<int64_t>((now_bar - old_bar) * (t_ms - move_start) / (move_end - move_start));
         if (t_ms < move_end) sctx.timers.set(10, t_ms);
         else sctx.timers.reset(10);
+        const uint64_t fsw0 = SDL_GetTicksNS();
+        // 7k モードを切り替えたら、皿のある 7 鍵の譜面とコースの記録を読み直す（鍵盤 6 でも欄のクリックでも）
+        if (app.cfg.seven_key != (profile.seven_key >= 0)) {
+            profile = record_profile(app.db, app);
+            reload_records_async();
+        }
+        if (records_reload_wanted && !busy) reload_records_async();
         {
             std::lock_guard<std::mutex> lock(mu);
             if (pending) {
+                // 前の一覧は、作り直しが終わるまで残す（いまのカーソルの曲を、前の一覧の譜面から名前で探すため。
+                // 先に捨てると、捨てた譜面を読んで落ちる）
+                std::shared_ptr<Library> old_lib = lib;
                 lib = pending;
                 pending.reset();
-                load_custom(*lib, app, favs);
-                folder_charts.clear();
-                rebuild();
+                auto prebuilt = std::move(pending_root);
+                pending_root.reset();
+                if (!prebuilt) load_custom(*lib, app, favs);
+                rebuild(prebuilt);
+                // 前の一覧（何万もの譜面）を捨てるのは裏で（表で捨てると数十 ms 止まる）
+                std::thread([l = std::move(old_lib)]() mutable { l.reset(); }).detach();
             }
         }
 
+        ft_swap = SDL_GetTicksNS() - fsw0;
         for (const std::string& nm : joystick_init().open_new()) {
             std::printf("コントローラー接続: %s\n", nm.c_str());
             joy_names.push_back(nm);
@@ -2063,6 +2640,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             joy_reported = true;
         }
         // プレビュー
+        const uint64_t fpv0 = SDL_GetTicksNS();
         stale_loads.erase(std::remove_if(stale_loads.begin(), stale_loads.end(),
                                          [](auto& f) { return f.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }),
                           stale_loads.end());
@@ -2092,7 +2670,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (!want.empty() && preview_path.empty() && !preview_load.valid() && sctx.timers.lapse(11, t_ms) >= 500) {
                 preview_path = want;
                 uint32_t rate = app.mixer.sample_rate();
-                preview_load = std::async(std::launch::async, [want, rate]() -> std::shared_ptr<Preview> {
+                const bool pcm16 = app.cfg.sound_16bit;
+                preview_load = std::async(std::launch::async, [want, rate, pcm16]() -> std::shared_ptr<Preview> {
                     BmsParseOptions popt;
                     popt.random_seed = 1;
                     BmsParseResult parsed = parse_chart_file(want, popt);
@@ -2104,12 +2683,13 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     std::vector<std::string> paths = resolve_chart_sounds(p->chart, missing);
                     auto ranges = sound_ranges(p->chart);
                     p->bank.load(paths, rate, static_cast<int>(std::max(2u, std::thread::hardware_concurrency() / 2)), nullptr,
-                                 nullptr, &ranges);
+                                 nullptr, &ranges, pcm16);
                     return p;
                 });
             }
         }
 
+        ft_preview = SDL_GetTicksNS() - fpv0;
         // 描画
         if (sk) {
             const Level& lv = stack.back();
@@ -2117,13 +2697,116 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             int n = static_cast<int>(list.size());
             const Entry* cur = current();
             sctx.type = 1, sctx.chart = nullptr, sctx.score = nullptr, sctx.course = nullptr;
-            if (cur && cur->kind == Entry::Kind::Folder && cur->course_folder) {
+            // フォルダ（とフォルダの名前のバー）にカーソルがあれば、中の持っている譜面の記録を合計してスコアの欄に出す。
+            // 同じ譜面が 2 つのフォルダにあっても 1 回だけ数える（難易度表の「全曲」とレベルのフォルダなど）
+            sctx.folder_score = nullptr;
+            folder_played.clear();
+            if (!folder_totals_pending.empty()) folder_totals.erase(folder_totals_pending), folder_totals_pending.clear();
+            if (cur && ((cur->kind == Entry::Kind::Folder && !cur->course_folder) ||
+                        (cur->kind == Entry::Kind::Header && cur->bar_type != 6))) {
+                const bool head = cur->kind == Entry::Kind::Header;
+                std::string key = head ? folder_lamp_key(mode_filter, level_path(), Entry{}) + "\x1fhead"
+                                       : folder_lamp_key(mode_filter, level_path(), *cur);
+                auto [it, fresh] = folder_totals.try_emplace(key);
+                bool complete = true;
+                if (fresh) {
+                    FolderTotal& ft = it->second;
+                    ft.sc.bp = 0;
+                    // 何万もの譜面を見るので、同じ譜面かどうかは番号で、記録は前もって並べたものから見る（文字列で探さない）
+                    std::vector<char> seen(lib->charts.size(), 0);
+                    std::unordered_set<std::string> seen_outside;
+                    std::function<void(const Entry&)> walk = [&](const Entry& x) {
+                        if (x.custom && !custom_ready(x)) complete = false;
+                        int idx = -1;
+                        const ScoreRecord* rec = x.kind == Entry::Kind::Chart && x.chart ? chart_score(x.chart, &idx) : nullptr;
+                        bool first = false;
+                        if (x.kind == Entry::Kind::Chart && x.chart) {
+                            if (idx >= 0) {
+                                char& s = seen[lib->same_sha[idx]];
+                                first = !s, s = 1;
+                            } else {
+                                first = seen_outside.insert(x.chart->sha256).second;
+                            }
+                        }
+                        if (first && mode_shows(mode_filter, x.chart->keys)) {
+                            const int n = sctx.notes_of(*x.chart);
+                            ft.notes += n;
+                            ft.charts++;
+                            if (rec && rec->playcount > 0) {
+                                const ScoreRecord& r = *rec;
+                                ft.played_notes += n;
+                                ft.played++;
+                                ft.sc.exscore += r.exscore;
+                                if (r.bp > 0) ft.sc.bp += r.bp;
+                                ft.sc.playcount += r.playcount;
+                                ft.sc.clearcount += r.clearcount;
+                                for (int j = 0; j < 5; ++j) ft.sc.judge[j] += r.judge[j];
+                            }
+                        }
+                        if (!x.course_folder)
+                            for (const Entry& c : x.children) walk(c);
+                    };
+                    if (head) {
+                        for (const Entry& x : list) walk(x);
+                    } else {
+                        walk(*cur);
+                    }
+                }
+                sctx.folder_score = &it->second.sc;
+                sctx.folder_notes = it->second.notes, sctx.folder_played_notes = it->second.played_notes;
+                if (!complete) folder_totals_pending = key;  // 集めている途中：出すが、次のフレームで数え直す
+                folder_played = {it->second.played, it->second.charts,
+                                 it->second.charts ? it->second.played * 100 / it->second.charts : 0};
+            }
+            // 曲でない要素の文字の欄（LR2 と同じく、フォルダならタイトルの枠にフォルダの名前）
+            sctx.bar_text = {};
+            if (cur && (cur->kind == Entry::Kind::Folder || cur->kind == Entry::Kind::Header || cur->kind == Entry::Kind::ModBar)) {
+                sctx.bar_text[0] = sctx.bar_text[2] = cur->label;
+                if (cur->custom) sctx.bar_text[3] = cur->custom->category;  // .lr2folder の #CATEGORY はジャンルの欄
+            } else if (cur && cur->kind == Entry::Kind::Missing) {
+                sctx.bar_text[0] = sctx.bar_text[2] = cur->missing().title;
+                sctx.bar_text[4] = cur->missing().artist;
+            }
+            // MOD のバーのルーレット：カーソルを置いている間、曲名の枠に一覧の曲名を毎フレーム（16ms ごと）次々に出す。
+            // バーに来たときに一覧から 48 曲を選んでおき、その中から出す（毎フレーム違う曲名の文字を作ると重い。
+            // 48 曲なら、一回りしたあとは作った文字を使い回せる）
+            sctx.title_override.clear();
+            if (cur && cur->kind == Entry::Kind::ModBar && cur->mod_bar().roulette) {
+                if (roulette_pool.empty()) {
+                    std::vector<const ChartRecord*> charts;
+                    for (const Entry& x : list)
+                        if (x.kind == Entry::Kind::Chart && x.chart) charts.push_back(x.chart);
+                    std::shuffle(charts.begin(), charts.end(), roulette_rng);
+                    if (charts.size() > 48) charts.resize(48);
+                    for (const ChartRecord* c : charts)
+                        roulette_pool.push_back({c->title + (c->subtitle.empty() ? "" : " " + c->subtitle), c->sha256});
+                }
+                if (!roulette_pool.empty() && (t_ms - roulette_ms >= 16 || roulette_title.empty())) {
+                    const auto& [title, sha] = roulette_pool[std::uniform_int_distribution<size_t>(0, roulette_pool.size() - 1)(roulette_rng)];
+                    roulette_title = title, roulette_sha = sha;
+                    roulette_ms = t_ms;
+                }
+                sctx.title_override = roulette_title;
+            } else {
+                roulette_title.clear(), roulette_sha.clear();  // 別のフォルダの譜面を次のルーレットに残さない
+                roulette_pool.clear();
+            }
+            if (cur && ((cur->kind == Entry::Kind::Folder && cur->course_folder) ||
+                        (cur->kind == Entry::Kind::Header && cur->bar_type == 6))) {
                 sctx.type = 6;
             } else if (cur && cur->kind == Entry::Kind::Course) {
                 sctx.type = 8;
                 sctx.course = cur->course.get();
                 auto it = lib->scores.find(cur->course->hash);
                 if (it != lib->scores.end()) sctx.score = &it->second;
+                if (dev_env("BMJ_DEBUG_COURSE")) {
+                    static std::string last;
+                    if (last != cur->course->hash) {
+                        last = cur->course->hash;
+                        std::printf("[コース] %s 記録 %s／EX %d／最大コンボ %d／BP %d／ノーツ %d\n", cur->course->name.c_str(), sctx.score ? "あり" : "なし",
+                                    sctx.number(71), sctx.number(75), sctx.number(76), sctx.number(74));
+                    }
+                }
             } else if (cur && cur->kind == Entry::Kind::Chart) {
                 sctx.type = 0;
                 sctx.chart = cur->chart;
@@ -2135,10 +2818,10 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             // 同じフォルダの、難易度ごとの譜面（WMIX の NORMAL / HYPER / ANOTHER の枠）
             sctx.diff_level.fill(-1), sctx.diff_count.fill(0), sctx.diff_lamp.fill(0);
             if (sctx.chart) {
-                if (folder_charts.empty())
-                    for (const ChartRecord& c : lib->charts) folder_charts[c.folder].push_back(&c);
-                auto fit = folder_charts.find(sctx.chart->folder);
-                if (fit != folder_charts.end())
+                if (lib->by_folder.empty())
+                    for (const ChartRecord& c : lib->charts) lib->by_folder[c.folder].push_back(&c);
+                auto fit = lib->by_folder.find(sctx.chart->folder);
+                if (fit != lib->by_folder.end())
                     for (const ChartRecord* c : fit->second) {
                         int d = c->difficulty - 1;
                         if (d < 0 || d > 4) continue;
@@ -2198,8 +2881,25 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             // カスタムゲージを選んでいれば、その名前と、ゲージのボタンの絵（落ちるものは HARD、落ちないものは GROOVE の絵）
             sctx.custom_gauge_name.clear();
             sctx.custom_gauge_frame = -1;
+            // 判定の欄：使っているカスタム判定の MOD で遊ぶ判定の、一覧の何番目か（選んでいなければ OFF）
+            sctx.no_record = app.metronome() != nullptr;
+            sctx.judge_frame = 0;
+            for (const ModManifest* m : app.active_mods())
+                if (m->has_setting("judges")) sctx.judge_frame = judge_choice(*m);
             for (const auto& [key, g] : app.custom_gauges())
                 if (key == app.cfg.custom_gauge) sctx.custom_gauge_name = g->name, sctx.custom_gauge_frame = g->survival ? kHard : kGroove;
+            // GAS：名前は「GAS」、ゲージの枠は順番の先頭のゲージのもの
+            if (app.cfg.custom_gauge == kGasKey) {
+                const std::vector<std::string> order = app.gas_order();
+                if (!order.empty()) {
+                    sctx.custom_gauge_name = "GAS";
+                    sctx.custom_gauge_frame = kHard;
+                    for (int i = 0; i < kGaugeCount; ++i)
+                        if (order[0] == kGaugeKeys[i]) sctx.custom_gauge_frame = i == kGroove || i == kEasy ? kGroove : kHard;
+                    for (const auto& [key, g] : app.custom_gauges())
+                        if (key == order[0]) sctx.custom_gauge_frame = g->survival ? kHard : kGroove;
+                }
+            }
             if (auto f = sctx.type == 0 && sctx.chart ? favs.find(sctx.chart->md5) : favs.end(); f != favs.end()) sctx.favorite = f->second;
             else sctx.favorite = 0;
             {
@@ -2229,7 +2929,9 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             ss.readme_open = readme_open;
             ss.readme_x = readme_x, ss.readme_y = readme_y;
             const int64_t new_since_now = new_song_since(app.cfg.title_flash);
-            ss.bar = [&](int i) {
+            const std::string lamp_path = level_path();
+            const auto lamp_defs = app.custom_lamps();
+            auto make_bar = [&](int i) {
                 SelectBar b;
                 const Entry& en = list[i];
                 if (en.kind == Entry::Kind::Folder) {
@@ -2237,19 +2939,32 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     b.title = en.label;
                     if (app.cfg.folder_lamp && !en.course_folder) {
                         // 持っている譜面だけを見る（鍵盤数の絞り込みは効かせる）。PERFECT から始めて一番低いランプ
-                        auto [it, fresh] = folder_lamps.try_emplace(&en, -1);
+                        auto [it, fresh] = folder_lamps.try_emplace(folder_lamp_key(mode_filter, lamp_path, en), -1);
                         if (fresh) {
+                            const uint64_t lt0 = SDL_GetTicksNS();
                             int lamp = 7;
-                            std::function<void(const Entry&)> walk = [&](const Entry& x) {
-                                if (x.custom && !x.custom_loaded) load_custom_entry(*lib, x);
-                                if (x.kind == Entry::Kind::Chart && x.chart && mode_shows(mode_filter, x.chart->keys)) {
-                                    auto sc = lib->scores.find(x.chart->sha256);
-                                    lamp = std::min(lamp, sc != lib->scores.end() ? sc->second.clear : 0);
+                            bool complete = true;
+                            // 関数を呼ばずに積んで回る（何万もの要素を見るので、1 つあたりの手間を小さく）。
+                            // 中身を集めるカスタムフォルダだけ、集め終わっているかを確かめる
+                            std::vector<const Entry*> todo{&en};
+                            while (!todo.empty()) {
+                                const Entry& x = *todo.back();
+                                todo.pop_back();
+                                ++lamp_nodes;
+                                if (x.custom && !custom_ready(x)) complete = false;
+                                if (x.kind == Entry::Kind::Chart) {
+                                    if (x.chart && mode_shows(mode_filter, x.chart->keys)) lamp = std::min(lamp, chart_lamp(x.chart));
+                                    continue;
                                 }
-                                for (const Entry& c : x.children) walk(c);
-                            };
-                            walk(en);
+                                for (const Entry& c : x.children) todo.push_back(&c);
+                            }
+                            lamp_ns += SDL_GetTicksNS() - lt0;
                             it->second = lamp == 7 ? 0 : std::min(lamp, 6);
+                            if (!complete) {
+                                // 中身を集めている途中のカスタムフォルダがある：今は出さず、次のフレームで数え直す
+                                folder_lamps.erase(it);
+                                return b;
+                            }
                         }
                         b.lamp = it->second;
                     }
@@ -2259,6 +2974,10 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     b.title = en.label;
                     auto it = lib->scores.find(en.course->hash);
                     if (it != lib->scores.end()) b.lamp = it->second.clear;
+                } else if (en.kind == Entry::Kind::Header || en.kind == Entry::Kind::ModBar) {
+                    // フォルダの名前のバーは、そのフォルダと同じ色
+                    b.type = en.bar_type;
+                    b.title = en.label;
                 } else {
                     b.type = 0;
                     b.title = en.label;
@@ -2269,8 +2988,24 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                         b.level = en.chart->playlevel;
                         auto it = lib->scores.find(en.chart->sha256);
                         if (it != lib->scores.end()) b.lamp = it->second.clear;
+                        // カスタムランプ：ふだんのランプより上の並びのものがあれば、その見せ方の絵をランプの色に染めて出す
+                        double best = b.lamp;
+                        if (auto cl = lib->custom_lamps.find(en.chart->sha256); cl != lib->custom_lamps.end())
+                            for (const auto& [key, v] : cl->second) {
+                                auto d = lamp_defs.find(key);
+                                if (v < 2 || d == lamp_defs.end() || d->second->rank <= best) continue;
+                                best = d->second->rank;
+                                b.lamp = std::clamp(d->second->as, 1, 4);
+                                b.lamp_tint = 0xff000000u | d->second->color_at(t_ms);
+                            }
                     }
                 }
+                return b;
+            };
+            // 本体のランプの色を変えていれば、その色に染める（カスタムランプの色が付いていないときだけ）
+            ss.bar = [&](int i) {
+                SelectBar b = make_bar(i);
+                if (!b.lamp_tint) b.lamp_tint = app.standard_lamp_tint(b.lamp, t_ms);
                 return b;
             };
             PlaySkinState st;
@@ -2282,14 +3017,62 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             st.slider = [&](int ty, int& v, int& lo, int& hi) { return sctx.slider(ty, v, lo, hi); };
             st.text = [&](int id) { return sctx.text(id); };
             st.button = [&](int ty) { return sctx.button(ty); };
+            // ゲージのボタン（40）：GAS・カスタムゲージは、スキンの絵に無いので名前を書く
+            st.button_label = [&](int ty) { return ty == 40 ? sctx.custom_gauge_name : std::string(); };
+            // GAUGE のボタン：GAS は 7 コマ目、カスタムゲージは MOD に書いたコマ（スキンの絵にあれば）
+            st.button_extra_frame = [&](int ty) {
+                if (ty != 40 || app.cfg.custom_gauge.empty()) return -1;
+                if (app.cfg.custom_gauge == kGasKey) return kGaugeCount;
+                for (const auto& [key, g] : app.custom_gauges())
+                    if (key == app.cfg.custom_gauge) return g->frame;
+                return -1;
+            };
             st.select = &ss;
+            // フォルダの合計とコースは、スキンの桁より大きい数になる（コースの最大 EX など）。字の幅を詰めて収める
+            st.grow_digits = sctx.folder_score != nullptr || sctx.type == 8;
+            // WMIX のスコアのパネルの背景（pannel.png の 543,453 からの 512×399）。他のスキンなら無い
+            const SkinObject* score_panel = nullptr;
+            for (const SkinObject& o : sk->image_objs)
+                if (o.src.valid && o.src.x == 543 && o.src.y == 453 && o.src.w == 512 && o.src.h == 399 && o.dst.timer == 23)
+                    score_panel = &o;
+            // 遊んだ譜面の数と割合は、PLAY COUNT（プレイ回数の数字）の右に添える
+            st.number_after = [&](int id) {
+                std::vector<PlaySkinState::NumberExtra> out;
+                if (id != 77 || folder_played.size() != 3) return out;
+                // 「遊んだ数 / 持っている数（割合%）」。数字は TOTAL と同じ絵。
+                // 「/」「(」「%)」は、WMIX ではスコアのパネルの背景の絵に描いてあるので、そこから切り抜いて使う
+                const float cw = 12;  // 1 文字の幅（WMIX の数字）
+                const float x1 = cw * 7, x2 = x1 + cw * 5 + cw, x3 = x2 + cw * 5 + cw * 2;
+                auto number = [&](int v, int digits, float x) {
+                    PlaySkinState::NumberExtra e;
+                    e.value = v, e.digits = digits, e.dx = x;
+                    out.push_back(e);
+                };
+                auto glyph = [&](int sx, int sy, int w, int h, float x, float y) {
+                    if (!score_panel) return;
+                    PlaySkinState::NumberExtra e;
+                    e.image.valid = true, e.image.gr = score_panel->src.gr;
+                    e.image.x = score_panel->src.x + sx, e.image.y = score_panel->src.y + sy, e.image.w = w, e.image.h = h;
+                    e.dx = x, e.dy = y;
+                    out.push_back(e);
+                };
+                number(folder_played[0], 5, x1);
+                glyph(356, 56, 12, 17, x2 - cw, -4);  // 「/」（EX の最大の前のもの）
+                number(folder_played[1], 5, x2);
+                glyph(164, 39, 8, 17, x3 - 6, -3);  // 「(」（PGREAT の割合の前のもの）
+                number(folder_played[2], 3, x3);
+                glyph(207, 39, 22, 17, x3 + cw * 3 + 1, -3);  // 「%)」
+                return out;
+            };
             // スキンがマウスカーソルを描くときは、OS のカーソルを隠す（二重に出ないように）
             bool skin_cursor = sk->mousecursor.src.valid && !sk->mousecursor.dst.empty();
             if (skin_cursor && SDL_CursorVisible()) SDL_HideCursor();
             else if (!skin_cursor && !SDL_CursorVisible()) SDL_ShowCursor();
             SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
             SDL_RenderClear(r);
+            ft_draw0 = SDL_GetTicksNS();
             app.select_renderer->draw_select(*sk, st);
+            ft_draw = SDL_GetTicksNS() - ft_draw0;
         } else {
         SDL_SetRenderDrawColor(r, 12, 12, 20, 255);
         SDL_RenderClear(r);
@@ -2377,11 +3160,11 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 std::snprintf(b, sizeof(b), "PLAY  %d    CLEAR  %d", sc.playcount, sc.clearcount);
                 text.draw(px, 392, 17, dim, b);
             } else if (cur->kind == Entry::Kind::Missing) {
-                text.draw(px, 70, 24, dim, cur->missing.title, 0, 420);
-                text.draw(px, 104, 17, dim, cur->missing.artist, 0, 420);
+                text.draw(px, 70, 24, dim, cur->missing().title, 0, 420);
+                text.draw(px, 104, 17, dim, cur->missing().artist, 0, 420);
                 text.draw(px, 140, 16, white, "この譜面は手元に無い");
-                if (!cur->missing.url.empty()) text.draw(px, 168, 13, dim, "本体：" + cur->missing.url, 0, 420);
-                if (!cur->missing.url_diff.empty()) text.draw(px, 188, 13, dim, "差分：" + cur->missing.url_diff, 0, 420);
+                if (!cur->missing().url.empty()) text.draw(px, 168, 13, dim, "本体：" + cur->missing().url, 0, 420);
+                if (!cur->missing().url_diff.empty()) text.draw(px, 188, 13, dim, "差分：" + cur->missing().url_diff, 0, 420);
             } else {
                 text.draw(px, 70, 24, white, cur->label, 0, 420);
                 if (!cur->sub.empty()) text.draw(px, 104, 15, dim, cur->sub, 0, 420);
@@ -2455,6 +3238,110 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             std::lock_guard<std::mutex> lock(mu);
             settled = !busy && !pending;
         }
+        if (open_test && settled && scene_ms() >= open_next) {
+            const double now_ms = scene_ms();
+            if (open_next == 0) {
+                open_next = now_ms + 2000;  // 落ち着くまで
+            } else if (open_measuring) {
+                std::printf("[開く] %s%s：開く %.0f ms、そのあと一番遅いフレーム %.0f ms\n", std::string(2 * (stack.size() - 2), ' ').c_str(),
+                            open_label.c_str(), open_decide_ms, open_max);
+                open_measuring = false;
+                if (stack.size() == open_depth) {
+                    ++open_pos.back();  // 開かなかった（空のフォルダなど）
+                } else if (stack.size() < 3) {
+                    open_pos.push_back(0), open_done.push_back(0);  // 中のフォルダも開く
+                } else {
+                    back();
+                    ++open_pos.back();
+                }
+                open_next = now_ms + 300;
+            } else {
+                const std::vector<Entry>& list = *stack.back().list;
+                int k = open_pos.back();
+                while (k < static_cast<int>(list.size()) && list[k].kind != Entry::Kind::Folder) ++k;
+                const bool limit = stack.size() > 1 && open_done.back() >= 8;
+                if (k >= static_cast<int>(list.size()) || limit) {
+                    if (stack.size() == 1) {
+                        std::printf("[開く] 終わり\n");
+                        quit = true;
+                    } else {
+                        back();
+                        open_pos.pop_back(), open_done.pop_back();
+                        ++open_pos.back();
+                        open_next = now_ms + 300;
+                    }
+                } else {
+                    open_pos.back() = k;
+                    ++open_done.back();
+                    stack.back().cursor = k;
+                    snap();
+                    open_label = list[k].label;
+                    open_depth = stack.size();
+                    const uint64_t d0 = SDL_GetTicksNS();
+                    decide();
+                    open_decide_ms = (SDL_GetTicksNS() - d0) / 1e6;
+                    open_max = 0;
+                    open_measuring = true;
+                    open_next = now_ms + 1000;
+                }
+            }
+        }
+        if (scroll_test && settled) {
+            // 0: 落ち着くまで 2 秒 → 1: 下を 8 秒長押し → 2: 1 つずつ 30 回（250 ms ごと）→ 3: 決定（フォルダを開く）→
+            // 4: 中で 8 秒長押し → 5: 1 つずつ 30 回 → 6: 戻る → 7: 上を 5 秒長押し → 終わり
+            const double now_ms = scene_ms();
+            if (test_t0 < 0) test_t0 = now_ms, test_next = now_ms + 2000, frame_ms.clear();
+            if (now_ms >= test_next) {
+                switch (test_step) {
+                case 0: case 3: down_held = true, test_next = now_ms + 8000, std::printf("[試験] 下を長押し\n"); break;
+                case 1: case 4:
+                    down_held = false;
+                    move(1);
+                    test_next = now_ms + 250;
+                    if (++test_count < 30) --test_step;
+                    else test_count = 0, std::printf("[試験] 1 つずつ 30 回\n");
+                    break;
+                case 2:
+                    // フォルダを開き、中の最初のフォルダ（難易度表なら「全曲」）も開いて、曲が並ぶ一覧にする。
+                    // BMJ_SCROLL_TEST に名前を書けば、一番上のその名前を含むフォルダを開く
+                    if (const char* want = dev_env("BMJ_SCROLL_TEST"); want && std::string(want) != "1") {
+                        const std::vector<Entry>& top = *stack.back().list;
+                        for (size_t i = 0; i < top.size(); ++i)
+                            if (top[i].kind == Entry::Kind::Folder && top[i].label.find(want) != std::string::npos) {
+                                stack.back().cursor = static_cast<int>(i), snap();
+                                break;
+                            }
+                    }
+                    decide();
+                    {
+                        const std::vector<Entry>& in = *stack.back().list;
+                        for (size_t i = 0; i < in.size(); ++i)
+                            if (in[i].kind == Entry::Kind::Folder) {
+                                stack.back().cursor = static_cast<int>(i), snap(), decide();
+                                break;
+                            }
+                    }
+                    test_next = now_ms + 1500;
+                    std::printf("[試験] 決定（%s、%zu 曲）\n", stack.back().name.c_str(), stack.back().list->size());
+                    break;
+                case 5: back(), back(), test_next = now_ms + 1500, std::printf("[試験] 戻る\n"); break;
+                case 6: up_held = true, test_next = now_ms + 5000, std::printf("[試験] 上を長押し\n"); break;
+                default: {
+                    up_held = false;
+                    std::vector<float> v = frame_ms;
+                    std::sort(v.begin(), v.end());
+                    auto pct = [&](double p) { return v.empty() ? 0.0f : v[std::min(v.size() - 1, static_cast<size_t>(p * v.size()))]; };
+                    int over33 = 0, over100 = 0;
+                    for (float f : v) over33 += f > 33, over100 += f > 100;
+                    std::printf("[試験] %zu フレーム：中央 %.1f ms、99%% %.1f ms、最大 %.1f ms、33 ms 超 %d、100 ms 超 %d\n", v.size(), pct(0.5),
+                                pct(0.99), v.empty() ? 0.0f : v.back(), over33, over100);
+                    quit = true;
+                    break;
+                }
+                }
+                ++test_step;
+            }
+        }
         if (const char* shot = dev_env("BMJ_SELECT_SHOT"); shot && settled) {
             // 開発用：更新が終わってから1枚保存して終わる。BMJ_SELECT_KEYS の文字で操作してから撮る（d=下 e=決定）
             static size_t step = 0;
@@ -2480,6 +3367,48 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     sctx.timers.set(2, scene_ms());
                     to_keyconfig = true;
                 }
+                else if (k == 'f') {
+                    // BMJ_SELECT_FIND の名前を含むコース・譜面を探し、そこまでフォルダを開いてカーソルを置く
+                    // 「@ファイル」なら、ファイルに書いた名前（UTF-8）。日本語は環境変数で渡すと化けることがある
+                    std::string want = dev_env("BMJ_SELECT_FIND") ? dev_env("BMJ_SELECT_FIND") : "";
+                    if (!want.empty() && want[0] == '@') {
+                        std::ifstream f(fs::u8path(want.substr(1)), std::ios::binary);
+                        std::getline(f, want);
+                        if (want.rfind("\xEF\xBB\xBF", 0) == 0) want.erase(0, 3);
+                        while (!want.empty() && (want.back() == '\r' || want.back() == ' ')) want.pop_back();
+                    }
+                    std::vector<std::string> chain;  // 開くフォルダの名前と、最後に目当ての名前
+                    std::function<bool(const std::vector<Entry>&)> dfs = [&](const std::vector<Entry>& l) {
+                        for (const Entry& x : l) {
+                            if ((x.kind == Entry::Kind::Course || x.kind == Entry::Kind::Chart) && x.label.find(want) != std::string::npos) {
+                                chain.push_back(x.label);
+                                return true;
+                            }
+                            if (x.kind == Entry::Kind::Folder && !x.custom) {
+                                chain.push_back(x.label);
+                                if (x.children.ptr() && dfs(*x.children.ptr())) return true;
+                                chain.pop_back();
+                            }
+                        }
+                        return false;
+                    };
+                    while (stack.size() > 1) back();
+                    if (!want.empty() && dfs(root))
+                        for (size_t ci = 0; ci < chain.size(); ++ci) {
+                            const std::vector<Entry>& l = *stack.back().list;
+                            for (size_t i = 0; i < l.size(); ++i)
+                                if (l[i].label == chain[ci] && l[i].kind != Entry::Kind::Header) {
+                                    stack.back().cursor = static_cast<int>(i), snap();
+                                    if (ci + 1 < chain.size()) decide();
+                                    break;
+                                }
+                        }
+                    std::printf("[探す] %s：%zu 段\n", want.c_str(), chain.size());
+                }
+                else if (k == 'g') app.cycle_gauge(1);  // GAUGE を 1 つ進める
+                else if (k == 'j') cycle_judge(1);      // 判定の欄を 1 つ進める
+                else if (k == 'm') toggle_metronome();  // メトロノームの欄を押す
+                else if (k == 'x') app.cfg.seven_key = !app.cfg.seven_key;  // 7k モードを切り替える
                 else if (k == 'p') force_panel = true;
                 else if (k == 's') change_difficulty();
                 else if (k == 'z') run_skin_select(app, catalog), set_select_view();
@@ -2508,13 +3437,36 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             }
         }
         if (resort_pending) resort_pending = false, reapply_view(false);
-        if (frame_timing) {
-            const uint64_t all = SDL_GetTicksNS() - ft0;
-            if (all > 50'000'000)
-                std::printf("  遅いフレーム %.0f ms（バナー %.0f、テキスト %.0f）\n", all / 1e6, ft_banner / 1e6, ft_text / 1e6);
-            ft_banner = ft_text = 0;
-        }
+        const uint64_t ft_present0 = SDL_GetTicksNS();
         frame_present(r);
+        {
+            const uint64_t end = SDL_GetTicksNS(), all = end - ft0;
+            if (back_from_play) {
+                back_from_play = false;
+                int made = 0;
+                double made_ms = 0;
+                TextCache::take_made(made, made_ms);
+            } else if (all > slow_ns && slow_logged < 300) {
+                // 入力：イベントを片付ける（つかむ・押すの処理を含む）／更新：カーソル・一覧・パネルなど／描画：スキン／表示：画面に出す
+                const uint64_t update = (ft_draw0 > ft0 + ft_events ? ft_draw0 - ft0 - ft_events : 0);
+                int made = 0;
+                double made_ms = 0;
+                TextCache::take_made(made, made_ms);
+                std::printf("遅いフレーム %.0f ms（入力 %.0f、更新 %.0f［一覧の差し替え %.0f、プレビュー %.0f、バナー %.1f、文字 %.1f］、"
+                            "描画 %.0f［文字を作る %d 個 %.0f、フォルダのランプ %zu 要素 %.0f］、表示 %.0f）\n",
+                            all / 1e6, ft_events / 1e6, update / 1e6, ft_swap / 1e6, ft_preview / 1e6, ft_banner / 1e6, ft_text / 1e6,
+                            ft_draw / 1e6, made, made_ms, lamp_nodes, lamp_ns / 1e6, (end - ft_present0) / 1e6);
+                ++slow_logged;
+            } else {
+                int made = 0;
+                double made_ms = 0;
+                TextCache::take_made(made, made_ms);  // 数を次のフレームへ持ち越さない
+            }
+            if (scroll_test) frame_ms.push_back(static_cast<float>(all / 1e6));
+            if (open_measuring) open_max = std::max(open_max, static_cast<float>(all / 1e6));
+            ft_banner = ft_text = ft_draw = ft_draw0 = 0;
+            lamp_ns = 0, lamp_nodes = 0;
+        }
         if (bgm_pending) bgm_pending = false, app.mixer.play_system(kSysSelect, true);
         if (app.scene_end_ns) {
             std::printf("選曲画面の最初の絵まで %.0f ms\n", (SDL_GetTicksNS() - app.scene_end_ns) / 1e6);
@@ -2533,9 +3485,18 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         banner->cv.notify_one();
     }
     if (banner_thread.joinable()) banner_thread.join();
+    const uint64_t exit_t0 = SDL_GetTicksNS();
+    {
+        std::lock_guard<std::mutex> lock(prefetch->mu);
+        prefetch->stop = true;
+        prefetch->jobs.clear();
+        prefetch->cv.notify_one();
+    }
+    if (prefetch_thread.joinable()) prefetch_thread.join();
     if (banner_tex) app.select_renderer->set_image_override(102, nullptr), SDL_DestroyTexture(banner_tex);
     stop_worker = true;
     if (worker.joinable()) worker.join();
+    std::printf("選曲画面を出る：裏の読み込みを待った %.0f ms\n", (SDL_GetTicksNS() - exit_t0) / 1e6);
 }
 
 }  // namespace bmj

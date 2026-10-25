@@ -1,3 +1,4 @@
+#include "skin/bmjoy_buttons.h"
 #include "app/play_session.h"
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <cstdlib>
 #include <cstdio>
 #include <thread>
@@ -94,19 +96,41 @@ bool is_movie_file(const std::string& p) {
 
 // リザルトに入ったときに1回だけ記録する。途中でやめたときもLR2と同じくFAILEDとして記録する
 // クリアしたときのオプションの履歴（LR2: statplay.cpp ConvertOptionHistory）。
-// 皿の自動演奏でのクリアは 1 ビットだけ。EASY ランプは EASY ゲージのときだけ。それより上のランプはゲージ・ランダム・HIDDEN/SUDDEN を残す
-uint32_t option_history(int lamp, int gauge_type, const AppConfig& cfg, bool assist) {
-    if (assist) return lamp > 1 ? 0x1000000u : 0u;
+// EASY ランプは EASY ゲージのときだけ。それより上のランプはゲージ・ランダム・HIDDEN/SUDDEN を残す
+uint32_t option_history(int lamp, int gauge_type, const AppConfig& cfg) {
     if (lamp == 2) return gauge_type == kEasy ? 8u : 0u;
     if (lamp > 2) return (1u << gauge_type) | (0x100u << std::clamp(cfg.random, 0, 7)) | (0x10000u << std::clamp(cfg.effect, 0, 3));
     return 0;
 }
 
-// lamp_only：ランプ・回数・オプション履歴だけを残す（皿の自動演奏・CONSTANT・SCATTER・CONVERGE。LR2: statplay.cpp:895）
+// ゲージの絵を染める色：カスタムゲージならその色、本体のゲージなら MOD で変えた色（無ければスキンの絵のまま）。
+// 1 色なら 80% 未満も同じ色
+void set_gauge_tint(PlaySkinState& st, const JudgeEngine& j, const App& app) {
+    st.gauge_tint = st.gauge_tint_low = 0;
+    if (const int c = j.custom_play(); c >= 0) {
+        const CustomGaugeDef& g = j.custom_def(c);
+        st.gauge_tint = 0xff000000u | g.color;
+        st.gauge_tint_low = 0xff000000u | (g.colors == 2 ? g.color_low : g.color);
+    } else if (const GaugeColors* g = app.standard_gauge_colors(j.display_gauge_type())) {
+        st.gauge_tint = 0xff000000u | g->color;
+        st.gauge_tint_low = 0xff000000u | (g->colors == 2 ? g->color_low : g->color);
+    }
+}
+
+// 開発用：BMJ_PLAY_FRAMES のフォルダに、曲の始まりの絵を 1 フレームずつ残す（読み込み中の絵から、始まって 3 秒まで）
+void dev_save_frame(SDL_Renderer* r, double ms_from_start) {
+    static int no = 0;
+    const char* dir = dev_env("BMJ_PLAY_FRAMES");
+    if (!dir || ms_from_start > 3000 || no >= 400) return;
+    char name[512];
+    std::snprintf(name, sizeof(name), "%s/p%04d_%05d.bmp", dir, no++, static_cast<int>(ms_from_start));
+    if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, name), SDL_DestroySurface(sf);
+}
+
+// lamp_only：ランプ・回数・オプション履歴だけを残す（CONSTANT・SCATTER・CONVERGE。LR2: statplay.cpp:895）
 // ghost は判定の列、rseed は譜面の乱数の種（自己ベストを更新したときだけ残る）
 // entry は 1 回ごとのプレーの表に残す分（ずれの統計と入力の記録の場所。ここでゲージなどを足す）
-void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int lamp, const AppConfig& cfg, bool assist,
-                  bool lamp_only, bool count_only, bool course_stage, int ln_mode, int profile, const std::vector<int8_t>& ghost,
+void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int lamp, const AppConfig& cfg, bool lamp_only, bool count_only, bool course_stage, int ln_mode, int profile, const std::vector<int8_t>& ghost,
                   uint32_t rseed, PlayEntry entry) {
     const PlayStats& s = j.stats();
     PlayRecord rec;
@@ -120,21 +144,22 @@ void record_score(App& app, const std::string& sha256, const JudgeEngine& j, int
     rec.profile = profile;
     rec.clear = lamp, rec.exscore = s.exscore(), rec.max_combo = s.max_combo;
     rec.judge = {s.judge_count[kPGreat], s.judge_count[kGreat], s.judge_count[kGood], s.judge_count[kBad], s.judge_count[kPoor]};
-    rec.op_history = option_history(lamp, j.gauge_type(), cfg, assist);
+    rec.op_history = option_history(lamp, j.gauge_type(), cfg);
     // 処理しなかったノーツは、どう終わっても BP に入れる（途中でやめたときも閉店したときも。LR2: statplay.cpp:992）
     rec.bp = s.bp() + s.total_notes - s.note_current;
     app.db.save_score(sha256, rec);
-    // カスタムゲージで遊んだときは、そのゲージのランプも残す（ランプは遊んでいるゲージだけで決める）
+    // カスタムゲージで遊んだときは、そのゲージのランプも残す（ランプは遊んでいるゲージだけで決める）。
+    // 記録の鍵はカスタムランプの鍵（同じランプのゲージどうしは同じ記録）。本体のランプを付けるゲージなら、ふだんの記録だけ
     const int c = j.custom_play();
-    if (c >= 0 && !lamp_only && !count_only) {
+    if (c >= 0 && !lamp_only && !count_only && !app.custom_gauges()[c].second->lamp_key.empty()) {
         int clamp = lamp >= 5 ? lamp - 2 : j.custom_cleared(c) ? 2 : 1;
-        app.db.save_custom_lamp(sha256, ln_mode, profile, cfg.custom_gauge, clamp);
+        app.db.save_custom_lamp(sha256, ln_mode, profile, app.custom_gauges()[c].second->lamp_key, clamp);
     }
     // 1 回ごとのプレーの表には、全部のプレーを残す。遅くして遊んだときは、ふだんの記録には回数しか残さない代わりに、中身はここに残る
     static const char* names[kGaugeCount] = {"GROOVE", "HARD", "HAZARD", "EASY", "P-ATTACK", "G-ATTACK"};
     entry.kind = count_only ? "slow" : course_stage ? "course" : "";
     entry.rate = cfg.sound_fx.play_rate();
-    entry.gauge = c >= 0 ? cfg.custom_gauge : names[j.gauge_type()];
+    entry.gauge = c >= 0 ? app.custom_gauges()[c].first : names[j.gauge_type()];
     entry.fast = s.fast, entry.slow = s.slow;
     char buf[64];
     for (int g = 0; g < kGaugeCount; ++g) {
@@ -188,15 +213,104 @@ double hs_fix_multiplier(const Chart& chart, int hs_fix) {
     }
 }
 
-PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
-    // スコアは譜面ファイルの原本のSHA-256で記録する（仕様書8章）
+namespace {
+
+// 譜面のファイルを読んで、原本の SHA-256 と、#RANDOM を評価した譜面を作る
+std::pair<std::string, BmsParseResult> read_chart(const std::string& path, uint32_t seed) {
+    if (const char* d = dev_env("BMJ_CHART_DELAY")) SDL_Delay(static_cast<Uint32>(std::atoi(d)));  // 開発用：冷えた HDD のまね
     std::string sha256;
     {
+        std::ifstream f(path, std::ios::binary);
+        std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        sha256 = sha256_hex(bytes);
+    }
+    BmsParseOptions popt;
+    popt.random_seed = seed;
+    return {sha256, parse_chart_file(path, popt)};
+}
+
+}  // namespace
+
+PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
+    AppConfig& cfg = app.cfg;
+    // メトロノームを鳴らして遊んだときは、記録（ランプ・スコア・回数・リプレイ）を残さない（オートプレイと同じ扱い）
+    if (app.metronome()) opt.save_score = false;
+    const uint64_t prelude_ns = SDL_GetTicksNS();
+    // 譜面のファイルは裏で読み始める（リプレイの再生と開発用の入力は、記録の乱数の種で読むので、この下で読む）
+    const bool read_early = opt.record && !opt.replay && !dev_env("BMJ_INPUT_REPLAY");
+    std::future<std::pair<std::string, BmsParseResult>> early;
+    uint32_t chart_seed = opt.seed ? opt.seed : static_cast<uint32_t>(SDL_GetTicksNS() % 0x7fff);  // #RANDOM の乱数の種
+    if (read_early) early = std::async(std::launch::async, read_chart, chart_path, chart_seed);
+    // 読み終えるのに時間がかかるとき（冷えた HDD など）は、先にプレー画面のスキンを読んで、読み込み中の絵を出して待つ。
+    // スキンの #IF は譜面で決まるものもあるので、選曲画面の譜面の情報で仮に決め、読み終えて違っていたら読み直す
+    bool prelude_shown = false;
+    std::array<bool, 1000> prelude_ops{};
+    if (read_early && early.wait_for(std::chrono::milliseconds(80)) != std::future_status::ready) {
+        const ChartRecord& r = *opt.record;
+        Chart pc;
+        pc.meta.title = r.title, pc.meta.subtitle = r.subtitle, pc.meta.artist = r.artist, pc.meta.subartist = r.subartist;
+        pc.meta.genre = r.genre, pc.meta.playlevel = r.playlevel, pc.meta.difficulty = r.difficulty;
+        pc.judge_rank = r.rank;
+        pc.initial_bpm = r.bpm_main > 0 ? r.bpm_main : r.bpm_max;
+        if (r.bpm_min > 0) pc.scroll.push_back(ScrollSeg{}), pc.scroll.back().bpm = r.bpm_min;
+        if (r.bpm_max > 0) pc.scroll.push_back(ScrollSeg{}), pc.scroll.back().bpm = r.bpm_max;
+        PlayContext pctx;
+        pctx.chart = &pc;
+        pctx.autoplay = opt.autoplay;
+        pctx.bga_shown = cfg.auto_adjust != 2 && (cfg.bga == 1 || cfg.bga == 3 || (cfg.bga == 2 && opt.autoplay));
+        pctx.hs_fix = cfg.hs_fix;
+        pctx.gauge_type = cfg.gauge;
+        pctx.ghost_pos = cfg.ghost, pctx.score_graph = cfg.score_graph, pctx.bga_size = cfg.bga_size;
+        pctx.silent = cfg.auto_adjust == 2;
+        pctx.replay_rec = !opt.autoplay && !opt.course && cfg.replay_save > 0;
+        pctx.has_stagefile = !r.stagefile.empty(), pctx.has_backbmp = !r.backbmp.empty();
+        ScoreRecord b;
+        if (app.db.get_score(r.sha256, b, r.ln_free > 0 ? cfg.ln_mode : 0, app.mod_profile()))
+            pctx.best_clear = b.clear, pctx.best_exscore = b.exscore;
+        prelude_ops = pctx.load_options();
+        app.load_play_skin(prelude_ops);
+        prelude_shown = true;
+        if (Lr2Skin* sk = app.play_skin.get()) {
+            app.set_view(sk->width, sk->height);
+            SDL_HideCursor();
+            pctx.skin = sk;
+            pctx.timers.set(0, 0);
+            while (early.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+                SDL_Event e;
+                while (SDL_PollEvent(&e)) {
+                    // 待っている間に閉じられても、読み終えるまでは待つ（読んでいる途中で捨てられないので）
+                    if (e.type == SDL_EVENT_JOYSTICK_ADDED) SDL_OpenJoystick(e.jdevice.which);
+                }
+                PlaySkinState st;
+                st.now_ms = (SDL_GetTicksNS() - prelude_ns) / 1e6;
+                st.timers = &pctx.timers;
+                st.option = [&](int o) { return pctx.option(o); };
+                st.number = [&](int id) { return pctx.number(id); };
+                st.bargraph = [&](int t, double& v, double& m) { return pctx.bargraph(t, v, m); };
+                st.slider = [&](int t, int& v, int& lo, int& hi) { return pctx.slider(t, v, lo, hi); };
+                st.text = [&](int id) { return pctx.text(id); };
+                st.button = [&](int t) { return pctx.button(t); };
+                if (auto it = cfg.skin_adjust.find(sk->path); it != cfg.skin_adjust.end()) st.adjust = it->second;
+                SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
+                SDL_RenderClear(app.renderer);
+                app.skin_renderer->draw_play(*sk, st);
+                dev_save_frame(app.renderer, (SDL_GetTicksNS() - prelude_ns) / 1e6);
+                frame_present(app.renderer);
+            }
+        }
+        std::printf("譜面の読み込みを待った：%.0f ms\n", (SDL_GetTicksNS() - prelude_ns) / 1e6);
+    }
+    // スコアは譜面ファイルの原本のSHA-256で記録する（仕様書8章）
+    std::string sha256;
+    BmsParseResult parsed;
+    if (read_early) {
+        auto got = early.get();
+        sha256 = std::move(got.first), parsed = std::move(got.second);
+    } else {
         std::ifstream f(chart_path, std::ios::binary);
         std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         sha256 = sha256_hex(bytes);
     }
-    AppConfig& cfg = app.cfg;
     // リプレイの再生：記録したときの乱数の種とオプションで遊ぶ。オプションは終わったら戻す（LR2: SetReplayConfig）
     Replay replay;
     const AppConfig saved_cfg = cfg;
@@ -206,7 +320,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     } restore_replay{[&] {
         if (!opt.replay) return;
         cfg.random = saved_cfg.random, cfg.gauge = saved_cfg.gauge, cfg.ln_mode = saved_cfg.ln_mode, cfg.hs_fix = saved_cfg.hs_fix;
-        cfg.effect = saved_cfg.effect, cfg.assist = saved_cfg.assist, cfg.gas = saved_cfg.gas, cfg.hi_speed = saved_cfg.hi_speed;
+        cfg.effect = saved_cfg.effect, cfg.seven_key = saved_cfg.seven_key, cfg.gas = saved_cfg.gas, cfg.hi_speed = saved_cfg.hi_speed;
         cfg.lane_cover = saved_cfg.lane_cover, cfg.lane_cover_v = saved_cfg.lane_cover_v, cfg.judge_timing = saved_cfg.judge_timing;
         cfg.custom_gauge = saved_cfg.custom_gauge;
     }};
@@ -226,29 +340,34 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             return PlayExit::Back;
         }
         cfg.random = replay.random, cfg.gauge = replay.gauge, cfg.ln_mode = replay.ln_mode, cfg.hs_fix = replay.hs_fix;
-        cfg.effect = replay.effect, cfg.assist = replay.assist, cfg.gas = replay.gas, cfg.hi_speed = replay.hi_speed;
+        cfg.effect = replay.effect, cfg.seven_key = replay.seven_key, cfg.gas = replay.gas, cfg.hi_speed = replay.hi_speed;
         cfg.lane_cover = replay.lane_cover, cfg.lane_cover_v = replay.lane_cover_v, cfg.custom_gauge = replay.custom_gauge;
         opt.seed = replay.seed, opt.save_score = false, opt.autoplay = false;
     }
-    BmsParseOptions popt;
-    popt.random_seed = opt.seed ? opt.seed : static_cast<uint32_t>(SDL_GetTicksNS() % 0x7fff);
-    BmsParseResult parsed = parse_chart_file(chart_path, popt);
+    if (!read_early) {
+        BmsParseOptions popt;
+        chart_seed = opt.seed ? opt.seed : chart_seed;  // リプレイの再生は、記録した乱数の種で読む
+        popt.random_seed = chart_seed;
+        parsed = parse_chart_file(chart_path, popt);
+    }
     if (!parsed.ok) {
-        std::fprintf(stderr, "読み込めない: %s\n", parsed.error.c_str());
+        // 曲データベースにはあるが、ファイルが無い（消した・別の PC へ持ってきた）ときもここ。選曲画面へ戻る
+        std::fprintf(stderr, "譜面を読み込めない（ファイルが無いなら、F8 か曲データベースの再作成で読み直す）: %s\n", parsed.error.c_str());
         return PlayExit::Back;
     }
+    // 7k モード：皿のある 7 鍵の譜面は、皿のノーツを除いて遊ぶ（記録も別）。皿の無い譜面・5 鍵の譜面はふだんどおり（記録も同じ）
+    const bool seven_key = cfg.seven_key && parsed.chart.layout == KeyLayout::K7S && key_count(parsed.chart) == 7;
+    if (seven_key) parsed.chart.drop_scratch();
     // 配置のオプション（LR2: bmsload:3354）。#RANDOM を評価した乱数の続きで並べ替える
-    apply_random_option(parsed.chart, cfg.random, parsed.rng);
+    apply_random_option(parsed.chart, cfg.random, parsed.rng, !seven_key);
     // TOTAL の既定式は、並べ替えで重なったノーツを捨てたあとの数で（LR2: bmsload:3789）
     if (!parsed.chart.total_defined) parsed.chart.total = lr2_default_total(parsed.chart.judgeable_notes());
-    // CONVERGE のときは皿の自動演奏を切る（LR2: bmsload:2102）
-    const bool assist = cfg.assist && cfg.random != kConverge;
     // HS-FIX の CONSTANT：一定の速さで流す
     const bool constant = cfg.hs_fix == 4;
     if (constant) parsed.chart.make_constant_speed();
-    // 皿の自動演奏・CONSTANT・SCATTER・CONVERGE は、ランプを EASY まで（フルコンボも EASY）にして、
+    // CONSTANT・SCATTER・CONVERGE は、ランプを EASY まで（フルコンボも EASY）にして、
     // ランプ・回数・オプション履歴だけを残す。コースのステージでは何も残さない（LR2: statplay.cpp:7, 895）
-    const bool lamp_only = assist || constant || cfg.random >= kScatter;
+    const bool lamp_only = constant || cfg.random >= kScatter;
     // 曲を遅くして（ピッチの FREQ・SPEED で下げて）遊んだら、回数だけを残す（LR2: statplay.cpp:791。速くしたときは普通に残す）
     const bool slowed = cfg.sound_fx.play_rate() < 1.0;
     // BGA の無い譜面は、LR2files/Movie の動画を 1 本ランダムに選んで、頭から繰り返し流す（LR2: bmsload:4089。コースでは流さない）。
@@ -278,14 +397,17 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     // ハイスピのモード（仕様書6章）。フローティングは HS-FIX の倍率を使わず、基準の BPM で緑数字を合わせる
     const bool floating = cfg.hs_mode == 1;
     const double speed_multiplier = floating ? 1.0 : hs_fix_multiplier(chart, cfg.hs_fix);
+    // ピッチの FREQ・SPEED で曲を速くしても遅くしても、ノーツが画面を流れる速さ（緑数字）は普段と同じにする。
+    // 拍は曲の速さで進むので、1 拍の長さを曲の速さで割る（LR2 は曲と一緒に流れも速くなる。BMjoy の変更）
+    const double scroll_multiplier = speed_multiplier / cfg.sound_fx.play_rate();
     const double fhs_bpm = constant ? 150.0 : floating_base_bpm(chart, cfg.fhs_base);
     int fhs = 100;  // フローティングのハイスピ（100 = 1.00）
     int& hs = floating ? fhs : cfg.hi_speed;
     int start_green = cfg.fhs_green;  // 曲の始まりの緑数字（ギアチェンの「緑数字に戻す」で使う）
     // 記録は LN の種類ごとに分ける（種類を決めていない LN が無い譜面は 0 にまとめる）
     const int score_ln_mode = chart.free_ln_count() > 0 ? cfg.ln_mode : 0;
-    // プレーに影響する MOD（判定など）を使っているときは、組み合わせごとに別の記録にする
-    const int profile = app.mod_profile();
+    // プレーに影響する MOD（判定など）を使っているときは、組み合わせごとに別の記録にする。7k モードも別の記録
+    const int profile = app.mod_profile(seven_key);
     ScoreRecord best_score;
     bool has_best = app.db.get_score(sha256, best_score, score_ln_mode, profile);
     Mixer& mixer = app.mixer;
@@ -303,7 +425,6 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         ctx.course_stages = static_cast<int>(course->course->stages.size());
     }
     ctx.autoplay = opt.autoplay;
-    ctx.assist = assist;
     ctx.bga_shown = bga_shown;
     ctx.hs_fix = cfg.hs_fix;
     {
@@ -312,8 +433,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         std::error_code ec;
         std::filesystem::path abs = std::filesystem::absolute(chart_path, ec).lexically_normal();
         std::string folder = abs.parent_path().string();
-        for (const ChartRecord& c : app.db.all_charts()) {
-            if (c.folder != folder || c.difficulty < 1 || c.difficulty > 5) continue;
+        for (const ChartRecord& c : app.db.charts_in_folder(folder)) {
+            if (c.difficulty < 1 || c.difficulty > 5) continue;
             int& lv = ctx.diff_level[c.difficulty - 1];
             if (lv < 0 || c.path == abs.string()) lv = c.playlevel;
         }
@@ -332,7 +453,19 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     // 自己ベストのランプ（op 100〜105）も読み込みの条件になる（WMIX はこれで選んだ絵を、リザルトで更新前のランプに使う）
     ctx.best_clear = has_best ? best_score.clear : 0;
     ctx.best_exscore = has_best ? best_score.exscore : 0;
-    app.load_play_skin(ctx.load_options());
+    {
+        // 読み込み中の絵を出すために仮の条件で読んだスキンは、本当の譜面で条件が同じならそのまま使う
+        const std::array<bool, 1000> ops = ctx.load_options();
+        if (prelude_shown && ops != prelude_ops) {
+            // 仮の条件と違ったもの（読み直しで絵が切り替わって見えるので、どれが違ったかを残す）
+            std::string diff;
+            for (int i = 0; i < 1000; ++i)
+                if (ops[i] != prelude_ops[i]) diff += " " + std::to_string(i) + (ops[i] ? "+" : "-");
+            std::printf("読み込み中の絵のスキンを読み直す（条件が違った:%s）\n", diff.c_str());
+        }
+        if (!prelude_shown || ops != prelude_ops) app.load_play_skin(ops);
+        std::printf("曲の始まり：スキンまで %.0f ms\n", (SDL_GetTicksNS() - prelude_ns) / 1e6);
+    }
     Lr2Skin* skin = app.play_skin.get();
     ctx.skin = skin;
     // 判定ラインまでのレーンの長さ（スキンの座標）。緑数字と LIFT の計算に使う
@@ -343,6 +476,17 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     // キー音はワーカーで読み込む。読み込み中もスキンの読み込み画面を動かす
     std::vector<std::string> missing;
     std::vector<std::string> paths = resolve_chart_sounds(chart, missing);
+    // メトロノーム（MOD）：小節の頭と拍の音を、譜面の音の後ろの番号に足し、拍の時刻に BGM と同じく鳴らす
+    //（曲と同じ時計で鳴るので、FREQ で速さを変えても拍からずれない）
+    const ModManifest* metro = app.metronome();
+    int metro_accent = -1, metro_beat = -1;
+    std::vector<Chart::Beat> metro_beats;
+    if (metro && paths.size() + 2 <= 0xffff) {
+        metro_accent = static_cast<int>(paths.size()), paths.push_back(metro->metronome_accent);
+        metro_beat = static_cast<int>(paths.size()), paths.push_back(metro->metronome_beat);
+        metro_beats = chart.metronome_beats();
+        std::printf("メトロノーム：%zu 拍（音量 %d%%）\n", metro_beats.size(), metro->metronome_volume);
+    }
     if (silent) paths.assign(paths.size(), ""), missing.clear();
     std::vector<std::pair<int64_t, int64_t>> ranges = sound_ranges(chart);
     for (const auto& m : missing) std::printf("キー音が見つからない: %s\n", m.c_str());
@@ -372,7 +516,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     std::atomic<int> load_done{0};
     std::thread loader([&] {
         int threads = std::max(2u, std::thread::hardware_concurrency() / 2) + 1;
-        bank.load(paths, mixer.sample_rate(), threads, &load_errors, &load_done, &ranges);
+        bank.load(paths, mixer.sample_rate(), threads, &load_errors, &load_done, &ranges, cfg.sound_16bit);
+        if (metro_accent >= 0) {
+            const float gain = metro->metronome_volume / 100.0f;
+            bank.scale(static_cast<size_t>(metro_accent), gain), bank.scale(static_cast<size_t>(metro_beat), gain);
+        }
         // BGAは黒を透過色にする（LR2: bmsload:731 SetTransColor(0,0,0)）
         const uint8_t black[3] = {0, 0, 0};
         for (size_t i = 0; i < bga_paths.size(); ++i) {
@@ -416,11 +564,18 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             jcfg.custom_gauges.push_back(*custom_gauges[i].second);
             if (custom_gauges[i].first == cfg.custom_gauge) jcfg.custom_play = static_cast<int>(i);
         }
-        for (const ModManifest* m : app.active_mods()) {
-            if (!m->judges.empty() && !jcfg.custom_judge) jcfg.custom_judge = m->judges.front();
-            jcfg.gas = jcfg.gas || m->gas;
+        for (const ModManifest* m : app.active_mods())
+            if (const CustomJudgeDef* j = m->active_judge(); j && !jcfg.custom_judge) jcfg.custom_judge = *j;
+        // GAS：GAUGE で「GAS」を選んでいれば、GAS の MOD の設定の順番で落ちていく（MOD を入れただけでは効かない）
+        if (cfg.custom_gauge == kGasKey) {
+            for (const std::string& k : app.gas_order()) {
+                for (int i = 0; i < kGaugeCount; ++i)
+                    if (k == kGaugeKeys[i]) jcfg.gas_chain.push_back(i);
+                for (size_t i = 0; i < custom_gauges.size(); ++i)
+                    if (k == custom_gauges[i].first) jcfg.gas_chain.push_back(kGaugeCount + static_cast<int>(i));
+            }
+            if (!jcfg.gas_chain.empty() && jcfg.gas_chain[0] < kGaugeCount) jcfg.gauge_type = jcfg.gas_chain[0];
         }
-        jcfg.assist_scratch = assist;
         jcfg.ln_mode = cfg.ln_mode;
         if (course) {
             // 2 ステージ目からは、前のステージのゲージ・ゲージの種類・コンボを引き継ぐ
@@ -432,6 +587,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             jcfg.gauge_type = course->gauge_type;
             jcfg.no_good = course->course->no_good;
             jcfg.no_great = course->course->no_great;
+            // コースでは GAS（ゲージの自動切り替え）を使わない。コースは選んだゲージで最後まで遊び、
+            // そのゲージが尽きたら終わり（途中で甘いゲージへ移ると、段位の合格の意味が変わる。LR2 には GAS が無い）
+            jcfg.gas = false;
+            jcfg.gas_chain.clear();
         }
         JudgeEngine judge(chart, jcfg);
         ctx.judge = &judge;
@@ -520,7 +679,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         std::vector<ButtonInput> button_in;
         bool started = false;
         enum class Phase { Play, Fadeout, Failed, Result } phase = Phase::Play;
-        const uint64_t scene_start = SDL_GetTicksNS();
+        // 譜面を待つ間に読み込み中の絵を出していたら、その続きから動かす（入場の演出を頭からやり直さない）
+        const uint64_t scene_start = prelude_shown && !retried ? prelude_ns : SDL_GetTicksNS();
         uint64_t prev_ns = scene_start, next_frame_ns = scene_start;
         int next_capture_s = 0;
         float scratch_angle = 0;
@@ -558,12 +718,16 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         auto enter_result = [&](bool quit_early) {
             // 鳴っている音は止めずにリザルトへ持ち込む（LR2 と同じ。閉店したときは、閉店した時点で止めてある）
             mixer.freeze_schedule();
+            judge.gas_settle();  // GAS：曲の終わりのクリアの線で、ゲージを決める
             print_result(chart, judge);
             const PlayStats& ps = judge.stats();
             // LR2（Main.cpp:1697）：オートプレイ・1 ノーツも判定していない・GOOD 以上が 1 つも無いときは、
             // リザルトを出さず、記録もせずに選曲画面へ戻る
             ctx.quit_early = quit_early;
-            if (opt.autoplay || ps.note_current == 0 ||
+            // 開発用：BMJ_COURSE_STAGE_RESULT なら、オートでもコースの各ステージのリザルトを出す（記録はしない）
+            // 開発用：BMJ_AUTO_RESULT なら、オートの単曲でもリザルトを出す（記録はしない）
+            const bool dev_stage_result = opt.autoplay && ((course && dev_env("BMJ_COURSE_STAGE_RESULT")) || (!course && dev_env("BMJ_AUTO_RESULT")));
+            if ((opt.autoplay && !dev_stage_result) || ps.note_current == 0 ||
                 ps.judge_count[kGood] + ps.judge_count[kGreat] + ps.judge_count[kPGreat] == 0) {
                 // コースでは、オートプレイなら次のステージへ進み、それ以外はコースをやめて選曲へ戻る
                 if (course && !(opt.autoplay && !quit_early)) course->abandoned = true;
@@ -617,8 +781,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     entry.offset_sd = std::sqrt(std::max(0.0, offset_sq / offset_n - entry.offset_mean * entry.offset_mean));
                 }
                 if (log_input) entry.input_log = input_log_path(sha256, played_at);
-                record_score(app, sha256, judge, ctx.result_clear, cfg, assist, lamp_only, slowed, course != nullptr, score_ln_mode,
-                             profile, ghost_log, popt.random_seed, entry);
+                record_score(app, sha256, judge, ctx.result_clear, cfg, lamp_only, slowed, course != nullptr, score_ln_mode,
+                             profile, ghost_log, chart_seed, entry);
                 // LR2はリザルトの前に記録するので、リザルトで見える自己ベストのランプ（100-105）は更新後のもの
                 // （コースのステージではフルコンボのときだけ上がる）
                 if ((!course || ctx.result_clear >= 5) && !slowed) ctx.best_clear = std::max(ctx.best_clear, ctx.result_clear);
@@ -626,14 +790,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             // 入力の記録（仕様書6章「リプレイ（入力ログ）」）。オートとリプレイの再生以外は、全部のプレーで 1 つずつ残す
             if (log_input) {
                 record.sha256 = sha256;
-                record.seed = popt.random_seed;
+                record.seed = chart_seed;
                 record.random_version = kRandomAlgorithmVersion;
                 record.judge_timing = cfg.judge_timing;
                 record.played_at = played_at;
                 record.mods = play_mod_key(app.active_mods());
                 record.custom_gauge = cfg.custom_gauge;
                 record.random = cfg.random, record.gauge = cfg.gauge, record.ln_mode = cfg.ln_mode, record.hs_fix = cfg.hs_fix;
-                record.effect = cfg.effect, record.assist = cfg.assist, record.gas = cfg.gas, record.hi_speed = cfg.hi_speed;
+                record.effect = cfg.effect, record.seven_key = cfg.seven_key, record.gas = cfg.gas, record.hi_speed = cfg.hi_speed;
                 record.lane_cover = cfg.lane_cover, record.lane_cover_v = cfg.lane_cover_v;
                 if (!save_replay(input_log_path(sha256, record.played_at), record)) std::fprintf(stderr, "入力の記録を保存できない\n");
             }
@@ -755,6 +919,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 if (ks[keys[i]]) return i + 1;
             return 0;
         };
+        double scratch_analog_ms = -1e9, scratch_repeat_ms = 0, wheel_ms = -1e9;  // wheel_ms：最後にホイールが来た時刻  // 最後にアナログ皿が動いた時刻、キーの皿の繰り返し
+        int scratch_repeat_dir = 0;
         auto play_buttons = [&](double now_ms) {
             bool held_start = input.button_held(kStart), held_select = input.button_held(kSelect);
             ctx.cover_adjusting = held_start || held_select;
@@ -773,24 +939,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 }
                 bool start_or_select = (held_start && b.button != kStart) || (held_select && b.button != kSelect);
                 if (!start_or_select) continue;
-                if (b.button == kScratchA || b.button == kScratchB) {
-                    // START か SELECT を押しながら皿（時計回りで + ）。
-                    // フローティング：カバーがあればカバーを動かし、緑数字が変わらないようにハイスピを決め直す（ギアチェン）。
-                    // LIFT を使っていてカバーが無ければ LIFT。どちらも無ければハイスピの微調整（0.01）。
-                    // クラシック：LIFT を使っていてカバーが無ければ LIFT（OpenLR2 と同じ）
-                    int d = b.button == kScratchB ? 1 : -1;
-                    if (floating && cover_active && cover_movable()) {
-                        cfg.lane_cover_v = std::clamp(cfg.lane_cover_v + d, 0, 100);
-                        keep_green(cfg.fhs_green);
-                    } else if (cfg.lift && !cover_active && cover_movable()) {
-                        cfg.lift_v = std::clamp(cfg.lift_v + d, 0, 100);
-                        if (floating) keep_green(cfg.fhs_green);
-                    } else if (floating) {
-                        hs = std::clamp(hs + d, kFloatingHsMin, kFloatingHsMax);
-                        hs_changed();
-                    }
-                    continue;
-                }
+                if (b.button == kScratchA || b.button == kScratchB) continue;  // 皿はこの下で、回した分だけ動かす
                 if (b.button > kKey7) continue;
                 int key = b.button - kKey1 + 1;
                 if (floating) {
@@ -804,6 +953,51 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 else if (key == 2 || key == 4) cfg.hi_speed += cfg.hs_margin;
                 else if (key == 6) cover_active ? cfg.lane_cover_v -= cfg.shutter_margin : cfg.hi_speed += cfg.hs_margin;
                 else if (key == 7) cover_active ? cfg.lane_cover_v += cfg.shutter_margin : cfg.hi_speed -= cfg.hs_margin;
+            }
+            // START か SELECT を押しながら皿（時計回りで + ）。アナログ皿は回した分（軸の 1 目盛りで 1）、
+            // キーやボタンの皿は、回すたび（押すたび）に 1。続けて何度回しても 1 回ずつ数える。
+            // 0.6 秒以上回し続けたときだけ、そこから 0.1 秒ごとに 1 ずつ動かす（ちょんと回しても 0.35 秒ほど
+            // 押されたままになるコントローラーがあるので、それより短い押し方では繰り返さない）。
+            // SUDDEN+ が出ていなくて LIFT を使っていれば LIFT（OpenLR2 の拡張。2 度押しで SUDDEN+ をしまえば動かせる）。
+            // フローティングで SUDDEN+ が出ていれば SUDDEN+（緑数字が変わらないようにハイスピを決め直す。ギアチェン）。
+            // どちらでもなければ、フローティングはハイスピの微調整（0.01）。
+            // クラシックの SUDDEN+ は LR2 と同じく皿では動かさない（START＋6・7 とホイール）。
+            // 皿を回すとホイールの信号も出すコントローラーでは、ホイールの側で動かすので、皿の分は足さない（二重に動く）
+            const int ticks = input.take_analog_ticks();
+            if (ticks != 0) scratch_analog_ms = now_ms;
+            int steps = 0;
+            if (held_start || held_select) {
+                steps = ticks;
+                const int dir = input.button_held(kScratchB) ? 1 : input.button_held(kScratchA) ? -1 : 0;
+                if (now_ms - scratch_analog_ms > 200 && dir != 0) {
+                    if (scratch_repeat_dir != dir) {
+                        steps += dir;
+                        scratch_repeat_ms = now_ms + 500;
+                    } else if (now_ms - scratch_repeat_ms >= 100) {
+                        scratch_repeat_ms = now_ms, steps += dir;
+                    }
+                    scratch_repeat_dir = dir;
+                } else if (dir == 0) {
+                    scratch_repeat_dir = 0;
+                }
+            } else {
+                scratch_repeat_dir = 0;
+            }
+            if (now_ms - wheel_ms < 500) steps = 0;
+            if (steps != 0) {
+                if (dev_env("BMJ_DEBUG_INPUT")) std::printf("カバー・LIFT を %+d（%.1f ms）\n", steps, now_ms), std::fflush(stdout);
+                if (cover_active) {
+                    if (floating && cover_movable()) {
+                        cfg.lane_cover_v = std::clamp(cfg.lane_cover_v + steps, 0, 100);
+                        keep_green(cfg.fhs_green);
+                    }
+                } else if (cfg.lift && cover_movable()) {
+                    cfg.lift_v = std::clamp(cfg.lift_v - steps, 0, 100);  // LIFT は皿の向きと逆に動かす（時計回りで下がる）
+                    if (floating) keep_green(cfg.fhs_green);
+                } else if (floating) {
+                    hs = std::clamp(hs + steps, kFloatingHsMin, kFloatingHsMax);
+                    hs_changed();
+                }
             }
             cfg.lane_cover_v = std::clamp(cfg.lane_cover_v, 0, 100);
             if (!floating) cfg.hi_speed = std::clamp(cfg.hi_speed, cfg.hs_min, cfg.hs_max);
@@ -864,13 +1058,24 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 switch (e.type) {
                 case SDL_EVENT_QUIT: quit = true, done = true, exit = PlayExit::Quit; break;
                 case SDL_EVENT_JOYSTICK_ADDED: SDL_OpenJoystick(e.jdevice.which); break;
-                case SDL_EVENT_MOUSE_WHEEL:
-                    // ホイールでレーンカバー（LR2: gameloop:183）
-                    if (phase == Phase::Play && cfg.lane_cover == 1 && cover_movable() && !speed_locked) {
-                        cfg.lane_cover_v = std::clamp(cfg.lane_cover_v - static_cast<int>(std::lround(e.wheel.y)), 0, 100);
+                case SDL_EVENT_MOUSE_WHEEL: {
+                    // ホイールで、カバーが出ていなくて LIFT を使っていれば LIFT、それ以外はレーンカバー（LR2: gameloop:183。
+                    // LIFT は OpenLR2 の拡張）。皿を回すとホイールの信号も出すコントローラーがあり、LR2 で「皿でカバーが
+                    // 動く」のはこれ。LIFT はカバーと逆向きに動かす
+                    const int w = static_cast<int>(std::lround(e.wheel.y));
+                    wheel_ms = (SDL_GetTicksNS() - scene_start) / 1e6;
+                    if (dev_env("BMJ_DEBUG_INPUT")) std::printf("ホイール %+d（%.1f ms）\n", w, wheel_ms), std::fflush(stdout);
+                    if (phase != Phase::Play || !cover_movable() || speed_locked || w == 0) break;
+                    const bool cover_shown = cfg.lane_cover && cover_display;
+                    if (cfg.lift && !cover_shown) {
+                        cfg.lift_v = std::clamp(cfg.lift_v + w, 0, 100);
+                        if (floating) keep_green(cfg.fhs_green);
+                    } else if (cfg.lane_cover == 1) {
+                        cfg.lane_cover_v = std::clamp(cfg.lane_cover_v - w, 0, 100);
                         if (floating) keep_green(cfg.fhs_green);
                     }
                     break;
+                }
                 case SDL_EVENT_KEY_DOWN:
                     if (e.key.repeat) break;
                     if (e.key.key == SDLK_ESCAPE) {
@@ -988,6 +1193,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             if (loaded && !loader_joined) {
                 loader.join();
                 loader_joined = true;
+                std::printf("曲の始まり：キー音と BGA を読み終えた %.0f ms\n", (SDL_GetTicksNS() - prelude_ns) / 1e6);
                 for (const auto& er : load_errors) std::printf("%s\n", er.c_str());
                 // GPUへのアップロードはメインスレッドで行う（仕様書4章）
                 bga_textures.assign(bga_images.size(), nullptr);
@@ -1036,6 +1242,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 uint32_t rate = mixer.sample_rate();
                 auto frame_of = [&](int64_t us) { return us * static_cast<int64_t>(rate) / 1000000; };
                 for (const BgmEvent& b : chart.bgm) schedule.push_back({frame_of(b.time_us), b.sound});
+                for (const Chart::Beat& b : metro_beats)
+                    schedule.push_back({frame_of(b.time_us), static_cast<uint16_t>(b.head ? metro_accent : metro_beat)});
                 if (opt.autoplay)
                     for (const Note& n : chart.notes)
                         if ((n.kind == NoteKind::Normal || n.kind == NoteKind::Long) && n.sound)
@@ -1044,6 +1252,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 mixer.stop_system(kSysDecide);
                 mixer.start(0);
                 started = true;
+                std::printf("曲の始まり：音を鳴らし始めた %.0f ms\n", (SDL_GetTicksNS() - prelude_ns) / 1e6);
             }
 
             int64_t song_us = started ? mixer.song_time_us_at(now_ns) : 0;
@@ -1307,6 +1516,24 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.judge = &judge;
                 st.graph = &graph;
                 st.graph_gauge = judge.display_gauge_type();
+                st.gauge_survival = course || !(judge.display_gauge_type() == kGroove || judge.display_gauge_type() == kEasy);
+                set_gauge_tint(st, judge, app);
+                // ゲージの欄：カスタムゲージならスキンに足したそのコマ（白い字）を、ゲージの色に染めて出す。
+                // 今回のクリア（ボタン 901）：付いたランプの色に染める（カスタムランプ、または色を変えた本体のランプ）
+                const int cg = course ? -1 : judge.custom_play();
+                st.button_extra_frame = [&judge, cg](int ty) { return ty == 40 && cg >= 0 ? judge.custom_def(cg).frame : -1; };
+                uint32_t lamp_tint = 0;
+                const int clear = judge.clear();
+                if (cg >= 0 && clear >= 2 && clear < 5 && judge.custom_cleared(cg)) {
+                    const auto lamps = app.custom_lamps();
+                    if (auto it = lamps.find(judge.custom_def(cg).lamp_key); it != lamps.end()) lamp_tint = 0xff000000u | it->second->color_at(t);
+                }
+                if (!lamp_tint && clear >= 2) lamp_tint = app.standard_lamp_tint(clear, t);
+                st.button_tint = [&st, lamp_tint](int ty, bool extra) -> uint32_t {
+                    if (ty == 40 && extra) return st.gauge_tint;
+                    if (ty == kClearLabelButton) return lamp_tint;
+                    return 0;
+                };
                 st.total_notes = judge.stats().total_notes;
                 st.chart_op3 = chart_op3;
                 st.chart_op4 = chart_op4;
@@ -1337,7 +1564,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.notes_visible = started;
                 st.render_beat = render_beat;
                 st.hi_speed = hs;
-                st.speed_multiplier = speed_multiplier;
+                st.speed_multiplier = scroll_multiplier;
                 st.lift_px = cfg.lift ? static_cast<float>(lane_px * cfg.lift_v / 100.0) : 0.0f;
                 if (auto it = cfg.skin_adjust.find(skin->path); it != cfg.skin_adjust.end()) st.adjust = it->second;
                 st.base_speed = cfg.base_speed;
@@ -1349,6 +1576,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 st.combo_draw = course ? judge.stats().course_combo : judge.stats().combo;
                 st.gauge_hp = ctx.hp_print >= 0 ? ctx.hp_print : judge.play_hp();
                 st.gauge_survival = course || !(judge.display_gauge_type() == kGroove || judge.display_gauge_type() == kEasy);
+                set_gauge_tint(st, judge, app);
                 st.scratch_angle = scratch_angle;
                 st.bga = &bga_textures;
                 st.bga_base = bga_base;
@@ -1399,7 +1627,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 view.song_ms = song_ms;
                 view.render_beat = render_beat;
                 view.hi_speed = hs;
-                view.speed_multiplier = speed_multiplier;
+                view.speed_multiplier = scroll_multiplier;
                 char status[128];
                 std::snprintf(status, sizeof(status), "UP/DOWN: HI-SPEED  SHIFT+LEFT/RIGHT: TIMING %+d ms  F4: FULLSCREEN  ESC: END",
                               cfg.judge_timing);
@@ -1407,6 +1635,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 draw_play(renderer, chart, judge, view);
             }
 
+            dev_save_frame(renderer, (SDL_GetTicksNS() - prelude_ns) / 1e6);
             if (!opt.capture_dir.empty() && now_ms / 1000 >= next_capture_s * 2) {
                 if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {
                     char name[64];
@@ -1447,6 +1676,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             course->total.note_current += ps.note_current;
             course->total.total_notes += ps.total_notes;
             course->finished = ps.note_current >= ps.total_notes && !fade_quit;
+            // コースリザルトのグラフのために、このステージの推移を残す（リザルトを出さずに進んだときは、ここで埋める）
+            if (graph.cursor < PlayGraph::kPoints) {
+                std::array<double, kGaugeCount> end_hp = course->hp;
+                graph.finish(end_hp, ps.combo, ps.exscore(), 0, 0);
+            }
+            course->graphs.push_back({graph, static_cast<int>(std::max<int64_t>(1, chart.end_us / 1000))});
             course->alive = !quit && !course->abandoned && course->finished && course->hp[course->gauge_type] >= 2.0;
         }
     }
@@ -1476,6 +1711,28 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     total.max_combo = cr.max_combo;
     const int gtype = cr.gauge_type;
     const double hp = cr.hp[gtype];
+    // コース通しのゲージの推移：ステージのグラフを、長さの割合でつなぐ（遊ばなかったステージの分は最後の値のまま）
+    PlayGraph course_graph;
+    if (!cr.graphs.empty()) {
+        int64_t whole = 0;
+        for (const auto& g : cr.graphs) whole += g.second;
+        int64_t before = 0;
+        int ex_before = 0;
+        size_t s = 0;
+        for (int i = 0; i < PlayGraph::kPoints; ++i) {
+            const int64_t t = whole * i / PlayGraph::kPoints;
+            while (s + 1 < cr.graphs.size() && t >= before + cr.graphs[s].second) {
+                ex_before += cr.graphs[s].first.exscore[PlayGraph::kPoints - 1];
+                before += cr.graphs[s].second, ++s;
+            }
+            const PlayGraph& g = cr.graphs[s].first;
+            const int k = static_cast<int>(std::clamp<int64_t>((t - before) * PlayGraph::kPoints / cr.graphs[s].second, 0, PlayGraph::kPoints - 1));
+            for (int gi = 0; gi < kGaugeCount; ++gi) course_graph.hp[gi][i] = g.hp[gi][k];
+            course_graph.combo[i] = g.combo[k];
+            course_graph.exscore[i] = ex_before + g.exscore[k];
+        }
+        course_graph.cursor = course_graph.best_cursor = course_graph.target_cursor = PlayGraph::kPoints;
+    }
     // コースのランプ：最後のステージを生きて終えたときだけクリア。フルコンボはコース全体を 1 本のコンボでつないだとき
     int clear = 1;
     const bool reached = cr.stage == n - 1 && cr.finished;
@@ -1485,10 +1742,11 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
             clear = (gtype == kHard || gtype == kGAttack || gtype == kPAttack) ? 4 : gtype == kEasy ? 2 : 3;
     }
     // LR2 と同じく、コースのランプには EASY の上限をかけない（ステージは記録していない。LR2: Scene13_Courseresult.cpp）
-    const bool assist = cfg.assist && cfg.random != kConverge;
+    // 7k モードで遊んだコースは別の記録
+    const int profile = app.mod_profile(cfg.seven_key);
 
     ScoreRecord best;
-    const bool has_best = app.db.get_score(course.hash, best, 0, app.mod_profile());
+    const bool has_best = app.db.get_score(course.hash, best, 0, profile);
     PlayContext ctx;
     ctx.course = &course;
     ctx.course_stage = cr.stage;
@@ -1497,7 +1755,6 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     ctx.hp_override = hp;
     ctx.gauge_type = gtype;
     ctx.autoplay = opt.autoplay;
-    ctx.assist = assist;
     ctx.in_result = true;
     ctx.result_clear = clear;
     ctx.quit_early = !reached;
@@ -1509,13 +1766,13 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     ctx.best_exscore = ctx.old_exscore;
     if (opt.save_score && !opt.autoplay) {
         PlayRecord rec;
-        rec.profile = app.mod_profile();
+        rec.profile = profile;
         rec.clear = clear, rec.exscore = total.exscore(), rec.max_combo = total.max_combo;
         rec.judge = {total.judge_count[kPGreat], total.judge_count[kGreat], total.judge_count[kGood], total.judge_count[kBad],
                      total.judge_count[kPoor]};
         // 途中で終わったときは、残りのノーツも BP に入れる
         rec.bp = total.bp() + total.total_notes - total.note_current;
-        rec.op_history = option_history(clear, gtype, cfg, assist);
+        rec.op_history = option_history(clear, gtype, cfg);
         app.db.save_score(course.hash, rec);
         ctx.best_clear = std::max(ctx.best_clear, clear);
     }
@@ -1584,7 +1841,9 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
         st.slider = [&](int ty, int& v, int& lo, int& hi) { return ctx.slider(ty, v, lo, hi); };
         st.text = [&](int id) { return ctx.text(id); };
         st.button = [&](int ty) { return ctx.button(ty); };
+        st.graph = cr.graphs.empty() ? nullptr : &course_graph;
         st.graph_gauge = gtype;
+        st.gauge_survival = true;  // コースのゲージは、どれも落ちたら終わり
         st.total_notes = total.total_notes;
         st.chart_op3 = chart_op3;
         st.chart_op4 = chart_op4;
@@ -1600,6 +1859,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
         frame_present(app.renderer);
     }
     for (int id : {kSysCourseClear, kSysCourseFail}) mixer.stop_system(id);
+    app.scene_end_ns = SDL_GetTicksNS();  // 選曲画面に戻るまでの時間は、コースリザルトを閉じたところから数える
     mixer.wait_callback();
     mixer.fade_all(1.0f, 0);
     return exit;
@@ -1609,16 +1869,17 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
 
 PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
     AppConfig& cfg = app.cfg;
+    if (app.metronome()) opt.save_score = false;  // メトロノームを鳴らして遊んだコースは記録しない
     // 段位認定はオプションを書き換える（LR2: Main.cpp:1546）。配置は正規だけ（難易度表の指定で MIRROR などを許す）、
     // EASY と G-ATTACK は GROOVE に、
-    // HIDDEN/SUDDEN と皿の自動演奏は切る。LR2 は終わっても戻さないが、BMjoy はコースが終わったら元に戻す。
+    // HIDDEN/SUDDEN は切る。LR2 は終わっても戻さないが、BMjoy はコースが終わったら元に戻す。
     // ハイスピード固定（ノースピ）のコースは、ハイスピ 1.00・HS-FIX なし・カバーと LIFT なし・基本スクロールスピード 100% で遊ぶ
     const AppConfig saved = cfg;
     struct Restore {
         std::function<void()> f;
         ~Restore() { f(); }
     } restore{[&] {
-        if (course.type == 2) cfg.random = saved.random, cfg.gauge = saved.gauge, cfg.effect = saved.effect, cfg.assist = saved.assist;
+        if (course.type == 2) cfg.random = saved.random, cfg.gauge = saved.gauge, cfg.effect = saved.effect;
         if (course.no_speed) {
             cfg.hs_mode = saved.hs_mode, cfg.hi_speed = saved.hi_speed, cfg.hs_fix = saved.hs_fix, cfg.lane_cover = saved.lane_cover;
             cfg.lift = saved.lift, cfg.base_speed = saved.base_speed;
@@ -1638,7 +1899,6 @@ PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
         if (cfg.random > allowed) cfg.random = kRandomOff;
         if (cfg.gauge == kEasy || cfg.gauge == kGAttack) cfg.gauge = kGroove;
         cfg.effect = 0;
-        cfg.assist = false;
     }
     CourseRun cr;
     cr.course = &course;

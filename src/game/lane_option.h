@@ -19,8 +19,9 @@ int key_count(const Chart& chart);
 
 // 鍵盤（5 鍵の譜面はレーン1〜5、それ以外は1〜7）のノーツを並べ替える。皿と不可視ノーツは動かさない。
 // rng は #RANDOM を評価した続きの乱数（LR2 と同じ並びにするため）。
-// 並べ替えで重なったノーツは、譜面の読み込みと同じ規則で捨てる
-void apply_random_option(Chart& chart, int option, Lr2Random& rng);
+// 並べ替えで重なったノーツは、譜面の読み込みと同じ規則で捨てる。
+// scratch が偽（7k モード）なら、CONVERGE も皿には置かない（乱数の進み方は同じ）
+void apply_random_option(Chart& chart, int option, Lr2Random& rng, bool scratch = true);
 
 
 }  // namespace bmj

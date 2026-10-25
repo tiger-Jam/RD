@@ -13,13 +13,16 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #ifdef _WIN32
+#include <io.h>
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <mutex>
@@ -28,6 +31,7 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "app/app.h"
@@ -48,7 +52,9 @@
 #include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
 #include "skin/lr2_skin.h"
+#include "util/data_dir.h"
 #include "util/dev.h"
+#include "util/startup_clock.h"
 
 using namespace bmj;
 
@@ -77,6 +83,13 @@ struct Options {
     std::string import_lr2_dir;  // LR2 のフォルダ（曲フォルダの登録・曲の情報・スコアをまとめて引き継いで終わる）
     bool copy_assets = false;
     std::string import_lr2_courses;
+    // 持っていない譜面の一覧（難易度表の名前・記号・URL のどれか）。--level で絞る（何度でも）。出したら終わる
+    std::string list_missing;
+    std::vector<std::string> levels;
+    bool list_owned = false;  // 持っている譜面の md5 とフォルダを 1 行ずつ出して終わる
+    // 外の道具（曲を集める道具）から使う：登録した難易度表を取り直す（その日の 2 回目からは手元の版）／登録した曲フォルダを全部読み直す
+    bool update_tables = false, rescan = false;
+    std::string tables_file;  // 登録した表に足して使う表の URL の一覧（1 行に 1 つ。収集だけに使い、選曲画面には出さない）
     std::vector<std::pair<int, int>> skin_opts;
     int gauge = -1, hi_speed = -1, timing = 1000, fps = -1000, effect = -1;
     bool gas = false;
@@ -113,8 +126,14 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--add-table") o.add_tables.push_back(next());
         else if (a == "--import-lr2") o.import_lr2 = next();
         else if (a == "--import-lr2-dir") o.import_lr2_dir = next();
-        else if (a == "--copy-lr2-assets") o.copy_assets = true;
-        else if (a == "--import-lr2-courses") o.import_lr2_courses = next();  // LR2 の song.db の段位・コースだけを写す  // 今の素材のフォルダ（LR2）の素材を、実行ファイルの横に写して付け替える
+        else if (a == "--copy-lr2-assets") o.copy_assets = true;  // 今の素材のフォルダ（LR2）の素材を、実行ファイルの横に写して付け替える
+        else if (a == "--import-lr2-courses") o.import_lr2_courses = next();
+        else if (a == "--list-missing") o.list_missing = next();
+        else if (a == "--list-owned") o.list_owned = true;
+        else if (a == "--update-tables") o.update_tables = true;
+        else if (a == "--rescan") o.rescan = true;
+        else if (a == "--tables-file") o.tables_file = next();
+        else if (a == "--level") o.levels.push_back(next());  // LR2 の song.db の段位・コースだけを写す
         else if (a == "--skin-opt") {
             std::string v = next();
             size_t eq = v.find('=');
@@ -232,7 +251,9 @@ int latency_test(bool exclusive, int buffer) {
 //   難易度表の取得中は表ごとの状態を出し、最後に版の名前と「PUSH ANY KEY」を出して入力を待つ。押すと「READY」。
 // 閉じられたら false
 // before_wait は「PUSH ANY KEY」を出す直前に呼ぶ（選曲画面の下ごしらえを始め、押されるのを待つ間に済ませる）
-bool startup_screen(App& app, bool update, const std::function<void()>& before_wait = {}) {
+// only が空でなければ、曲フォルダのうちそのフォルダだけを読む（「手動」のときの、まだ読んでいない曲フォルダ）
+bool startup_screen(App& app, bool update, const std::function<void()>& before_wait = {},
+                    const std::vector<std::string>& only = {}) {
     // LR2（DxLib の printfDx）と同じく、拡大せずにウィンドウの画素にそのまま、ぼかさない 16px の文字で描く
     frame_target_set(app.renderer, 0, 0);
     SDL_SetRenderLogicalPresentation(app.renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
@@ -279,10 +300,18 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
             std::mutex scan_mu;
             std::string scan_path;
             auto scan_job = std::async(std::launch::async, [&] {
-                return db.scan(app.cfg.song_dirs, threads, [&](int, int, const std::string& path) {
+                auto progress = [&](int, int, const std::string& path) {
                     std::lock_guard<std::mutex> lock(scan_mu);
                     if (!path.empty()) scan_path = path;
-                });
+                };
+                if (only.empty()) return db.scan(app.cfg.song_dirs, threads, progress);
+                ScanStats total;
+                for (const std::string& d : only) {
+                    ScanStats s = db.scan(app.cfg.song_dirs, threads, progress, d);
+                    total.found += s.found, total.added += s.added, total.updated += s.updated, total.removed += s.removed;
+                    total.failed += s.failed, total.seconds += s.seconds;
+                }
+                return total;
             });
             while (scan_job.wait_for(std::chrono::milliseconds(16)) != std::future_status::ready) {
                 std::string p;
@@ -316,27 +345,47 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
             std::printf("曲データベースを開けない: %s\n", song_db_path().c_str());
         }
     }
+    startup_mark("曲データベースの更新を終えた");
     {
         // 難易度表は、曲フォルダの更新を手動にしていても起動のたびに確かめる（取りに行くのはその日の最初の 1 回だけ）。
-        // まとめて並べて取りに行く（応答の無いサイトがあっても、待つのは1つぶんで済む）
+        // まとめて並べて取りに行く。応答の無いサイトがあっても、起動の画面で待つのは 2 秒まで（残りは裏で続け、
+        // 間に合わなかった表が新しくなっていたら、選曲画面が一覧を作り直す）
         const std::vector<std::string>& urls = app.cfg.tables;
-        std::vector<std::future<DifficultyTable>> jobs;
-        for (const std::string& u : urls) jobs.push_back(std::async(std::launch::async, [u] { return update_table(table_cache_dir(), u); }));
-        std::vector<std::optional<DifficultyTable>> got(jobs.size());
-        for (int tick = 0;; ++tick) {
-            bool all = true;
+        auto tu = std::make_shared<TableUpdates>();
+        tu->got.resize(urls.size());
+        tu->remaining = static_cast<int>(urls.size());
+        app.table_updates = tu;
+        for (size_t i = 0; i < urls.size(); ++i)
+            std::thread([tu, i, u = urls[i]] {
+                DifficultyTable t = update_table(table_cache_dir(), u);
+                const bool changed = !t.from_cache && t.warning.empty();
+                {
+                    std::lock_guard<std::mutex> lock(tu->mu);
+                    tu->got[i] = std::move(t);
+                }
+                if (changed && tu->cut) tu->late_changed = true;
+                --tu->remaining;
+            }).detach();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        for (int tick = 0; tu->remaining > 0 && std::chrono::steady_clock::now() < deadline; ++tick) {
             std::vector<std::string> temp{"Loading difficulty tables:"};
-            for (size_t i = 0; i < jobs.size(); ++i) {
-                if (!got[i] && jobs[i].wait_for(std::chrono::seconds(0)) == std::future_status::ready) got[i] = jobs[i].get();
-                if (!got[i]) all = false;
-                temp.push_back("[" + urls[i] + "]: " + (got[i] ? "done" : std::string(1 + tick / 10 % 3, '.')));
+            {
+                std::lock_guard<std::mutex> lock(tu->mu);
+                for (size_t i = 0; i < urls.size(); ++i)
+                    temp.push_back("[" + urls[i] + "]: " + (tu->got[i] ? "done" : std::string(1 + tick / 10 % 3, '.')));
             }
-            if (all || jobs.empty()) break;
             draw(temp);
             SDL_Delay(16);
         }
-        for (size_t i = 0; i < got.size(); ++i) {
-            const DifficultyTable& t = *got[i];
+        tu->cut = true;
+        std::lock_guard<std::mutex> lock(tu->mu);
+        for (size_t i = 0; i < urls.size(); ++i) {
+            if (!tu->got[i]) {
+                lines.push_back("[" + urls[i] + "]: checking in background");
+                std::printf("難易度表 %s：裏で確かめている\n", urls[i].c_str());
+                continue;
+            }
+            const DifficultyTable& t = *tu->got[i];
             std::string name = t.name.empty() ? urls[i] : t.name;
             // 毎回、表ごとにどう読んだかを出す（今日取りに行った／今日すでに取った手元の版／取れずに手元の版／取れない）
             const std::string n = std::to_string(t.charts.size()) + " charts";
@@ -347,6 +396,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
             std::printf("難易度表 %s：%zu 譜面%s\n", name.c_str(), t.charts.size(), t.warning.empty() ? "" : ("（" + t.warning + "）").c_str());
         }
     }
+    startup_mark("難易度表を読んだ");
     if (before_wait) before_wait();
     lines.push_back("");
     lines.push_back("BMjoy version 0.1.0");
@@ -355,7 +405,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
     draw({});
     if (startup_shot) return false;
     // 何か押されるまで待つ（キーボード・コントローラーのボタン・マウス）。開発用の撮影中は待たない
-    bool pushed = dev_env("BMJ_SELECT_SHOT") != nullptr;
+    bool pushed = dev_env("BMJ_SELECT_SHOT") != nullptr || dev_env("BMJ_SCROLL_TEST") != nullptr || dev_env("BMJ_OPEN_TEST") != nullptr;
     while (!pushed && !closed) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -368,6 +418,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
         SDL_Delay(5);
     }
     if (closed) return false;
+    startup_mark("キーが押された");
     lines.push_back("READY");
     draw({});
     return true;
@@ -375,16 +426,113 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
 
 }  // namespace
 
+// 難易度表の譜面のうち、曲データベースに無いもの（持っていないもの）を 1 行ずつ出す：md5、レベル、曲名、アーティスト、表の名前、
+// 本体の URL、差分の URL（表に書いてあれば）。
+// 表は手元の版（BMjoy が起動のときに取ったもの）を使う。which は表の名前・記号・URL のどれか（名前は大文字小文字を区別せず、一部でよい）。"*" なら登録した表を全部。
+// 外の道具（曲を取ってくる道具など）から使う
+// 登録した表の URL に、一覧のファイル（あれば）の URL を足したもの（重なりは 1 つ）
+std::vector<std::string> table_urls_with(const AppConfig& cfg, const std::string& file) {
+    std::vector<std::string> urls = cfg.tables;
+    if (file.empty()) return urls;
+    std::ifstream f(std::filesystem::u8path(file));
+    std::unordered_set<std::string> have(urls.begin(), urls.end());
+    for (std::string line; std::getline(f, line);) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        if (line.rfind("\xEF\xBB\xBF", 0) == 0) line.erase(0, 3);
+        if (!line.empty() && line[0] != '#' && have.insert(line).second) urls.push_back(line);
+    }
+    return urls;
+}
+
+int list_missing(const std::string& which, const std::vector<std::string>& levels, const std::string& tables_file) {
+    AppConfig cfg;
+    migrate_old_data();
+    cfg.load(config_path());
+    SongDb db;
+    if (!db.open(song_db_path())) {
+        std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
+        return 1;
+    }
+    std::unordered_set<std::string> owned;
+    for (const ChartRecord& c : db.all_charts()) owned.insert(c.md5);
+    auto low = [](std::string s) {
+        for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        return s;
+    };
+    const std::string want = low(which);
+    int tables = 0, missing = 0;
+    for (const std::string& url : table_urls_with(cfg, tables_file)) {
+        DifficultyTable t;
+        if (!load_cached_table(table_cache_dir(), url, t)) continue;
+        if (which != "*" && !(low(url).find(want) != std::string::npos || low(t.name).find(want) != std::string::npos ||
+              (!t.symbol.empty() && t.symbol == which)))
+            continue;
+        ++tables;
+        std::unordered_set<std::string> seen;
+        for (const TableChart& c : t.charts) {
+            if (c.md5.size() != 32 || owned.count(low(c.md5)) || !seen.insert(low(c.md5)).second) continue;
+            if (!levels.empty() && std::find(levels.begin(), levels.end(), c.level) == levels.end()) continue;
+            // タブと改行は区切りなので、曲名などに混ざっていれば空白にする
+            auto field = [](std::string v) {
+                for (char& ch : v)
+                    if (ch == '\t' || ch == '\n' || ch == '\r') ch = ' ';
+                return v;
+            };
+            std::printf("%s\t%s%s\t%s\t%s\t%s\t%s\t%s\n", low(c.md5).c_str(), field(t.symbol).c_str(), field(c.level).c_str(),
+                        field(c.title).c_str(), field(c.artist).c_str(), field(t.name).c_str(), field(c.url).c_str(), field(c.url_diff).c_str());
+            ++missing;
+        }
+    }
+    std::fprintf(stderr, "難易度表 %d 個、持っていない譜面 %d 件\n", tables, missing);
+    return tables > 0 ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
+    startup_clock_start();
     // ログをファイルに流しても、落ちたり止まったりしたときに残るようにする
 #if defined(_WIN32)
+    {
+        // ダブルクリックで起動したとき（出力の行き先が無いとき）は、ログを LR2files/log.txt に残す。前の 1 回分は log_old.txt。
+        // 別の PC やテスターの環境で、遊べなかった・止まったときの理由を後から見られるように
+        HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (out == nullptr || out == INVALID_HANDLE_VALUE || GetFileType(out) == FILE_TYPE_UNKNOWN) {
+            const std::filesystem::path dir = std::filesystem::u8path(data_dir());
+            std::error_code ec;
+            std::filesystem::rename(dir / "log.txt", dir / "log_old.txt", ec);
+            const std::wstring log = (dir / "log.txt").wstring();
+            FILE* f = nullptr;
+            // stderr は stdout と同じ書き先にする（別々に開くと、片方の書いた行をもう片方が上書きする）
+            if (_wfreopen_s(&f, log.c_str(), L"w", stdout) == 0) _dup2(_fileno(stdout), _fileno(stderr));
+        }
+    }
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
     // コマンドプロンプトから動かしたときに、日本語のログを読めるようにする
     SetConsoleOutputCP(CP_UTF8);
 #else
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
 #endif
     Options opt;
+#ifdef _WIN32
+    // Windows の argv は ANSI（Shift_JIS）なので、日本語の引数（曲のパス・難易度表の名前）が化ける。UTF-16 の引数から作り直す
+    std::vector<std::string> wargs;
+    std::vector<char*> wargv;
+    {
+        int wn = 0;
+        if (LPWSTR* w = CommandLineToArgvW(GetCommandLineW(), &wn)) {
+            for (int i = 0; i < wn; ++i) {
+                int len = WideCharToMultiByte(CP_UTF8, 0, w[i], -1, nullptr, 0, nullptr, nullptr);
+                std::string u(len > 0 ? len - 1 : 0, '\0');
+                if (len > 1) WideCharToMultiByte(CP_UTF8, 0, w[i], -1, u.data(), len, nullptr, nullptr);
+                wargs.push_back(std::move(u));
+            }
+            LocalFree(w);
+            for (std::string& a : wargs) wargv.push_back(a.data());
+            wargv.push_back(nullptr);
+            argc = wn, argv = wargv.data();
+        }
+    }
+#endif
     if (!parse_args(argc, argv, opt)) {
         std::fprintf(stderr,
                      "使い方: bmjoy <譜面ファイル> [--auto] [--gauge groove|hard|death|easy|pattack|gattack] [--gas]\n"
@@ -395,6 +543,55 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
+    if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file);
+    if (opt.update_tables || opt.rescan) {
+        AppConfig cfg;
+        migrate_old_data();
+        cfg.load(config_path());
+        int rc = 0;
+        if (opt.update_tables) {
+            // 表が何百あっても、同時に取りに行くのは 16 個まで
+            const std::vector<std::string> urls = table_urls_with(cfg, opt.tables_file);
+            for (size_t from = 0; from < urls.size(); from += 16) {
+                std::vector<std::future<DifficultyTable>> jobs;
+                for (size_t i = from; i < std::min(urls.size(), from + 16); ++i)
+                    jobs.push_back(std::async(std::launch::async, [u = urls[i]] { return update_table(table_cache_dir(), u); }));
+                for (size_t i = 0; i < jobs.size(); ++i) {
+                    DifficultyTable t = jobs[i].get();
+                    std::printf("難易度表 %s：%zu 譜面%s\n", t.name.empty() ? urls[from + i].c_str() : t.name.c_str(), t.charts.size(),
+                                t.warning.empty() ? "" : ("（" + t.warning + "）").c_str());
+                }
+            }
+        }
+        if (opt.rescan) {
+            SongDb db;
+            if (!db.open(song_db_path())) {
+                std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
+                return 1;
+            }
+            // 見つからない曲フォルダ（外付けのドライブが外れているなど）があれば読まない。そのまま読むと、その下の譜面が全部消える
+            for (const std::string& d : cfg.song_dirs) {
+                std::error_code ec;
+                if (!std::filesystem::is_directory(std::filesystem::u8path(d), ec)) {
+                    std::fprintf(stderr, "曲フォルダが見つからないので読み直さない: %s\n", d.c_str());
+                    return 1;
+                }
+            }
+            int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
+            ScanStats s = db.scan(cfg.song_dirs, threads);
+            std::printf("曲フォルダを読み直した：%d 譜面（追加 %d／変更 %d／削除 %d／読めない %d）%.1f 秒\n", s.found, s.added, s.updated,
+                        s.removed, s.failed, s.seconds);
+            if (cfg.song_dirs.empty()) rc = 1;
+        }
+        return rc;
+    }
+    if (opt.list_owned) {
+        // 持っている譜面の md5 と、それがあるフォルダ（外の道具が、差分を本体のフォルダへ入れるのに使う）
+        SongDb db;
+        if (!db.open(song_db_path())) return 1;
+        for (const ChartRecord& c : db.all_charts()) std::printf("%s\t%s\n", c.md5.c_str(), c.folder.c_str());
+        return 0;
+    }
     if (!opt.table_urls.empty()) {
         std::string cache = opt.db_path.empty() ? "tables_test" : opt.db_path;
         for (const std::string& u : opt.table_urls) {
@@ -435,6 +632,7 @@ int main(int argc, char** argv) {
     int rc = 0;
     {
         App app;
+        migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の LR2files へ
         app.cfg_path = config_path();
         if (app.cfg.load(app.cfg_path)) std::printf("設定: %s\n", app.cfg_path.c_str());
         // コマンドラインの指定は設定に上書きし、終了時に保存する
@@ -457,9 +655,11 @@ int main(int argc, char** argv) {
         }
         for (const std::string& t : opt.add_tables)
             if (std::find(c.tables.begin(), c.tables.end(), t) == c.tables.end()) c.tables.push_back(t);
+        startup_mark("SDL の準備が終わった");
         joystick_init().start(c.joystick_directinput);
         raw_hid().start();
         if (!app.init(argv[0])) return 1;
+        startup_mark("ウィンドウ・音声・曲データベースの準備が終わった");
         midi_input().start();  // SDL のイベントで送るので、SDL の準備の後に開く
         if (!opt.import_lr2_courses.empty()) {
             int n = import_lr2_courses(opt.import_lr2_courses);
@@ -499,13 +699,34 @@ int main(int argc, char** argv) {
         std::future<std::shared_ptr<SelectPrep>> select_prep;  // 選曲画面の下ごしらえ（起動の画面の間に裏で作る）
         if (opt.chart_path.empty() && !opt.keyconfig) {
             if (c.watch_folders) app.watcher.start(c.song_dirs);
+            startup_mark("曲フォルダの見張りを始めた");
             bool update = c.db_update == 0;
+            std::vector<std::string> unread;
+            if (!update) {
+                // 「手動」でも、まだ一度も読んでいない曲フォルダ（新しく登録した・別の PC へ持ってきた・曲データベースを
+                // 再作成した）は読む。読まないと、その曲フォルダは空のままになる。読むのはそのフォルダだけ
+                for (const std::string& d : c.song_dirs) {
+                    std::error_code ec;
+                    // 先に曲データベースで確かめる（読んであるフォルダのためにドライブを見に行くと、止まっている HDD が回るまで待たされる）
+                    if (!app.db.has_charts_under(d) && std::filesystem::is_directory(std::filesystem::u8path(d), ec)) {
+                        std::printf("まだ読んでいない曲フォルダを読む: %s\n", d.c_str());
+                        unread.push_back(d);
+                    }
+                }
+                update = !unread.empty();
+                startup_mark("まだ読んでいない曲フォルダを確かめた");
+            }
             // 「PUSH ANY KEY」を待っている間に、選曲画面の一覧を裏で作り、選曲スキンを読んでおく（READY のあと待たせない）
             auto prepare = [&] {
-                select_prep = std::async(std::launch::async, [&app] { return prepare_select(app); });
+                select_prep = std::async(std::launch::async, [&app] {
+                    auto prep = prepare_select(app);
+                    startup_mark("選曲画面の一覧ができた（裏）");
+                    return prep;
+                });
                 if (!opt.no_skin && opt.skin_opts.empty()) preload_select_skin(app);
+                startup_mark("選曲スキンを読んだ");
             };
-            if (!startup_screen(app, update, prepare)) {
+            if (!startup_screen(app, update, prepare, unread)) {
                 if (select_prep.valid()) select_prep.wait();
                 return 0;
             }
@@ -539,8 +760,19 @@ int main(int argc, char** argv) {
             run_keyconfig(app.window, app.renderer, app.keycfg, keyconfig_path());
         } else if (opt.chart_path.empty()) {
             app.scene_end_ns = SDL_GetTicksNS();
-            run_select(app, select_prep.valid() ? select_prep.get() : nullptr);
+            auto prep = select_prep.valid() ? select_prep.get() : nullptr;
+            startup_mark("選曲画面に入る");
+            run_select(app, prep);
         } else {
+            // 開発用：BMJ_CHART_DELAY のときは、選曲画面から遊ぶのと同じく曲データベースの譜面の情報を渡す
+            std::vector<ChartRecord> recs;
+            if (dev_env("BMJ_CHART_DELAY")) {
+                std::error_code ec;
+                const std::string abs = std::filesystem::absolute(opt.chart_path, ec).lexically_normal().string();
+                recs = app.db.charts_in_folder(std::filesystem::path(abs).parent_path().string());
+                for (const ChartRecord& c : recs)
+                    if (c.path == abs) opt.play.record = &c;
+            }
             run_play(app, opt.chart_path, opt.play);
         }
         if (!opt.no_skin) app.save_config();
