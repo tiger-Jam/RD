@@ -60,6 +60,8 @@ add_library(bmj_core STATIC
     src/util/path.cpp
     src/util/dxa.cpp
     src/skin/lr2_skin.cpp
+    src/skin/skin_color.cpp
+    src/skin/skin_compose.cpp
     src/util/hash.cpp
     src/db/song_db.cpp
     src/db/difficulty_table.cpp
@@ -115,6 +117,7 @@ add_executable(BMjoybody WIN32
     src/render/play_scene.cpp
     src/render/skin_play.cpp
     src/skin/skin_renderer.cpp
+    src/skin/skin_parts.cpp
     src/render/text_cache.cpp
 )
 # 動画の BGA：FFmpeg のヘッダーだけを使い、ライブラリは実行時に読み込む（同梱しない）。

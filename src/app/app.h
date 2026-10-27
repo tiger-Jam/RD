@@ -23,6 +23,9 @@
 
 namespace bmj {
 
+// LR2のフォルダ（LR2files があるところ）を探す。configured（設定の値）を最初に見る。見つからなければ空
+std::string find_lr2_root(const std::string& configured, const char* argv0);
+
 // #RESOLUTION の無いスキンの解像度を、画面全体を覆う DST から推定する
 void guess_resolution(Lr2Skin& sk);
 
@@ -70,6 +73,11 @@ struct App {
     std::string custom_gauge_name() const;
     // GAS の MOD を使っていれば、落ちていくゲージの順番（使っていなければ空）。GAUGE で「GAS」を選んだときに使う
     std::vector<std::string> gas_order() const;
+    // 使っている MOD のプレースキンの部品の色（MOD の並びの順）
+    std::vector<SkinColorFilter> skin_colors() const;
+    // プレースキンの部品を、スキン選択で選んだほかのスキンから持ってきて、使っている MOD の色を当てる。
+    // path は設定に書いたそのスキンのパス、options はスキンを読むときの値
+    void apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array<bool, 1000>& options) const;
     // 使っているメトロノームの MOD（無ければ nullptr）
     const ModManifest* metronome() const;
     // 使っている MOD のうち、プレーに影響するものの組み合わせの記録の番号（0 は MOD 無し。初めてなら曲データベースに足す）。

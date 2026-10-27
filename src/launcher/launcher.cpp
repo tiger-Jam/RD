@@ -20,6 +20,7 @@
 
 #include "app/config.h"
 #include "app/lr2_import.h"
+#include "app/skin_catalog.h"
 #include "db/song_db.h"
 #include "mod/mod.h"
 #include "render/text_cache.h"
@@ -379,8 +380,8 @@ uint32_t standard_lamp_color(int i, uint64_t ms) {
 
 // MOD の詳細の画面。GAS の順番（gauge_order）、カスタムゲージの一覧（gauges）、カスタムランプの一覧（lamps）を変える。
 // 設定が 2 つ以上ある MOD は、上のボタンで page を切り替える。done は「戻る」（保存して一覧へ）
-void draw_mod_detail(Gui& g, std::vector<ModManifest>& mods, ModManifest& m, const std::vector<std::string>& enabled, float X, float Y,
-                     int& page, int& sel, int& scroll, int& add_sel, const std::function<void()>& done) {
+void draw_mod_detail(Gui& g, std::vector<ModManifest>& mods, ModManifest& m, const std::vector<std::string>& enabled, const std::string& lr2_root,
+                     float X, float Y, int& page, int& sel, int& scroll, int& add_sel, const std::function<void()>& done) {
     // ほかの MOD のゲージ・ランプは、使っている（印を付けた）ものだけ出す
     auto in_use = [&](const ModManifest& o) { return &o == &m || std::find(enabled.begin(), enabled.end(), o.id) != enabled.end(); };
     resolve_gauge_lamps(mods);  // 名前（CUSTOM1 …）とランプを、いまの中身で引き直す
@@ -730,6 +731,137 @@ void draw_mod_detail(Gui& g, std::vector<ModManifest>& mods, ModManifest& m, con
         if (g.button(lx + 86, Y + 290, 78, 22, "下へ", can_down)) {
             const double lo = at + 2 < static_cast<int>(ladder.size()) ? ladder[at + 2].rank : 0;
             m.lamps[mi].rank = (ladder[at + 1].rank + lo) / 2;
+        }
+    }
+    if (st.type == "skin_colors") {
+        // プレースキンの部品の色。左が当てるものの一覧（上から順に当てる）、右が選んでいるものの中身
+        static const char* const part_keys[] = {"note", "ln", "mine", "bomb", "hold", "beam", "key", "judge", "combo", "judgeline", "line", "gauge", "frame"};
+        static const char* const part_names[] = {"ノーツ", "LN", "地雷", "ボム", "LN のボム", "キービーム", "鍵盤", "判定の文字", "コンボ", "判定ライン", "小節線", "ゲージ", "フレーム"};
+        static const char* const lane_keys[] = {"scratch", "white", "blue"};
+        static const char* const lane_names[] = {"皿", "白鍵", "青鍵"};
+        static const char* const judge_keys[] = {"pgreat", "great", "good", "bad", "poor", "empty_poor"};
+        static const char* const judge_names[] = {"PGREAT", "GREAT", "GOOD", "BAD", "POOR", "空POOR"};
+        static const char* const mode_keys[] = {"hue", "range", "map", "mul"};
+        static const std::vector<std::string> mode_names = {"色相をずらす", "近い色だけずらす", "グラデーションマップ", "灰色にして掛ける"};
+        auto has = [](const std::vector<std::string>& v, const char* k) { return std::find(v.begin(), v.end(), k) != v.end(); };
+        // 一覧の行：部品の名前を「・」でつなぐ
+        auto summary = [&](const SkinColorFilter& f) {
+            std::string t;
+            for (size_t i = 0; i < std::size(part_keys); ++i)
+                if (has(f.parts, part_keys[i])) t += (t.empty() ? "" : "・") + std::string(part_names[i]);
+            if (t.empty()) t = "（部品なし）";
+            // スキンを決めていれば、そのファイルの名前も付ける
+            if (!f.skins.empty()) t += " / " + fs::u8path(from_portable(f.skins[0])).stem().string();
+            return t;
+        };
+        std::vector<std::string> rows;
+        for (const SkinColorFilter& f : m.skin_colors) rows.push_back(summary(f));
+        g.label(X + 14, Y + 36, st.name);
+        g.listview(X + 14, Y + 54, 140, 230, "上から順に当てる", rows, sel, scroll);
+        const int n = static_cast<int>(m.skin_colors.size());
+        if (g.button(X + 14, Y + 290, 66, 22, "足す")) {
+            g.unfocus();
+            SkinColorFilter f;
+            if (sel >= 0 && sel < n) f = m.skin_colors[sel];  // 選んでいるものを元にする
+            else f.parts = {"note"}, f.hue = 120;
+            m.skin_colors.push_back(f);
+            sel = n;
+        }
+        if (g.button(X + 88, Y + 290, 66, 22, "消す", sel >= 0 && sel < n)) {
+            g.unfocus();
+            m.skin_colors.erase(m.skin_colors.begin() + sel);
+            sel = std::min(sel, n - 2);
+        }
+        if (sel >= 0 && sel < static_cast<int>(m.skin_colors.size())) {
+            SkinColorFilter& f = m.skin_colors[sel];
+            const float x0 = X + 166, x1 = X + 220;
+            // 印の付け外しで、一覧に足す・外す
+            auto toggles = [&](std::vector<std::string>& v, const char* const* keys, const char* const* names, size_t cnt, float y, float w,
+                               int per_row, bool enabled) {
+                for (size_t i = 0; i < cnt; ++i) {
+                    bool on = has(v, keys[i]);
+                    if (g.check(x1 + (i % per_row) * w, y + (i / per_row) * 20.0f, names[i], on, enabled)) {
+                        if (on) v.push_back(keys[i]);
+                        else v.erase(std::remove(v.begin(), v.end(), keys[i]), v.end());
+                    }
+                }
+            };
+            // 効かせるスキン：全部か、1 つのプレースキン（7 鍵）
+            {
+                static SkinCatalog catalog;
+                static std::string scanned;
+                if (scanned != lr2_root) catalog.scan(lr2_root), scanned = lr2_root;
+                std::vector<std::string> names = {"全部"}, paths = {""};
+                if (auto it = catalog.entries().find(0); it != catalog.entries().end())
+                    for (const SkinEntry& e : it->second)
+                        names.push_back(e.header.title + " (" + fs::u8path(e.path).stem().string() + ")"), paths.push_back(to_portable(e.path));
+                int cur = 0;
+                if (!f.skins.empty())
+                    for (size_t i = 1; i < paths.size(); ++i)
+                        if (fs::u8path(from_portable(paths[i])).lexically_normal() == fs::u8path(from_portable(f.skins[0])).lexically_normal())
+                            cur = static_cast<int>(i);
+                g.label(x0, Y + 34, "スキン");
+                g.combo(&f.skins, x1, Y + 30, 340, 22, names, cur, [&f, paths](int i) {
+                    f.skins.clear();
+                    if (!paths[i].empty()) f.skins.push_back(paths[i]);
+                });
+            }
+            g.label(x0, Y + 58, "部品");
+            toggles(f.parts, part_keys, part_names, std::size(part_keys), Y + 58, 84, 4, true);
+            const bool lanes_on = has(f.parts, "note") || has(f.parts, "ln") || has(f.parts, "mine") || has(f.parts, "bomb") ||
+                                  has(f.parts, "hold") || has(f.parts, "beam") || has(f.parts, "key");
+            // 空の一覧は「全部」なので、全部に印を付けて見せる
+            if (lanes_on && f.lanes.empty()) f.lanes.assign(std::begin(lane_keys), std::end(lane_keys));
+            g.label2(x0, Y + 142, "レーン", lanes_on);
+            toggles(f.lanes, lane_keys, lane_names, 3, Y + 142, 60, 3, lanes_on);
+            const bool judges_on = has(f.parts, "judge") || has(f.parts, "combo");
+            if (judges_on && f.judges.empty()) f.judges.assign(std::begin(judge_keys), std::end(judge_keys));
+            g.label2(x0, Y + 164, "判定", judges_on);
+            toggles(f.judges, judge_keys, judge_names, 6, Y + 164, 70, 5, judges_on);
+            int mode = 0;
+            for (int i = 0; i < 4; ++i)
+                if (f.mode == mode_keys[i]) mode = i;
+            g.label(x0, Y + 212, "方式");
+            g.combo(&f.mode, x1, Y + 208, 150, 22, mode_names, mode, [&f](int i) { f.mode = mode_keys[i]; });
+            // 方式ごとの値（色相は度、彩度・強さは %）
+            const float py = Y + 238;
+            if (mode <= 1) {
+                float x = x1;
+                if (mode == 1) {
+                    g.label(x0, py + 4, "変える色"), num(f.from, x, py, 44), g.label(x + 48, py + 4, "度");
+                    g.label(x + 70, py + 4, "幅"), num(f.width, x + 88, py, 40), x += 150;
+                }
+                g.label(mode == 1 ? x : x0, py + 4, mode == 1 ? "ずらす" : "色相");
+                const float xx = mode == 1 ? x + 40 : x1;
+                num(f.hue, xx, py, 44), g.label(xx + 48, py + 4, "度");
+                g.label(x0, py + 30, "彩度"), num(f.sat, x1, py + 26, 44), g.label(x1 + 48, py + 30, "%");
+                if (mode == 0) g.label(x1 + 74, py + 30, "明るさ"), num(f.lit, x1 + 120, py + 26, 44), g.label(x1 + 168, py + 30, "（-50〜50）");
+            } else {
+                g.label(x0, py + 4, "色"), g.color_button(&f.color, x1, py, 36, 22);
+                g.label(x1 + 48, py + 4, "強さ"), num(f.mix, x1 + 82, py, 44), g.label(x1 + 130, py + 4, "%");
+                // グラデーションマップのいちばん明るい所（100% なら白、下げると色に近づく。白い絵にも色を付けたいとき）
+                if (mode == 2) g.label(x0, py + 30, "明るい所"), num(f.white, x1, py + 26, 44), g.label(x1 + 48, py + 30, "%");
+            }
+            // 見本：上が元の色（色相の帯と灰色の帯）、下が変えたあと
+            const float sy = Y + 294, sw = 7;
+            for (int i = 0; i < 48; ++i) {
+                uint8_t px[4] = {0, 0, 0, 255};
+                if (i < 36) {
+                    // 色相の帯（鮮やかな色）
+                    const double h = i * 10.0 / 60.0, c = 1, xk = c * (1 - std::fabs(std::fmod(h, 2.0) - 1));
+                    double rgb[3] = {0, 0, 0};
+                    const int hi = static_cast<int>(h) % 6;
+                    const int ci[6][2] = {{0, 1}, {1, 0}, {1, 2}, {2, 1}, {2, 0}, {0, 2}};
+                    rgb[ci[hi][0]] = c, rgb[ci[hi][1]] = xk;
+                    for (int k = 0; k < 3; ++k) px[k] = static_cast<uint8_t>(rgb[k] * 255);
+                } else {
+                    px[0] = px[1] = px[2] = static_cast<uint8_t>((i - 36) * 255 / 11);
+                }
+                g.fill({x1 + i * sw, sy - 6, sw, 6}, SDL_Color{px[0], px[1], px[2], 255});
+                recolor_pixel(px, f);
+                g.fill({x1 + i * sw, sy, sw, 12}, SDL_Color{px[0], px[1], px[2], 255});
+            }
+            g.label(x0, sy - 2, "見本");
         }
     }
     if (st.type == "metronome") {
@@ -1243,11 +1375,29 @@ int main(int, char**) {
             int fi = 0;
             while (fi < 9 && fps_vals[fi] != cfg.fps) ++fi;
             g.combo(&cfg.fps, X + 392, Y + 68, 174, 20, fps_names, fi == 9 ? 0 : fi, [&](int i) { cfg.fps = fps_vals[i]; });
-            // スキンはゲームの中のスキンセレクトで選ぶ（LR2 と同じ）ので、ここには出さない
-            float y = Y + 102;
+            // スキンはゲームの中のスキンセレクトで選ぶ（LR2 と同じ）。スキンセレクトの画面のスキンだけはここで選ぶ
+            //（LR2 標準のスキンセレクトには、スキンセレクトのスキンを替えるボタンが無いので）
+            {
+                static SkinCatalog catalog;
+                static std::string scanned;
+                const std::string root = cfg.lr2_root.empty() ? base_dir() : from_portable(cfg.lr2_root);
+                if (scanned != root) catalog.scan(root), scanned = root;
+                std::vector<std::string> names = {"LR2 の既定"}, paths = {""};
+                if (auto it = catalog.entries().find(9); it != catalog.entries().end())
+                    for (const SkinEntry& e : it->second)
+                        names.push_back(e.header.title + " (" + fs::u8path(e.path).stem().string() + ")"), paths.push_back(e.path);
+                int cur = 0;
+                for (size_t i = 1; i < paths.size(); ++i)
+                    if (!cfg.skinselect_skin.empty() &&
+                        fs::u8path(paths[i]).lexically_normal() == fs::u8path(cfg.skinselect_skin).lexically_normal())
+                        cur = static_cast<int>(i);
+                g.label(X + 20, Y + 104, "スキンセレクト");
+                g.combo(&cfg.skinselect_skin, X + 124, Y + 98, 300, 20, names, cur, [&cfg, paths](int i) { cfg.skinselect_skin = paths[i]; });
+            }
+            float y = Y + 128;
             g.label(X + 20, y + 10, "難易度表（URL）");
-            g.listview(X + 20, y + 26, 546, 162, "url", cfg.tables, table_sel, table_scroll);
-            float by = y + 196;
+            g.listview(X + 20, y + 26, 546, 136, "url", cfg.tables, table_sel, table_scroll);
+            float by = y + 170;
             g.edit_str(table_input, X + 20, by, 380, 20);
             if (g.button(X + 410, by - 1, 74, 22, "追加", !table_input.empty())) {
                 if (std::find(cfg.tables.begin(), cfg.tables.end(), table_input) == cfg.tables.end()) cfg.tables.push_back(table_input);
@@ -1262,7 +1412,7 @@ int main(int, char**) {
             g.check(X + 280, by + 26, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
 #endif
         } else if (tab == 8 && mod_detail >= 0 && mod_detail < static_cast<int>(mods.size())) {
-            draw_mod_detail(g, mods, mods[mod_detail], cfg.enabled_mods, X, Y, det_page, det_sel, det_scroll, det_add, [&] { mod_detail = -1; });
+            draw_mod_detail(g, mods, mods[mod_detail], cfg.enabled_mods, cfg.lr2_root.empty() ? base_dir() : from_portable(cfg.lr2_root), X, Y, det_page, det_sel, det_scroll, det_add, [&] { mod_detail = -1; });
         } else if (tab == 8) {
             // MOD：使うものに印を付ける。プレーに影響する MOD（判定・譜面・入力）を使うと、記録はふだんのものと分かれる
             float y = Y + 12;
@@ -1349,7 +1499,7 @@ int main(int, char**) {
                     if (!job.assets.ok) {
                         n.lr2_root = cfg.lr2_root, n.play_skin = cfg.play_skin, n.result_skin = cfg.result_skin;
                         n.courseresult_skin = cfg.courseresult_skin, n.select_skin = cfg.select_skin, n.decide_skin = cfg.decide_skin;
-                        n.keyconfig_skin = cfg.keyconfig_skin, n.sound_set = cfg.sound_set, n.skin_adjust = cfg.skin_adjust;
+                        n.keyconfig_skin = cfg.keyconfig_skin, n.skinselect_skin = cfg.skinselect_skin, n.sound_set = cfg.sound_set, n.skin_adjust = cfg.skin_adjust;
                     }
                     cfg = n;
                     message = "LR2 から引き継ぎました（曲フォルダ " + std::to_string(job.res.song_dirs) + "、譜面 " +

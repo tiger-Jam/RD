@@ -26,9 +26,20 @@ struct AppConfig {
     std::string select_skin;       // 選曲スキンの .lr2skin（空なら LR2 の既定。"none" なら BMjoy の仮の画面）
     std::string decide_skin;       // 決定画面のスキン（空なら LR2 の既定。"none" なら決定画面を出さない）
     std::string keyconfig_skin;    // キーコンフィグのスキン（空なら LR2 の既定。"none" ならスキンを使わない画面）
+    std::string skinselect_skin;   // スキンセレクトのスキン（空なら LR2 の既定）
     std::string sound_set;         // サウンドセットの .lr2ss（空なら LR2 の既定）
     std::string skin_res;          // "", "sd", "hd", "fhd"
     std::map<std::string, std::vector<SkinCustomChoice>> skin_custom;  // スキンのパス → カスタマイズの選択（項目の順）
+    // プレースキンの部品をほかのスキンから持ってくる（スキンのパス → 差し込み口の鍵 → 持ってくるスキンのパスと、その絵の種類）と、大きさの合わせ方
+    struct SkinParts {
+        std::map<std::string, std::string> from;
+        // 差し込み口の鍵 → 持ってくるスキンの #CUSTOMFILE のうち、その部品の絵を選ぶ項目（番号 → 選んだ名前）。
+        // 書いていない項目は、そのスキン自身のカスタマイズのまま
+        std::map<std::string, std::map<int, std::string>> custom;
+        bool screen_scale = false;  // true：画面の高さの比で合わせる。false：レーン全体の幅の比
+        bool empty() const { return from.empty() && !screen_scale; }
+    };
+    std::map<std::string, SkinParts> skin_parts;
     std::vector<std::string> song_dirs;  // 曲フォルダ
     std::vector<std::string> custom_folder_dirs;  // カスタムフォルダ（.lr2folder）の置き場（LR2 の LR2files/CustomFolder など）
     std::vector<std::string> tables;     // 難易度表のURL（アプリには同梱しない。ユーザーが登録する）

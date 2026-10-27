@@ -333,3 +333,61 @@ TEST(metronome_beats) {
             break;
         }
 }
+
+// skin_colors を読むと、見た目の MOD になる（記録は分けない）
+TEST(mod_skin_colors) {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "bmj_mod_test_skin_colors";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::ofstream(dir / "mod.json") << R"({"id":"note-color","skin_colors":[
+        {"parts":["note","ln"],"lanes":["white","blue",3],"mode":"map","color":"#23d100","mix":80},
+        {"parts":[],"mode":"hue"}]})";
+    ModManifest m;
+    CHECK(load_mod_manifest(dir.string(), m));
+    CHECK_EQ(m.skin_colors.size(), size_t(1));  // 部品の無いものは読まない
+    if (!m.skin_colors.empty()) {
+        const SkinColorFilter& f = m.skin_colors[0];
+        CHECK(f.parts.size() == 2 && f.lanes.size() == 3 && f.lanes[2] == "3");
+        CHECK(f.mode == "map" && f.color == 0x23d100 && f.mix == 80);
+    }
+    CHECK((m.touches & static_cast<uint32_t>(ModTouch::Visual)) != 0);
+    CHECK((m.touches & kModAffectsPlay) == 0);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// 部品の色の設定は settings.json に書いて、読み直すと同じになる（設定のほうが mod.json より優先）
+TEST(mod_skin_colors_settings) {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "bmj_mod_test_skin_colors_settings";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::ofstream(dir / "mod.json") << R"({"id":"c","settings":[{"type":"skin_colors","name":"部品の色"}],
+        "skin_colors":[{"parts":["note"],"mode":"map","color":"#23d100"}]})";
+    ModManifest m;
+    CHECK(load_mod_manifest(dir.string(), m));
+    CHECK(m.has_setting("skin_colors"));
+    CHECK_EQ(m.skin_colors.size(), size_t(1));
+    m.skin_colors[0].parts = {"note", "ln"};
+    m.skin_colors[0].lanes = {"white", "blue"};
+    SkinColorFilter extra;
+    extra.parts = {"judge"}, extra.judges = {"pgreat"}, extra.mode = "range", extra.from = 200, extra.hue = -45.5;
+    extra.skins = {"LR2files/Theme/WMIX_HD/play/HDPLAY_AC.lr2skin"};
+    m.skin_colors.push_back(extra);
+    const std::string path = (dir / "settings.json").string();
+    CHECK(save_mod_settings(m, path));
+    ModManifest r;
+    CHECK(load_mod_manifest(dir.string(), r));
+    apply_mod_settings(r, path);
+    CHECK_EQ(r.skin_colors.size(), size_t(2));
+    if (r.skin_colors.size() == 2) {
+        CHECK(r.skin_colors[0].parts.size() == 2 && r.skin_colors[0].lanes.size() == 2 && r.skin_colors[0].color == 0x23d100);
+        CHECK(r.skin_colors[1].mode == "range" && r.skin_colors[1].from == 200 && r.skin_colors[1].hue == -45.5);
+        CHECK(r.skin_colors[1].judges.size() == 1 && r.skin_colors[1].judges[0] == "pgreat");
+        CHECK(r.skin_colors[0].skins.empty());
+        CHECK(r.skin_colors[1].skins.size() == 1 && r.skin_colors[1].skins[0] == "LR2files/Theme/WMIX_HD/play/HDPLAY_AC.lr2skin");
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}

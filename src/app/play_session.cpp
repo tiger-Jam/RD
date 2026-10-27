@@ -921,6 +921,19 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 if (ks[keys[i]]) return i + 1;
             return 0;
         };
+        // スキンの位置の調整を 1 段階動かす（dx：右が +、dy：下が +）
+        auto adjust_skin = [&](int dx, int dy) {
+            SkinAdjust& a = cfg.skin_adjust[skin->path];
+            switch (adjust_key()) {
+            case 1: a.shift_x += dx * 10, a.shift_y += dy * 10; break;
+            case 2: a.rate_x += dx * 5, a.rate_y += dy * 5; break;
+            case 3: a.judge_x += dx * 10, a.judge_y += dy * 10; break;
+            case 4: a.size_x += dx, a.size_y -= dy; break;
+            case 5: a.dark = ((a.dark + (dy != 0 ? -dy : -dx)) % 3 + 3) % 3; break;
+            case 6: a.note_x += dx * 10, a.note_y += dy * 10; break;
+            default: break;
+            }
+        };
         double scratch_analog_ms = -1e9, scratch_repeat_ms = 0, wheel_ms = -1e9;  // wheel_ms：最後にホイールが来た時刻  // 最後にアナログ皿が動いた時刻、キーの皿の繰り返し
         int scratch_repeat_dir = 0;
         auto play_buttons = [&](double now_ms) {
@@ -1067,6 +1080,18 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     const int w = static_cast<int>(std::lround(e.wheel.y));
                     wheel_ms = (SDL_GetTicksNS() - scene_start) / 1e6;
                     if (dev_env("BMJ_DEBUG_INPUT")) std::printf("ホイール %+d（%.1f ms）\n", w, wheel_ms), std::fflush(stdout);
+                    if (adjust_key() > 0 && skin) {
+                        // 数字キーを押しながらのホイールは、矢印の上下と同じ（BMjoy の拡張。矢印が押しにくいキーボード向け）。
+                        // Shift を押していれば左右
+                        const int steps = w != 0 ? w : static_cast<int>(std::lround(e.wheel.x));
+                        const bool side = w == 0 || (SDL_GetModState() & SDL_KMOD_SHIFT);
+                        for (int i = 0; i < std::abs(steps); ++i) {
+                            const int d = steps > 0 ? -1 : 1;  // 上へ回すと ↑
+                            if (side) adjust_skin(-d, 0);      // 上へ回すと →
+                            else adjust_skin(0, d);
+                        }
+                        break;
+                    }
                     if (phase != Phase::Play || !cover_movable() || speed_locked || w == 0) break;
                     const bool cover_shown = cfg.lane_cover && cover_display;
                     if (cfg.lift && !cover_shown) {
@@ -1093,18 +1118,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     } else if ((e.key.key == SDLK_UP || e.key.key == SDLK_DOWN || e.key.key == SDLK_LEFT || e.key.key == SDLK_RIGHT) &&
                                adjust_key() > 0 && skin) {
                         // スキンの位置の調整（LR2: gameloop:426）。数字キーを押している間は、矢印でその項目を変えてスキンごとに残す
-                        SkinAdjust& a = cfg.skin_adjust[skin->path];
-                        int dx = e.key.key == SDLK_RIGHT ? 1 : e.key.key == SDLK_LEFT ? -1 : 0;
-                        int dy = e.key.key == SDLK_DOWN ? 1 : e.key.key == SDLK_UP ? -1 : 0;
-                        switch (adjust_key()) {
-                        case 1: a.shift_x += dx * 10, a.shift_y += dy * 10; break;
-                        case 2: a.rate_x += dx * 5, a.rate_y += dy * 5; break;
-                        case 3: a.judge_x += dx * 10, a.judge_y += dy * 10; break;
-                        case 4: a.size_x += dx, a.size_y -= dy; break;
-                        case 5: a.dark = ((a.dark + (dy != 0 ? -dy : -dx)) % 3 + 3) % 3; break;
-                        case 6: a.note_x += dx * 10, a.note_y += dy * 10; break;
-                        default: break;
-                        }
+                        adjust_skin(e.key.key == SDLK_RIGHT ? 1 : e.key.key == SDLK_LEFT ? -1 : 0,
+                                    e.key.key == SDLK_DOWN ? 1 : e.key.key == SDLK_UP ? -1 : 0);
                     } else if ((e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) && (e.key.mod & SDL_KMOD_SHIFT)) {
                         // 判定タイミング（BMjoy の拡張。LR2 はオプション画面でしか変えられない）
                         int d = e.key.key == SDLK_RIGHT ? 1 : -1;

@@ -303,6 +303,18 @@ void SkinRenderer::add_numbers(const SkinSrc& src, const SkinDst& dst, const Pla
     }
 }
 
+namespace {
+
+// ノーツの高さを draw_h にする（下の端はそのまま。判定ラインにそろうのは下の端なので）
+void fit_note_height(const SkinSrc& src, SkinDraw& d, float size_y) {
+    if (src.draw_h <= 0) return;
+    const float h = src.draw_h + size_y;
+    d.y += d.h - h;
+    d.h = h;
+}
+
+}  // namespace
+
 // LR2: AddDrawingBuffer_PlayArea。フィルタは無し、合成はアルファ
 void SkinRenderer::add_play_area(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, float sx, float sy,
                                  int alpha, float size_x, float size_y) {
@@ -315,6 +327,7 @@ void SkinRenderer::add_play_area(const SkinSrc& src, const SkinDst& dst, const P
     d.filter = 0;
     d.blend = 1;
     if (alpha >= 0) d.a = alpha;
+    fit_note_height(src, d, size_y);
     add(src, d, src_time(src, dst, st));
 }
 
@@ -334,14 +347,18 @@ void SkinRenderer::add_ln(const SkinSrc& s, const SkinSrc& e, const SkinSrc& b, 
     SkinDraw body = base;
     body.y += long_y + body.h;
     body.h = shift_y - long_y - body.h;
+    // 始点の高さを変えていれば、中身は始点の上の端まで伸ばす（すき間を作らない）
+    if (s.draw_h > 0) body.h += base.h - (s.draw_h + size_y);
     part(b, body);
     SkinDraw start = base;
     start.sort += 2;
     start.y += shift_y;
+    fit_note_height(s, start, size_y);
     part(s, start);
     SkinDraw end = base;
     end.sort += 1;
     end.y += long_y;
+    fit_note_height(e, end, size_y);
     part(e, end);
 }
 

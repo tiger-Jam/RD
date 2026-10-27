@@ -51,7 +51,9 @@
 #include "render/frame_hooks.h"
 #include "render/keyconfig_scene.h"
 #include "render/text_cache.h"
+#include "render/skin_play.h"
 #include "skin/lr2_skin.h"
+#include "skin/skin_parts.h"
 #include "util/data_dir.h"
 #include "util/dev.h"
 #include "util/startup_clock.h"
@@ -87,6 +89,7 @@ struct Options {
     std::string list_missing;
     bool list_all = false;  // --list-charts：持っている譜面も出す
     std::vector<std::string> levels;
+    std::string skin_parts;  // 開発用：プレースキン（--skin で替えられる）を部品ごとに切り出して、このフォルダに書いて終わる
     bool list_owned = false;  // 持っている譜面の md5 とフォルダを 1 行ずつ出して終わる
     // 外の道具（曲を集める道具）から使う：登録した難易度表を取り直す（その日の 2 回目からは手元の版）／登録した曲フォルダを全部読み直す
     bool update_tables = false, rescan = false;
@@ -131,6 +134,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--import-lr2-courses") o.import_lr2_courses = next();
         else if (a == "--list-missing") o.list_missing = next();
         else if (a == "--list-charts") o.list_missing = next(), o.list_all = true;
+        else if (a == "--skin-parts") o.skin_parts = next();
         else if (a == "--list-owned") o.list_owned = true;
         else if (a == "--update-tables") o.update_tables = true;
         else if (a == "--rescan") o.rescan = true;
@@ -448,6 +452,34 @@ std::vector<std::string> table_urls_with(const AppConfig& cfg, const std::string
 
 // 難易度表の、持っていない譜面を 1 行ずつ出す（md5・記号とレベル・曲名・作者・表の名前・本体の URL・差分の URL）。
 // all なら持っている譜面も出し、行の終わりに持っているか（1 / 0）と表の URL を足す
+// プレースキンを部品ごとに切り出す（設定は読むだけで書かない）
+int export_parts(const char* argv0, const Options& opt) {
+    AppConfig cfg;
+    cfg.load(config_path());
+    std::error_code ec;
+    const std::string root = find_lr2_root(opt.lr2_root.empty() ? cfg.lr2_root : opt.lr2_root, argv0);
+    const std::string path = opt.skin.empty() ? cfg.play_skin : std::filesystem::absolute(opt.skin, ec).string();
+    SkinHeader header;
+    if (root.empty() || path.empty() || !read_skin_header(root, path, header)) {
+        std::fprintf(stderr, "スキンを読めない: %s\n", path.c_str());
+        return 1;
+    }
+    apply_skin_custom(cfg, path, header);
+    Lr2Skin skin;
+    std::string err;
+    if (!load_lr2_skin(root, path, header, PlayContext{}.load_options(), skin, err)) {
+        std::fprintf(stderr, "スキンを読めない: %s\n", err.c_str());
+        return 1;
+    }
+    skin.path = path;
+    if (!header.has_resolution) guess_resolution(skin);
+    if (!export_skin_parts(skin, opt.skin_parts, err)) {
+        std::fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+    }
+    return 0;
+}
+
 int list_missing(const std::string& which, const std::vector<std::string>& levels, const std::string& tables_file, bool all = false) {
     AppConfig cfg;
     migrate_old_data();
@@ -551,6 +583,7 @@ int main(int argc, char** argv) {
     }
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
     if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file, opt.list_all);
+    if (!opt.skin_parts.empty()) return export_parts(argv[0], opt);
     if (opt.update_tables || opt.rescan) {
         AppConfig cfg;
         migrate_old_data();

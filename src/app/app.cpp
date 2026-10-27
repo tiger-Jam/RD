@@ -1,10 +1,13 @@
 #include "app/app.h"
 
+#include <algorithm>
 #include <cstdio>
 
 #include "app/skin_catalog.h"
+#include "skin/skin_compose.h"
 #include "audio/system_sound.h"
 #include "render/frame_hooks.h"
+#include "util/data_dir.h"
 #include "util/dev.h"
 #include <filesystem>
 #include <vector>
@@ -12,8 +15,6 @@
 namespace fs = std::filesystem;
 
 namespace bmj {
-
-namespace {
 
 // LR2のフォルダ（LR2files があるところ）を探す
 std::string find_lr2_root(const std::string& configured, const char* argv0) {
@@ -31,8 +32,6 @@ std::string find_lr2_root(const std::string& configured, const char* argv0) {
         if (!resolve_lr2_path(c, "LR2files", false).empty()) return c;
     return {};
 }
-
-}  // namespace
 
 // #RESOLUTION の無いスキンは、画面全体を覆うDST（0,0 から 640x480 / 1280x720 / 1920x1080）を探して解像度を推定する。
 // 見つからなければSD（BMjoyの拡張。OpenLR2は設定の既定値を使う）
@@ -240,6 +239,78 @@ std::string App::custom_gauge_name() const {
     return {};
 }
 
+// 同じスキンのファイルか（区切りの向き・「..」・大文字小文字の違いを無視する。スキンの一覧の見分け方と同じ）
+static bool same_skin_path(const std::string& a, const std::string& b) {
+    auto norm = [](const std::string& p) {
+        std::error_code ec;
+        fs::path q = fs::weakly_canonical(fs::path(p), ec);
+        std::string s = (ec ? fs::path(p) : q).lexically_normal().generic_string();
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return s;
+    };
+    return norm(a) == norm(b);
+}
+
+void App::apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array<bool, 1000>& options) const {
+    // 色は、部品が元々どのスキンのものかで決める（スキンを決めていないものは全部）。
+    // 付け替える前に、遊ぶスキンと、部品を持ってくるスキンのそれぞれに当てる
+    const std::vector<SkinColorFilter> all = skin_colors();
+    int colored = 0;
+    auto colors_for = [&](Lr2Skin& target, const std::string& skin_path) {
+        std::vector<SkinColorFilter> use;
+        for (const SkinColorFilter& f : all)
+            if (f.skins.empty() ||
+                std::any_of(f.skins.begin(), f.skins.end(), [&](const std::string& s) { return same_skin_path(from_portable(s), skin_path); }))
+                use.push_back(f);
+        colored += apply_skin_colors(target, use);
+    };
+    colors_for(sk, path);
+    // ほかのスキンから持ってくる部品（スキン選択で選んだもの）。カスタマイズはそのスキンの設定に、部品ごとに選んだ絵の種類を重ねる。
+    // 同じスキンを同じカスタマイズで使う部品どうしは、1 回だけ読む
+    if (auto it = cfg.skin_parts.find(path); it != cfg.skin_parts.end()) {
+        std::map<std::string, std::unique_ptr<Lr2Skin>> others;
+        int n = 0;
+        for (const PlayPartSlot& slot : kPlayPartSlots) {
+            auto f = it->second.from.find(slot.key);
+            if (f == it->second.from.end()) continue;
+            static const std::map<int, std::string> none;
+            auto c = it->second.custom.find(slot.key);
+            const std::map<int, std::string>& custom = c != it->second.custom.end() ? c->second : none;
+            std::string key = f->second;
+            for (const auto& [i, name] : custom) key += "|" + std::to_string(i) + "=" + name;
+            auto [o, fresh] = others.try_emplace(key);
+            if (fresh) {
+                SkinHeader h;
+                std::string err;
+                auto skin = std::make_unique<Lr2Skin>();
+                if (read_skin_header(lr2_root, f->second, h)) {
+                    apply_skin_custom(cfg, f->second, h);
+                    for (const auto& [i, name] : custom)
+                        if (i >= 0 && i < static_cast<int>(h.customs.size()) && h.customs[i].is_file)
+                            for (size_t j = 0; j < h.customs[i].labels.size(); ++j)
+                                if (h.customs[i].labels[j] == name) h.customs[i].selected = static_cast<int>(j);
+                    if (load_lr2_skin(lr2_root, f->second, h, options, *skin, err)) {
+                        if (!h.has_resolution) guess_resolution(*skin);
+                        colors_for(*skin, f->second);
+                        o->second = std::move(skin);
+                    }
+                }
+                if (!o->second) std::printf("  部品を持ってくるスキンを読めない: %s\n", f->second.c_str());
+            }
+            if (o->second)
+                n += compose_play_part(sk, *o->second, slot.key, it->second.screen_scale ? PartScale::Screen : PartScale::Lane);
+        }
+        if (n) std::printf("  ほかのスキンから持ってきた部品: %d\n", n);
+    }
+    if (colored) std::printf("  部品の色を変えた: %d\n", colored);
+}
+
+std::vector<SkinColorFilter> App::skin_colors() const {
+    std::vector<SkinColorFilter> out;
+    for (const ModManifest* m : active_mods()) out.insert(out.end(), m->skin_colors.begin(), m->skin_colors.end());
+    return out;
+}
+
 const ModManifest* App::metronome() const {
     for (const ModManifest* m : active_mods())
         if (m->metronome) return m;
@@ -280,7 +351,7 @@ namespace {
 
 // .lr2skin を読む。configured が空なら LR2 の既定のスキン（default_rel）を使う
 std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, const char* default_rel,
-                                   const std::array<bool, 1000>& options, SkinRenderer& renderer) {
+                                   const std::array<bool, 1000>& options, SkinRenderer& renderer, bool play = false) {
     // 引き継ぎ元は前に読んだスキン。読めなかったときに、置き換えで消えるスキンを指したまま残らないよう、先に外す
     const Lr2Skin* previous = app.last_skin;
     app.last_skin = nullptr;
@@ -305,6 +376,8 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
     }
     skin->path = skin_path;
     if (!header.has_resolution) guess_resolution(*skin);
+    // MOD でほかのスキンの部品を持ってくる・部品の色を変える（プレースキンだけ）
+    if (play) app.apply_skin_mods(*skin, skin_path, options);
     for (const auto& w : skin->warnings)
         if (w.find(".dummy") == std::string::npos) std::printf("  スキン警告: %s\n", w.c_str());
     const uint64_t t1 = SDL_GetTicksNS();
@@ -320,7 +393,7 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
 }  // namespace
 
 void App::load_play_skin(const std::array<bool, 1000>& options) {
-    play_skin = load_skin(*this, cfg.play_skin, "LR2files/Theme/LR2/Play/play_7.lr2skin", options, *skin_renderer);
+    play_skin = load_skin(*this, cfg.play_skin, "LR2files/Theme/LR2/Play/play_7.lr2skin", options, *skin_renderer, true);
     if (!play_skin) std::printf("LR2スキンが見つからないので、仮の画面で遊ぶ（--lr2-root でLR2のフォルダを指定できる）\n");
 }
 

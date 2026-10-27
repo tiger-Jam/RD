@@ -54,6 +54,16 @@ public:
     const std::map<int, std::vector<SkinEntry>>& entries() const { return by_type_; }
 
 private:
+    // プレースキンの部品の行（カスタマイズの項目の前に並べる）：row は 0〜kPlayPartSlotCount（最後は大きさの合わせ方）
+    int part_rows() const;
+    std::string part_text(int row, bool value, const AppConfig& cfg, const SkinEntry& e) const;
+    bool step_part(AppConfig& cfg, const SkinEntry& e, int row, int dir);
+    std::string skin_label(const SkinEntry& e) const;
+    // 部品を持ってくるスキン：part の絵を選んでいる #CUSTOMFILE の番号（そのスキン自身のカスタマイズで読んだときのもの）
+    std::vector<int> part_customs(const SkinEntry& src, const AppConfig& cfg, const std::string& part) const;
+    // その項目の、そのスキン自身のカスタマイズでの選択の名前
+    std::string custom_label(const SkinEntry& src, const AppConfig& cfg, int item) const;
+    const SkinEntry* play_entry(const std::string& path) const;
     // 設定に書かれたカスタマイズの選択を、項目の並びに当てはめる
     std::vector<int> selections(const SkinEntry& e, const AppConfig& cfg) const;
     std::string default_path(int type) const;
@@ -62,6 +72,8 @@ private:
     std::map<int, std::vector<SkinEntry>> by_type_;
     int type_ = 0;
     int scroll_ = 0;
+    // part_customs の覚え（スキンのパスとカスタマイズ → 差し込み口の鍵 → 番号）
+    mutable std::map<std::string, std::map<std::string, std::vector<int>>> part_customs_;
 };
 
 }  // namespace bmj

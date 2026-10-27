@@ -413,7 +413,7 @@ AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, con
         if (!path.empty() && path != "none" && under(path, src, rel)) path = (dst / rel).string();
     };
     for (std::string* p : {&cfg.play_skin, &cfg.result_skin, &cfg.courseresult_skin, &cfg.select_skin, &cfg.decide_skin,
-                           &cfg.keyconfig_skin, &cfg.sound_set})
+                           &cfg.keyconfig_skin, &cfg.skinselect_skin, &cfg.sound_set})
         relocate(*p);
     auto relocate_keys = [&](auto& m) {
         std::remove_reference_t<decltype(m)> out;

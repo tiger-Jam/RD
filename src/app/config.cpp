@@ -10,6 +10,7 @@
 #include <sstream>
 
 #include "util/data_dir.h"
+#include "skin/skin_compose.h"
 #include "util/text.h"
 
 namespace bmj {
@@ -77,6 +78,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "select_skin") select_skin = from_portable(val);
         else if (key == "decide_skin") decide_skin = from_portable(val);
         else if (key == "keyconfig_skin") keyconfig_skin = from_portable(val);
+        else if (key == "skinselect_skin") skinselect_skin = from_portable(val);
         else if (key == "sound_set") sound_set = from_portable(val);
         else if (key == "skin_res") skin_res = val;
         else if (key == "song_dir") song_dirs.push_back(from_portable(val));
@@ -162,7 +164,31 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "audio_buffer") audio_buffer = iv;
         else if (key.rfind("skin_custom ", 0) == 0)
             skin_custom[from_portable(std::string(trim(std::string_view(key).substr(12))))] = parse_skin_custom(val);
-        else if (key.rfind("skin_adjust ", 0) == 0) {
+        else if (key.rfind("skin_parts ", 0) == 0) {
+            // skin_parts <スキンのパス> = size=lane|screen;<差し込み口>=<スキンのパス>[|<項目の番号>=<選んだ名前>…];…
+            SkinParts p;
+            std::istringstream in(val);
+            std::string item;
+            while (std::getline(in, item, ';')) {
+                const size_t eq = item.find('=');
+                if (eq == std::string::npos) continue;
+                const std::string k(trim(std::string_view(item).substr(0, eq))), v(trim(std::string_view(item).substr(eq + 1)));
+                if (k == "size") p.screen_scale = v == "screen";
+                else if (!v.empty() && std::any_of(std::begin(kPlayPartSlots), std::end(kPlayPartSlots), [&](const PlayPartSlot& s) { return k == s.key; })) {
+                    // 持ってこられない部品（前の版の判定ラインなど）は読まない
+                    std::istringstream parts(v);
+                    std::string piece;
+                    std::getline(parts, piece, '|');
+                    p.from[k] = from_portable(std::string(trim(piece)));
+                    while (std::getline(parts, piece, '|')) {
+                        const size_t e = piece.find('=');
+                        if (e == std::string::npos || e == 0) continue;
+                        p.custom[k][std::atoi(piece.substr(0, e).c_str())] = std::string(trim(std::string_view(piece).substr(e + 1)));
+                    }
+                }
+            }
+            skin_parts[from_portable(std::string(trim(std::string_view(key).substr(11))))] = p;
+        } else if (key.rfind("skin_adjust ", 0) == 0) {
             // skin_adjust <スキンのパス> = 位置x,位置y,拡大x,拡大y,判定x,判定y,大きさx,大きさy,制限,ノーツx,ノーツy
             SkinAdjust a;
             int* f[] = {&a.shift_x, &a.shift_y, &a.rate_x, &a.rate_y, &a.judge_x, &a.judge_y, &a.size_x, &a.size_y, &a.dark,
@@ -188,6 +214,7 @@ bool AppConfig::save(const std::string& path) const {
     f << "select_skin = " << to_portable(select_skin) << "\n";
     f << "decide_skin = " << to_portable(decide_skin) << "\n";
     f << "keyconfig_skin = " << to_portable(keyconfig_skin) << "\n";
+    f << "skinselect_skin = " << to_portable(skinselect_skin) << "\n";
     f << "sound_set = " << to_portable(sound_set) << "\n";
     f << "skin_res = " << skin_res << "\n";
     for (const std::string& d : song_dirs) f << "song_dir = " << to_portable(d) << "\n";
@@ -273,6 +300,16 @@ bool AppConfig::save(const std::string& path) const {
     f << "audio_exclusive = " << (audio_exclusive ? 1 : 0) << "  # 1 = Windows の WASAPI 排他モード（音の遅れが小さい）\n";
     f << "audio_buffer = " << audio_buffer << "  # 1 回分のフレーム数。0 = 自動\n";
     for (const auto& [skin, sel] : skin_custom) f << "skin_custom " << to_portable(skin) << " = " << format_skin_custom(sel) << "\n";
+    for (const auto& [skin, p] : skin_parts) {
+        if (p.empty()) continue;
+        f << "skin_parts " << to_portable(skin) << " = size=" << (p.screen_scale ? "screen" : "lane");
+        for (const auto& [k, v] : p.from) {
+            f << ";" << k << "=" << to_portable(v);
+            if (auto c = p.custom.find(k); c != p.custom.end())
+                for (const auto& [i, name] : c->second) f << "|" << i << "=" << name;
+        }
+        f << "\n";
+    }
     for (const auto& [skin, a] : skin_adjust)
         if (!a.is_default())
             f << "skin_adjust " << to_portable(skin) << " = " << a.shift_x << "," << a.shift_y << "," << a.rate_x << "," << a.rate_y << ","

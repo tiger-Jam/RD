@@ -41,10 +41,19 @@ public:
         if (e)
             if (auto it = app_.cfg.skin_custom.find(e->path); it != app_.cfg.skin_custom.end())
                 want += "," + format_skin_custom(it->second);
+        // ほかのスキンの部品を変えたときも
+        if (e)
+            if (auto it = app_.cfg.skin_parts.find(e->path); it != app_.cfg.skin_parts.end()) {
+                want += it->second.screen_scale ? "|screen" : "|lane";
+                for (const auto& [k, v] : it->second.from) want += "|" + k + "=" + v;
+                for (const auto& [k, c] : it->second.custom)
+                    for (const auto& [i, name] : c) want += "|" + k + "." + std::to_string(i) + "=" + name;
+            }
         if (want == path_ && type == type_) return;
         path_ = want, type_ = type;
         skin_.reset();
         demo_judge_.reset(), demo_.reset(), demo_start_ = -1;
+        ctx_.skin = nullptr, ctx_.chart = nullptr;  // 捨てたものを読み込みの条件（ctx_.load_options）で見ないように
         if (thumb_) SDL_DestroyTexture(thumb_), thumb_ = nullptr;
         start_ns_ = SDL_GetTicksNS();
         timers_ = SkinTimers();
@@ -60,12 +69,23 @@ public:
             }
             return;
         }
+        // 見本の譜面は先に読む（スキンの #IF に効く譜面の条件を、遊ぶときと同じに）
+        if (type == 0 || type == 1) {
+            const std::string sample =
+                resolve_lr2_path(app_.lr2_root, type == 1 ? "LR2files/Config/sample_5.bme" : "LR2files/Config/sample_7.bme", false);
+            BmsParseOptions popt;
+            popt.random_seed = 1;
+            if (!sample.empty())
+                if (BmsParseResult r = parse_chart_file(sample, popt); r.ok) demo_ = std::make_unique<Chart>(std::move(r.chart));
+            ctx_.chart = demo_.get();
+        }
         SkinHeader h = e->header;
         apply_skin_custom(app_.cfg, e->path, h);
         auto sk = std::make_unique<Lr2Skin>();
         std::string err;
         if (!load_lr2_skin(app_.lr2_root, e->path, h, ctx_.load_options(), *sk, err)) return;
         if (!h.has_resolution) guess_resolution(*sk);  // 本体と同じく、解像度の書いていないスキンは中身から推定する
+        if (type == 0 || type == 1) app_.apply_skin_mods(*sk, e->path, ctx_.load_options());  // ほかのスキンの部品と色（遊ぶときと同じに見せる）
         renderer_.upload(*sk);
         // スキンはスキン本来の大きさの絵に描いてから、プレビューの枠の大きさに縮めて貼る
         float fw = 0, fh = 0;
@@ -77,15 +97,6 @@ public:
         }
         skin_ = std::move(sk);
         ctx_.skin = skin_.get();
-        if (type == 0 || type == 1) {
-            const std::string sample =
-                resolve_lr2_path(app_.lr2_root, type == 1 ? "LR2files/Config/sample_5.bme" : "LR2files/Config/sample_7.bme", false);
-            BmsParseOptions popt;
-            popt.random_seed = 1;
-            if (!sample.empty())
-                if (BmsParseResult r = parse_chart_file(sample, popt); r.ok) demo_ = std::make_unique<Chart>(std::move(r.chart));
-        }
-        ctx_.chart = demo_.get();
     }
 
     // 1 フレーム分を描く（タイマー 1・40・41 は、LR2 と同じく時間が来たら立てる）
@@ -212,11 +223,14 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
     std::array<bool, 1000> ops{};
     for (int i = 0; i < 900; ++i) ops[i] = ctx.option(i);
     SkinRenderer renderer(app.renderer);
-    std::string path = resolve_lr2_path(app.lr2_root, "LR2files/Theme/LR2/SkinSelect/skinselect.lr2skin", false);
+    // スキンセレクトのスキン（設定に無ければ LR2 の既定）
+    std::string path = !app.cfg.skinselect_skin.empty() ? app.cfg.skinselect_skin
+                                                        : resolve_lr2_path(app.lr2_root, "LR2files/Theme/LR2/SkinSelect/skinselect.lr2skin", false);
     SkinHeader header;
     Lr2Skin skin;
     std::string err;
-    if (path.empty() || !read_skin_header(app.lr2_root, path, header) || !load_lr2_skin(app.lr2_root, path, header, ops, skin, err)) {
+    if (!path.empty() && read_skin_header(app.lr2_root, path, header)) apply_skin_custom(app.cfg, path, header);
+    if (path.empty() || header.type < 0 || !load_lr2_skin(app.lr2_root, path, header, ops, skin, err)) {
         std::printf("スキンセレクトのスキンを読めない: %s\n", err.c_str());
         return false;
     }
@@ -239,6 +253,7 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
     const SkinObject* dragging = nullptr;
     float mouse_x = -1, mouse_y = -1;
     double mouse_moved_ms = 0;
+    int dev_key = 0;
     SDL_GetMouseState(&mouse_x, &mouse_y);
     SDL_RenderCoordinatesFromWindow(app.renderer, mouse_x, mouse_y, &mouse_x, &mouse_y);
     // スキンがマウスカーソルを描くなら OS のカーソルは隠す。描かないなら OS のカーソルを出す
@@ -319,6 +334,12 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         }
         if (timers.on(2) && timers.lapse(2, t) >= skin.fadeout) done = true;
 
+        // 開発用：BMJ_SKINSELECT_KEYS の文字を 1 フレームに 1 つずつ。'0'〜'4' はその行を次へ、'j' は 1 行下へ送る
+        if (const char* keys = dev_env("BMJ_SKINSELECT_KEYS"); keys && keys[dev_key] && t > 300) {
+            const char k = keys[dev_key++];
+            if (k >= '0' && k <= '4') catalog.step_custom(app.cfg, k - '0', 1);
+            else if (k == 'j') catalog.set_scroll(catalog.scroll() + 1, app.cfg);
+        }
         preview.select(catalog.current(app.cfg), catalog.selected_type());
         preview.draw();
         PlaySkinState st;

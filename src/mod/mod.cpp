@@ -188,6 +188,12 @@ std::string json_num(double v) {
     return buf;
 }
 
+std::string json_list(const std::vector<std::string>& v) {
+    std::string o = "[";
+    for (size_t i = 0; i < v.size(); ++i) o += (i ? ", " : "") + json_str(v[i]);
+    return o + "]";
+}
+
 std::string color_str(uint32_t c) {
     char buf[16];
     std::snprintf(buf, sizeof(buf), "#%06x", c & 0xffffff);
@@ -230,6 +236,37 @@ std::string folder_hash(const fs::path& dir) {
 }
 
 }  // namespace
+
+// 部品の色の一覧。keep_empty なら部品を選んでいないものも残す（設定画面で作りかけのもの）
+std::vector<SkinColorFilter> parse_skin_colors(yyjson_val* arr, bool keep_empty) {
+    std::vector<SkinColorFilter> out;
+    size_t i, n;
+    yyjson_val* v;
+    yyjson_arr_foreach(arr, i, n, v) {
+        if (!yyjson_is_obj(v)) continue;
+        SkinColorFilter f;
+        auto strings = [&](const char* key, std::vector<std::string>& to) {
+            size_t j, m;
+            yyjson_val* e;
+            yyjson_arr_foreach(yyjson_obj_get(v, key), j, m, e) {
+                if (yyjson_is_str(e)) to.push_back(yyjson_get_str(e));
+                else if (yyjson_is_int(e)) to.push_back(std::to_string(yyjson_get_int(e)));
+            }
+        };
+        strings("parts", f.parts);
+        strings("lanes", f.lanes);
+        strings("judges", f.judges);
+        strings("skins", f.skins);
+        f.mode = str(v, "mode", f.mode);
+        f.hue = num(v, "hue", f.hue), f.sat = num(v, "sat", f.sat), f.lit = num(v, "lit", f.lit);
+        f.from = num(v, "from", f.from), f.width = num(v, "width", f.width);
+        f.color = parse_color(str(v, "color"), f.color);
+        f.mix = num(v, "mix", f.mix);
+        f.white = num(v, "white", f.white);
+        if (keep_empty || !f.parts.empty()) out.push_back(std::move(f));
+    }
+    return out;
+}
 
 bool load_mod_manifest(const std::string& dir, ModManifest& out, std::string* error) {
     std::string text = read_file(fs::path(dir) / "mod.json");
@@ -274,13 +311,16 @@ bool load_mod_manifest(const std::string& dir, ModManifest& out, std::string* er
         ModSetting st;
         st.type = str(v, "type");
         st.name = str(v, "name", st.type);
-        if (st.type == "gauge_order" || st.type == "gauges" || st.type == "lamps" || st.type == "judges" || st.type == "metronome")
+        if (st.type == "gauge_order" || st.type == "gauges" || st.type == "lamps" || st.type == "judges" || st.type == "metronome" ||
+            st.type == "skin_colors")
             out.settings.push_back(st);
     }
     out.judges = parse_judges(yyjson_obj_get(root, "judges"));
+    out.skin_colors = parse_skin_colors(yyjson_obj_get(root, "skin_colors"), false);
     yyjson_doc_free(doc);
     // 定義から分かる分類は宣言が無くても足す（カスタムゲージ・GAS は評価、カスタム判定は判定）
     if (out.metronome) out.touches |= static_cast<uint32_t>(ModTouch::Sound);
+    if (!out.skin_colors.empty() || out.has_setting("skin_colors")) out.touches |= static_cast<uint32_t>(ModTouch::Visual);
     if (!out.gauges.empty() || !out.lamps.empty() || out.gas) out.touches |= static_cast<uint32_t>(ModTouch::Evaluation);
     if (!out.judges.empty() || out.has_setting("judges")) out.touches |= static_cast<uint32_t>(ModTouch::Judge);
     if (out.id.empty()) {
@@ -354,6 +394,8 @@ void apply_mod_settings(ModManifest& m, const std::string& settings_path) {
                     c.color_low = parse_color(str(v, "color_low"), c.color_low);
                 }
             }
+            if (st.type == "skin_colors" && yyjson_is_arr(yyjson_obj_get(root, "skin_colors")))
+                m.skin_colors = parse_skin_colors(yyjson_obj_get(root, "skin_colors"), true);
             if (st.type == "metronome") m.metronome_volume = std::clamp(static_cast<int>(num(root, "metronome_volume", m.metronome_volume)), 0, kMaxMetronomeVolume);
             if (st.type == "judges" && yyjson_is_arr(yyjson_obj_get(root, "judges"))) {
                 m.judges = parse_judges(yyjson_obj_get(root, "judges"));
@@ -416,6 +458,19 @@ std::string mod_settings_json(const ModManifest& m) {
                        ", \"great\": " + pair(j.great) + ", \"good\": " + pair(j.good) + ", \"bad\": " + pair(j.bad) +
                        ", \"empty_poor\": " + std::to_string(j.empty_poor) + ", \"rank_scaled\": " + (j.rank_scaled ? "true" : "false") + "}" +
                        (i + 1 < m.judges.size() ? ",\n" : "\n");
+            }
+            out += "  ]";
+        } else if (st.type == "skin_colors") {
+            const auto& list = json_list;
+            out += "  \"skin_colors\": [\n";
+            for (size_t i = 0; i < m.skin_colors.size(); ++i) {
+                const SkinColorFilter& f = m.skin_colors[i];
+                char b[288];
+                std::snprintf(b, sizeof(b), ", \"hue\": %g, \"sat\": %g, \"lit\": %g, \"from\": %g, \"width\": %g, \"color\": \"%s\", \"mix\": %g, \"white\": %g}",
+                              f.hue, f.sat, f.lit, f.from, f.width, color_str(f.color).c_str(), f.mix, f.white);
+                out += "    {\"parts\": " + list(f.parts) + ", \"lanes\": " + list(f.lanes) + ", \"judges\": " + list(f.judges) +
+                       ", \"skins\": " + list(f.skins) +
+                       ", \"mode\": " + json_str(f.mode) + b + (i + 1 < m.skin_colors.size() ? ",\n" : "\n");
             }
             out += "  ]";
         } else if (st.type == "gauge_order") {

@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "skin/skin_color.h"
+
 namespace bmj {
 
 // MOD が触れる場所の分類（仕様書14章「触れる場所の分類」）
@@ -135,6 +137,8 @@ struct ModManifest {
     int gauge_frame = -1;
     std::vector<ModSetting> settings;
     std::vector<CustomJudgeDef> judges;
+    // プレースキンの部品の色を変える（読み込んだときに、上から順に当てる）
+    std::vector<SkinColorFilter> skin_colors;
     // 遊ぶ判定の id（judges の設定を持つ MOD。空なら判定を変えない）。本体の判定（kStandardJudgeIds）も選べる
     std::string judge_use;
     bool has_setting(const char* type) const {

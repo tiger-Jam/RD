@@ -18,6 +18,7 @@ struct SkinImage {
     uint8_t trans[3] = {0, 0, 0};  // 読んだときの透過色（読み直すときに使う）
     bool use_trans = false;
     std::string movie;  // 動画（mpg・avi・wma・ogv）なら、そのファイル。描くときに無音で繰り返し流す（LR2: skinload:974）
+    int custom = -1;    // この絵のファイルを選んだ #CUSTOMFILE（ヘッダの customs の番号。無ければ -1）
 };
 
 struct SkinSrc {
@@ -26,6 +27,7 @@ struct SkinSrc {
     int x = 0, y = 0, w = 0, h = 0, div_x = 1, div_y = 1;
     int cycle = 0, timer = 0;
     int op[5] = {};
+    int draw_h = 0;  // ノーツを描く高さ（px。0 ならレーンの DST の高さ）。ほかのスキンから持ってきたノーツの太さ（BMjoy の MOD）
     int graphcount() const { return div_x * div_y; }
 };
 
@@ -169,9 +171,11 @@ bool read_skin_header(const std::string& lr2_root, const std::string& skin_path,
 
 // スキンを読み込む。options は読み込み時点のゲームのオプション（GetOptionFlag_dst 相当）。
 // header.customs の selected をカスタマイズとして反映する。
-// previous は前の画面で読んだスキン（#IMAGE,CONTINUE の番号は、LR2 と同じくその番号の画像をそのまま使い続ける）
+// previous は前の画面で読んだスキン（#IMAGE,CONTINUE の番号は、LR2 と同じくその番号の画像をそのまま使い続ける）。
+// images が偽なら画像を読まない（命令の並びだけ。大きさの -1 も残る）
 bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, const SkinHeader& header,
-                   const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error, const Lr2Skin* previous = nullptr);
+                   const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error, const Lr2Skin* previous = nullptr,
+                   bool images = true);
 
 // 画像を1枚読む。use_trans なら、アルファの無い画像の trans 色を透明にする（DxLibと同じ）
 bool load_skin_image(const std::string& path, SkinImage& img, const uint8_t trans[3], bool use_trans);

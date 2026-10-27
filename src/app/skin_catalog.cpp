@@ -1,5 +1,7 @@
 #include "app/skin_catalog.h"
 
+#include "skin/skin_compose.h"
+
 #include <algorithm>
 #include <filesystem>
 
@@ -59,6 +61,7 @@ std::string* SkinCatalog::config_slot(AppConfig& cfg, int type) {
     case 6: return &cfg.decide_skin;
     case 7: return &cfg.result_skin;
     case 8: return &cfg.keyconfig_skin;
+    case 9: return &cfg.skinselect_skin;
     case 15: return &cfg.courseresult_skin;
     case 10: return &cfg.sound_set;
     default: return nullptr;
@@ -77,6 +80,7 @@ std::string SkinCatalog::default_path(int type) const {
     case 6: rel = "LR2files/Theme/LR2/Decide/decide.lr2skin"; break;
     case 7: rel = "LR2files/Theme/LR2/Result/result.lr2skin"; break;
     case 8: rel = "LR2files/Theme/LR2/KeyConfig/keyconfig.lr2skin"; break;
+    case 9: rel = "LR2files/Theme/LR2/SkinSelect/skinselect.lr2skin"; break;
     case 15: rel = "LR2files/Theme/LR2/CourseResult/courseresult.lr2skin"; break;
     case 10: rel = "LR2files/Sound/lr2.lr2ss"; break;
     default: return {};
@@ -150,6 +154,8 @@ bool SkinCatalog::step_custom(AppConfig& cfg, int k, int dir) {
     const SkinEntry* e = current(cfg);
     if (!e) return false;
     size_t idx = static_cast<size_t>(scroll_ + k);
+    if (static_cast<int>(idx) < part_rows()) return step_part(cfg, *e, static_cast<int>(idx), dir);
+    idx -= static_cast<size_t>(part_rows());
     if (idx >= e->header.customs.size()) return false;
     int n = static_cast<int>(e->header.customs[idx].labels.size());
     if (n <= 0) return false;
@@ -163,7 +169,139 @@ bool SkinCatalog::step_custom(AppConfig& cfg, int k, int dir) {
 
 int SkinCatalog::scroll_max(const AppConfig& cfg) const {
     const SkinEntry* e = current(cfg);
-    return e ? std::max(0, static_cast<int>(e->header.customs.size()) - 5) : 0;
+    return e ? std::max(0, static_cast<int>(e->header.customs.size()) + part_rows() - 5) : 0;
+}
+
+int SkinCatalog::part_rows() const { return type_ == 0 ? kPlayPartSlotCount + 1 : 0; }
+
+std::string SkinCatalog::skin_label(const SkinEntry& e) const {
+    // 同じ名前のスキンが多い（W-mix の 1P・2P・DP など）ので、名前が重なればファイルの名前を付ける
+    int same = 0;
+    if (auto it = by_type_.find(0); it != by_type_.end())
+        for (const SkinEntry& o : it->second) same += o.header.title == e.header.title;
+    if (same <= 1) return e.header.title;
+    return e.header.title + " (" + fs::u8path(e.path).stem().string() + ")";
+}
+
+const SkinEntry* SkinCatalog::play_entry(const std::string& path) const {
+    auto it = by_type_.find(0);
+    if (it == by_type_.end()) return nullptr;
+    const std::string k = key_of(path);
+    for (const SkinEntry& o : it->second)
+        if (key_of(o.path) == k) return &o;
+    return nullptr;
+}
+
+std::vector<int> SkinCatalog::part_customs(const SkinEntry& src, const AppConfig& cfg, const std::string& part) const {
+    std::string key = src.path;
+    for (int v : selections(src, cfg)) key += "," + std::to_string(v);
+    auto it = part_customs_.find(key);
+    if (it == part_customs_.end()) {
+        // 画像は読まずに命令の並びだけ読み、部品の絵がどの #CUSTOMFILE で選ばれたファイルかを見る
+        it = part_customs_.try_emplace(key).first;
+        SkinHeader h = src.header;
+        apply_skin_custom(cfg, src.path, h);
+        Lr2Skin sk;
+        std::string err;
+        if (load_lr2_skin(root_, src.path, h, std::array<bool, 1000>{}, sk, err, nullptr, false))
+            for (const PlayPartSlot& slot : kPlayPartSlots) {
+                std::vector<int>& v = it->second[slot.key];
+                for (int i : play_part_customs(sk, slot.key))
+                    // 候補が RANDOM だけの項目は選べないので出さない
+                    if (i < static_cast<int>(h.customs.size()) && h.customs[i].is_file && h.customs[i].labels.size() > 1) v.push_back(i);
+            }
+    }
+    auto f = it->second.find(part);
+    return f != it->second.end() ? f->second : std::vector<int>{};
+}
+
+std::string SkinCatalog::custom_label(const SkinEntry& src, const AppConfig& cfg, int item) const {
+    const SkinCustomItem& c = src.header.customs[item];
+    const int sel = selections(src, cfg)[item];
+    if (sel >= 0 && sel < static_cast<int>(c.labels.size())) return c.labels[sel];
+    return c.default_value.empty() ? std::string("RANDOM") : c.default_value;
+}
+
+std::string SkinCatalog::part_text(int row, bool value, const AppConfig& cfg, const SkinEntry& e) const {
+    if (row == kPlayPartSlotCount) {
+        if (!value) return "PARTS SIZE";
+        auto it = cfg.skin_parts.find(e.path);
+        return it != cfg.skin_parts.end() && it->second.screen_scale ? "SCREEN" : "LANE";
+    }
+    if (!value) return kPlayPartSlots[row].name;
+    auto it = cfg.skin_parts.find(e.path);
+    if (it == cfg.skin_parts.end()) return "-";
+    const std::string key = kPlayPartSlots[row].key;
+    auto f = it->second.from.find(key);
+    if (f == it->second.from.end()) return "-";
+    const SkinEntry* o = play_entry(f->second);
+    if (!o) return fs::u8path(f->second).filename().string();
+    // スキンの名前と、部品の絵の種類（「W-mix play AC / splash_red」）
+    std::string s = skin_label(*o);
+    auto c = it->second.custom.find(key);
+    for (int i : part_customs(*o, cfg, key)) {
+        std::string name = custom_label(*o, cfg, i);
+        if (c != it->second.custom.end())
+            if (auto n = c->second.find(i); n != c->second.end()) name = n->second;
+        s += " / " + name;
+    }
+    return s;
+}
+
+bool SkinCatalog::step_part(AppConfig& cfg, const SkinEntry& e, int row, int dir) {
+    AppConfig::SkinParts& p = cfg.skin_parts[e.path];
+    if (row == kPlayPartSlotCount) {
+        p.screen_scale = !p.screen_scale;
+    } else {
+        // 選べるもの：「-」（このスキンのまま）と、ほかの 7 鍵のプレースキン。スキンごとに、部品の絵を選ぶ #CUSTOMFILE の
+        // 選択肢を順に並べる（そのスキン自身のカスタマイズで選んでいるものを先に）
+        struct Choice {
+            std::string path;
+            std::map<int, std::string> custom;
+        };
+        const std::string key = kPlayPartSlots[row].key;
+        std::vector<Choice> choices = {{}};
+        int cur = 0;
+        const auto f = p.from.find(key);
+        const auto fc = p.custom.find(key);
+        for (const SkinEntry& o : by_type_.at(0)) {
+            if (key_of(o.path) == key_of(e.path)) continue;
+            const bool now = f != p.from.end() && key_of(f->second) == key_of(o.path);
+            std::vector<Choice> list = {{o.path, {}}};
+            std::map<int, std::string> want;  // 今の選択
+            for (int i : part_customs(o, cfg, key)) {
+                const std::string mine = custom_label(o, cfg, i);
+                want[i] = mine;
+                if (now && fc != p.custom.end())
+                    if (auto n = fc->second.find(i); n != fc->second.end()) want[i] = n->second;
+                std::vector<std::string> labels = o.header.customs[i].labels;
+                if (auto at = std::find(labels.begin(), labels.end(), mine); at != labels.end()) std::rotate(labels.begin(), at, labels.end());
+                std::vector<Choice> next;
+                for (const Choice& c : list)
+                    for (const std::string& l : labels) {
+                        if (next.size() >= 256) break;  // 項目が多くても送り切れる数まで
+                        next.push_back(c), next.back().custom[i] = l;
+                    }
+                list = std::move(next);
+            }
+            if (now)
+                for (size_t j = 0; j < list.size(); ++j)
+                    if (list[j].custom == want) cur = static_cast<int>(choices.size() + j);
+            if (now && cur == 0) cur = static_cast<int>(choices.size());
+            choices.insert(choices.end(), list.begin(), list.end());
+        }
+        const int n = static_cast<int>(choices.size());
+        cur = ((cur + dir) % n + n) % n;
+        p.custom.erase(key);
+        if (choices[cur].path.empty()) {
+            p.from.erase(key);
+        } else {
+            p.from[key] = choices[cur].path;
+            if (!choices[cur].custom.empty()) p.custom[key] = choices[cur].custom;
+        }
+    }
+    if (p.empty()) cfg.skin_parts.erase(e.path);
+    return true;
 }
 
 void SkinCatalog::set_scroll(int v, const AppConfig& cfg) { scroll_ = std::clamp(v, 0, scroll_max(cfg)); }
@@ -174,7 +312,10 @@ std::string SkinCatalog::text(int id, const AppConfig& cfg) const {
     if (id == 50) return e->header.title;
     if (id == 51) return e->header.maker;
     if (id >= 100 && id <= 114) {
+        // 部品の行を先に、スキンのカスタマイズの項目をその後ろに並べる（項目の多いスキンでも部品がすぐ見えるように）
         size_t idx = static_cast<size_t>(scroll_ + (id % 10));
+        if (static_cast<int>(idx) < part_rows()) return part_text(static_cast<int>(idx), id >= 110, cfg, *e);
+        idx -= static_cast<size_t>(part_rows());
         if (idx >= e->header.customs.size()) return {};
         const SkinCustomItem& c = e->header.customs[idx];
         if (id < 110) return c.title;

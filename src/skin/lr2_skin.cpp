@@ -308,16 +308,25 @@ struct Loader {
     const SkinHeader& header;
     uint8_t trans[3] = {0, 255, 0};
     int custom_index = 0;  // #CUSTOMOPTION と #CUSTOMFILE で共有する番号（LR2: customfile_count）
-    // #CUSTOMFILE の検索パターンと、選ばれたファイル名
-    std::vector<std::pair<std::string, std::string>> custom_files;
+    // #CUSTOMFILE の検索パターンと、選ばれたファイル名と、項目の番号
+    struct CustomFile {
+        std::string pattern, chosen;
+        int item;
+    };
+    std::vector<CustomFile> custom_files;
     int image_count = 0;
     std::vector<DecodeJob> jobs;
     const Lr2Skin* previous = nullptr;  // 前の画面のスキン（#IMAGE,CONTINUE で画像を引き継ぐ）
+    bool images = true;                 // 偽なら画像を読まない
 
     // 画像を読む予約。need_size なら大きさはすぐ決める（SRC の -1 に使う #IMAGE）。読めなければ false。
     // 画像フォントの絵は大きさを使わないので、ファイルにも触らずに予約だけする（.dxa の中だと 1 枚ずつ取り出すのが遅い）
     bool queue_image(const std::string& path, SkinImage& img, int font, int index, const uint8_t tr[3], bool use_trans,
                      std::string warning, bool need_size = true) {
+        if (!images) {
+            img.path = path;
+            return true;
+        }
         DecodeJob j;
         if (need_size && !peek_image(path, img, j.bytes)) return false;
         if (!need_size) img.path = path;
@@ -329,12 +338,15 @@ struct Loader {
         return true;
     }
 
-    std::string apply_custom_file(std::string path) {
-        for (auto& [pattern, chosen] : custom_files) {
-            if (chosen.empty() || chosen == "RANDOM" || chosen == "ERROR") continue;
-            if (lower(path).compare(0, pattern.size(), lower(pattern)) == 0) {
+    // item には置き換えた #CUSTOMFILE の項目の番号（置き換えなければ -1）
+    std::string apply_custom_file(std::string path, int* item = nullptr) {
+        if (item) *item = -1;
+        for (const CustomFile& f : custom_files) {
+            if (f.chosen.empty() || f.chosen == "RANDOM" || f.chosen == "ERROR") continue;
+            if (lower(path).compare(0, f.pattern.size(), lower(f.pattern)) == 0) {
                 size_t star = path.find('*');
-                if (star != std::string::npos) path.replace(star, 1, chosen);
+                if (star != std::string::npos) path.replace(star, 1, f.chosen);
+                if (item) *item = f.item;
                 break;
             }
         }
@@ -421,7 +433,7 @@ struct Loader {
             const int index = image_count++;
             SkinImage& img = sk.images[index];
             img = SkinImage{};
-            std::string resolved = resolve_lr2_path(root, apply_custom_file(p));
+            std::string resolved = resolve_lr2_path(root, apply_custom_file(p, &img.custom));
             if (is_movie(p)) {
                 // 動画の大きさは開くまで分からないので、SRC の -1 はそのまま残す（描くときに動画の大きさにする）
                 if (resolved.empty()) sk.warnings.push_back("動画が見つからない: " + p);
@@ -439,7 +451,7 @@ struct Loader {
         } else if (cmd == "#LR2FONT") {
             if (sk.image_fonts.size() >= 10) return;
             sk.image_fonts.emplace_back();
-            if (c.s(1) != "CONTINUE") load_image_font(apply_custom_file(c.s(1)), sk.image_fonts.back());
+            if (c.s(1) != "CONTINUE" && images) load_image_font(apply_custom_file(c.s(1)), sk.image_fonts.back());
         } else if (cmd == "#INCLUDE") {
             std::string p = resolve_lr2_path(root, apply_custom_file(c.s(1)));
             if (t_skin == 0) t_skin = 1;
@@ -462,7 +474,7 @@ struct Loader {
                 std::uniform_int_distribution<size_t> pick(0, hits.empty() ? 0 : hits.size() - 1);
                 chosen = hits.empty() ? std::string() : hits[pick(rng())];
             }
-            custom_files.push_back({c.s(2), chosen});
+            custom_files.push_back({c.s(2), chosen, custom_index});
             custom_index++;
         } else if (cmd == "#SETOPTION") {
             int v = c.val(1);
@@ -851,7 +863,8 @@ bool read_skin_header(const std::string& lr2_root, const std::string& skin_path,
 }
 
 bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, const SkinHeader& header,
-                   const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error, const Lr2Skin* previous) {
+                   const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error, const Lr2Skin* previous,
+                   bool images) {
     out = Lr2Skin{};
     out.header = header;
     out.width = header.width;
@@ -882,6 +895,7 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
     }
     Loader ld{lr2_root, out, header, {0, 255, 0}, 0, {}, 0};
     ld.previous = previous;
+    ld.images = images;
     auto tp0 = std::chrono::steady_clock::now();
     if (ld.read(skin_path, 0) == 0) {
         error = "スキンを読めない: " + skin_path;
