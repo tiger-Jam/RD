@@ -378,7 +378,8 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
             if (bar.pos < st.render_beat) continue;
             float y = static_cast<float>((st.render_beat - bar.pos) * k) - st.lift_px;
             if (base_y + y <= draw_start) break;
-            add_play_area(skin.line[0].src, skin.line[0].dst, st, static_cast<float>(st.adjust.note_x), y + st.adjust.note_y, 255,
+            add_play_area(skin.line[0].src, skin.line[0].dst, st, static_cast<float>(st.adjust.note_x),
+                          y + st.adjust.note_y + st.adjust.note_fine_y, 255,
                           static_cast<float>(st.adjust.size_x), 0);
         }
     }
@@ -411,6 +412,9 @@ void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
             // ノーツの位置と大きさの調整（LR2: Play.cpp:561 の note_x / note_y / notesize）
             note_y += st.adjust.note_y;
             note_l += st.adjust.note_y;
+            // ノーツだけの縦の位置（BMjoy。判定ラインは動かさない）
+            note_y += st.adjust.note_fine_y;
+            note_l += st.adjust.note_fine_y;
             const float nx = static_cast<float>(st.adjust.note_x), szx = static_cast<float>(st.adjust.size_x),
                         szy = static_cast<float>(st.adjust.size_y);
             if (n.kind == NoteKind::Mine) {
@@ -481,9 +485,20 @@ void SkinRenderer::add_gauge(const SkinObject& o, const PlaySkinState& st) {
 void SkinRenderer::add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st) {
     int judge = std::clamp(st.judge_draw, 0, 5);
     int combo = judge < 3 ? 0 : st.combo_draw;
-    const SkinObject& j = skin.nowjudge[0][judge];
-    const SkinObject& c = skin.nowcombo[0][judge];
-    if (j.dst.empty()) return;
+    const SkinObject* jp = &skin.nowjudge[0][judge];
+    const SkinObject* cp = &skin.nowcombo[0][judge];
+    if (jp->dst.empty()) return;
+    // 判定の表示の大きさ（BMjoy）：判定の文字は真ん中を中心に、コンボの数字は判定の文字からの位置ごと大きくする
+    SkinObject js, cs;
+    if (st.adjust.judge_scale != 100) {
+        const float s = st.adjust.judge_scale / 100.0f;
+        js = *jp, cs = *cp;
+        for (SkinDstKey& k : js.dst.keys) k.x += k.w * (1 - s) / 2, k.y += k.h * (1 - s) / 2, k.w *= s, k.h *= s;
+        for (SkinDstKey& k : cs.dst.keys) k.x *= s, k.y *= s, k.w *= s, k.h *= s;
+        jp = &js, cp = &cs;
+    }
+    const SkinObject& j = *jp;
+    const SkinObject& c = *cp;
     int digit = 0;
     if (combo > 0) digit = count_digit(combo);
     float pos = 0, posn = 0;

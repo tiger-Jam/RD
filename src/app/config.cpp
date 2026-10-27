@@ -189,13 +189,13 @@ bool AppConfig::load(const std::string& path) {
             }
             skin_parts[from_portable(std::string(trim(std::string_view(key).substr(11))))] = p;
         } else if (key.rfind("skin_adjust ", 0) == 0) {
-            // skin_adjust <スキンのパス> = 位置x,位置y,拡大x,拡大y,判定x,判定y,大きさx,大きさy,制限,ノーツx,ノーツy
+            // skin_adjust <スキンのパス> = 位置x,位置y,拡大x,拡大y,判定x,判定y,大きさx,大きさy,制限,ノーツx,ノーツy,判定の大きさ,ノーツだけの縦
             SkinAdjust a;
             int* f[] = {&a.shift_x, &a.shift_y, &a.rate_x, &a.rate_y, &a.judge_x, &a.judge_y, &a.size_x, &a.size_y, &a.dark,
-                        &a.note_x, &a.note_y};
+                        &a.note_x, &a.note_y, &a.judge_scale, &a.note_fine_y};
             std::istringstream in(val);
             std::string item;
-            for (int i = 0; i < 11 && std::getline(in, item, ','); ++i) *f[i] = std::atoi(item.c_str());
+            for (int i = 0; i < 13 && std::getline(in, item, ','); ++i) *f[i] = std::atoi(item.c_str());
             skin_adjust[from_portable(std::string(trim(std::string_view(key).substr(12))))] = a;
         }
     }
@@ -314,7 +314,7 @@ bool AppConfig::save(const std::string& path) const {
         if (!a.is_default())
             f << "skin_adjust " << to_portable(skin) << " = " << a.shift_x << "," << a.shift_y << "," << a.rate_x << "," << a.rate_y << ","
               << a.judge_x << "," << a.judge_y << "," << a.size_x << "," << a.size_y << "," << a.dark << "," << a.note_x << ","
-              << a.note_y << "\n";
+              << a.note_y << "," << a.judge_scale << "," << a.note_fine_y << "\n";
     return static_cast<bool>(f);
 }
 

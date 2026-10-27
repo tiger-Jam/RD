@@ -434,3 +434,28 @@ TEST(skin_parts_config_custom) {
     CHECK(p.custom.at("bomb").at(12) == "splash blue");
     std::filesystem::remove_all(root);
 }
+
+// 判定の表示の大きさは config.txt に残る。前の版の 11 個の行は 100% として読む
+TEST(skin_adjust_judge_scale_config) {
+    auto root = skin_test_dir("bmj_test_skin_adjcfg");
+    const std::string path = (root / "config.txt").string();
+    AppConfig a;
+    a.skin_adjust["host.lr2skin"].judge_scale = 135;
+    a.skin_adjust["host.lr2skin"].judge_y = -20;
+    a.skin_adjust["host.lr2skin"].note_fine_y = -3;
+    CHECK(a.save(path));
+    AppConfig b;
+    CHECK(b.load(path));
+    CHECK_EQ(b.skin_adjust.size(), size_t(1));
+    CHECK_EQ(b.skin_adjust.begin()->second.judge_scale, 135);
+    CHECK_EQ(b.skin_adjust.begin()->second.judge_y, -20);
+    CHECK_EQ(b.skin_adjust.begin()->second.note_fine_y, -3);
+    std::ofstream(path) << "skin_adjust old.lr2skin = 0,0,100,100,10,0,0,0,0,0,0\n";
+    AppConfig c;
+    CHECK(c.load(path));
+    CHECK_EQ(c.skin_adjust.size(), size_t(1));
+    CHECK_EQ(c.skin_adjust.begin()->second.judge_scale, 100);
+    CHECK_EQ(c.skin_adjust.begin()->second.judge_x, 10);
+    CHECK_EQ(c.skin_adjust.begin()->second.note_fine_y, 0);
+    std::filesystem::remove_all(root);
+}

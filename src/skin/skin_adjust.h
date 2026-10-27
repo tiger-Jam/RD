@@ -10,9 +10,12 @@ struct SkinAdjust {
     int size_x = 0, size_y = 0;      // 4: ノーツの大きさ（1 ずつ）
     int dark = 0;                    // 5: 描画の制限 0=OFF 1=DARK 1 2=DARK 2
     int note_x = 0, note_y = 0;      // 6: 1P のノーツの位置（10 ずつ。7 の 2P は BMjoy に無い）
+    int judge_scale = 100;           // 8: 判定の表示の大きさ（%。5 ずつ。判定の文字の真ん中が中心。BMjoy だけ）
+    int note_fine_y = 0;             // 9: ノーツと小節線だけの縦の位置（1 ずつ。判定ラインは動かさない。BMjoy だけ）
     bool is_default() const {
         return shift_x == 0 && shift_y == 0 && rate_x == 100 && rate_y == 100 && judge_x == 0 && judge_y == 0 && size_x == 0 &&
-               size_y == 0 && dark == 0 && note_x == 0 && note_y == 0;
+               size_y == 0 && dark == 0 && note_x == 0 && note_y == 0 && judge_scale == 100 &&
+               note_fine_y == 0;
     }
 };
 

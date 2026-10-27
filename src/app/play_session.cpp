@@ -913,13 +913,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 if (floating) keep_green(cfg.fhs_green);
             }
         };
-        // スキンの位置の調整で押している数字キー（1〜6。押していなければ 0）
+        // スキンの位置の調整で押している数字キー（1〜6 と 8・9。押していなければ 0）
         auto adjust_key = [] {
             const bool* ks = SDL_GetKeyboardState(nullptr);
             const SDL_Scancode keys[] = {SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4, SDL_SCANCODE_5, SDL_SCANCODE_6};
             for (int i = 0; i < 6; ++i)
                 if (ks[keys[i]]) return i + 1;
-            return 0;
+            return ks[SDL_SCANCODE_8] ? 8 : ks[SDL_SCANCODE_9] ? 9 : 0;
         };
         // スキンの位置の調整を 1 段階動かす（dx：右が +、dy：下が +）
         auto adjust_skin = [&](int dx, int dy) {
@@ -931,6 +931,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             case 4: a.size_x += dx, a.size_y -= dy; break;
             case 5: a.dark = ((a.dark + (dy != 0 ? -dy : -dx)) % 3 + 3) % 3; break;
             case 6: a.note_x += dx * 10, a.note_y += dy * 10; break;
+            case 9: a.note_fine_y += dy; break;  // 縦だけ
+            case 8: a.judge_scale = std::clamp(a.judge_scale + (dx - dy) * 5, 10, 500); break;  // 右か上で大きく
             default: break;
             }
         };
@@ -1250,7 +1252,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 if (input.button_held(kStart) || input.button_held(kSelect)) return true;
                 const bool* ks = SDL_GetKeyboardState(nullptr);
                 for (SDL_Scancode sc : {SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4, SDL_SCANCODE_5, SDL_SCANCODE_6,
-                                        SDL_SCANCODE_7, SDL_SCANCODE_8, SDL_SCANCODE_0})
+                                        SDL_SCANCODE_7, SDL_SCANCODE_8, SDL_SCANCODE_9, SDL_SCANCODE_0})
                     if (ks[sc]) return true;
                 return false;
             };
@@ -1626,10 +1628,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     // 調整している項目と値（LR2: Main.cpp:2176 の表示）
                     const SkinAdjust& a = st.adjust;
                     static const char* names[] = {"", "スキン位置の変更", "スキン拡大率の変更", "ジャッジ表示位置の変更", "ノートサイズの変更",
-                                                  "スキン描画制限", "ノート位置の変更"};
+                                                  "スキン描画制限", "ノート位置の変更", "", "ジャッジ表示サイズの変更", "ノートだけの縦の位置の変更"};
                     static const char* darks[] = {"OFF", "DARK 1", "DARK 2"};
                     char v[64];
                     if (k == 5) std::snprintf(v, sizeof(v), "%s", darks[std::clamp(a.dark, 0, 2)]);
+                    else if (k == 8) std::snprintf(v, sizeof(v), "%d%%", a.judge_scale);
+                    else if (k == 9) std::snprintf(v, sizeof(v), "y:%d", a.note_fine_y);
                     else {
                         int x = k == 1 ? a.shift_x : k == 2 ? a.rate_x : k == 3 ? a.judge_x : k == 4 ? a.size_x : a.note_x;
                         int y = k == 1 ? a.shift_y : k == 2 ? a.rate_y : k == 3 ? a.judge_y : k == 4 ? a.size_y : a.note_y;

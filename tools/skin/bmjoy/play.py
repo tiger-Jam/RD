@@ -88,8 +88,8 @@ def build(out):
         bg.append(at(PANEL_X, 566 + j * 40, 120, 30, label(s, 20, GRAY)))
     bg.append(at(PANEL_X + 172, 330, 40, 44, label('%', 30, GRAY, align='center')))
     # スキンの調整の操作（数字キーを押しながら矢印かホイール。Shift＋ホイールで横）
-    help_lines = ['SKIN ADJUST: HOLD 1-6 + ARROW KEYS / MOUSE WHEEL (SHIFT + WHEEL = LEFT / RIGHT)',
-                  '1 POSITION  /  2 SCALE  /  3 JUDGE POSITION  /  4 NOTE SIZE  /  5 DARK  /  6 NOTE POSITION']
+    help_lines = ['SKIN ADJUST: HOLD 1-6 / 8 / 9 + ARROW KEYS / MOUSE WHEEL (SHIFT + WHEEL = LEFT / RIGHT)',
+                  '1 POSITION  /  2 SCALE  /  3 JUDGE POSITION  /  4 NOTE SIZE  /  5 DARK  /  6 NOTE POSITION  /  8 JUDGE SIZE  /  9 NOTE OFFSET']
     for i, s_ in enumerate(help_lines):
         bg.append(at(BGA[0], 1024 + i * 24, BGA[2], 22, label(s_.replace('  ', '&nbsp; '), 15, '#5a5a5a', align='flex-end')))
     # BGA の枠
