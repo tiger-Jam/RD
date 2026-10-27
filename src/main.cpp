@@ -44,6 +44,7 @@
 #include "db/difficulty_table.h"
 #include "app/lr2_import.h"
 #include "db/song_db.h"
+#include "net/borrow.h"
 #include "game/judge.h"
 #include "input/joystick_init.h"
 #include "input/midi.h"
@@ -91,6 +92,7 @@ struct Options {
     std::vector<std::string> levels;
     std::string skin_parts;  // 開発用：プレースキン（--skin で替えられる）を部品ごとに切り出して、このフォルダに書いて終わる
     bool list_owned = false;  // 持っている譜面の md5 とフォルダを 1 行ずつ出して終わる
+    bool serve = false;       // 譜面を貸す（設定の serve が 0 になるまで動き続ける）
     // 外の道具（曲を集める道具）から使う：登録した難易度表を取り直す（その日の 2 回目からは手元の版）／登録した曲フォルダを全部読み直す
     bool update_tables = false, rescan = false;
     std::string tables_file;  // 登録した表に足して使う表の URL の一覧（1 行に 1 つ。収集だけに使い、選曲画面には出さない）
@@ -136,6 +138,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--list-charts") o.list_missing = next(), o.list_all = true;
         else if (a == "--skin-parts") o.skin_parts = next();
         else if (a == "--list-owned") o.list_owned = true;
+        else if (a == "--serve") o.serve = true;
         else if (a == "--update-tables") o.update_tables = true;
         else if (a == "--rescan") o.rescan = true;
         else if (a == "--tables-file") o.tables_file = next();
@@ -526,6 +529,61 @@ int list_missing(const std::string& which, const std::vector<std::string>& level
     return tables > 0 ? 0 : 1;
 }
 
+// 譜面を貸す（仕様書10章「借りて返す」）。曲データベースの譜面を、合言葉を知っている相手に貸す。
+// 曲データベースは 10 分ごとに読み直し（曲を集める道具が足したものも貸す）、設定の serve が 0 になったら終わる
+int serve_charts() {
+    AppConfig cfg;
+    migrate_old_data();
+    cfg.load(config_path());
+    if (cfg.serve_key.empty()) {
+        std::fprintf(stderr, "合言葉が決まっていないので貸さない（設定の serve_key）\n");
+        return 1;
+    }
+    std::mutex mu;
+    std::shared_ptr<const BorrowLibrary> lib;
+    auto rebuild = [&] {
+        SongDb db;
+        if (!db.open(song_db_path())) return false;
+        auto l = std::make_shared<BorrowLibrary>();
+        l->build(db.all_charts());
+        std::printf("貸せる譜面：%zu\n", l->size());
+        std::lock_guard<std::mutex> lock(mu);
+        lib = std::move(l);
+        return true;
+    };
+    if (!rebuild()) {
+        std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
+        return 1;
+    }
+    const std::string key = cfg.serve_key;
+    HttpServer server;
+    std::string err;
+    if (!server.start(cfg.serve_port, [&](const HttpRequest& r) {
+            std::shared_ptr<const BorrowLibrary> l;
+            {
+                std::lock_guard<std::mutex> lock(mu);
+                l = lib;
+            }
+            HttpResponse res = l->handle(r, key);
+            if (res.status != 200) std::printf("断った %d：%s\n", res.status, r.path.c_str());
+            return res;
+        }, err)) {
+        std::fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+    }
+    std::printf("貸し始めた：ポート %d\n", server.port());
+    for (int minute = 1;; ++minute) {
+        std::this_thread::sleep_for(std::chrono::minutes(1));
+        AppConfig now;
+        now.load(config_path());
+        if (!now.serve || now.serve_key != key || now.serve_port != cfg.serve_port) break;  // 止めた・変えた（変えたときは呼び直してもらう）
+        if (minute % 10 == 0) rebuild();
+    }
+    server.stop();
+    std::printf("貸すのをやめた\n");
+    return 0;
+}
+
 int main(int argc, char** argv) {
     startup_clock_start();
     // ログをファイルに流しても、落ちたり止まったりしたときに残るようにする
@@ -537,8 +595,11 @@ int main(int argc, char** argv) {
         if (out == nullptr || out == INVALID_HANDLE_VALUE || GetFileType(out) == FILE_TYPE_UNKNOWN) {
             const std::filesystem::path dir = std::filesystem::u8path(data_dir());
             std::error_code ec;
-            std::filesystem::rename(dir / "log.txt", dir / "log_old.txt", ec);
-            const std::wstring log = (dir / "log.txt").wstring();
+            // 譜面を貸すとき（--serve）は、遊ぶほうのログを上書きしないように別のファイルにする
+            const bool serving = std::wstring(GetCommandLineW()).find(L"--serve") != std::wstring::npos;
+            const char* name = serving ? "serve_log.txt" : "log.txt";
+            if (!serving) std::filesystem::rename(dir / "log.txt", dir / "log_old.txt", ec);
+            const std::wstring log = (dir / name).wstring();
             FILE* f = nullptr;
             // stderr は stdout と同じ書き先にする（別々に開くと、片方の書いた行をもう片方が上書きする）
             if (_wfreopen_s(&f, log.c_str(), L"w", stdout) == 0) _dup2(_fileno(stdout), _fileno(stderr));
@@ -582,6 +643,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
+    if (opt.serve) return serve_charts();
     if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file, opt.list_all);
     if (!opt.skin_parts.empty()) return export_parts(argv[0], opt);
     if (opt.update_tables || opt.rescan) {

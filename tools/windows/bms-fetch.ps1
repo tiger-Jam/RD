@@ -30,7 +30,11 @@ $utf8 = New-Object Text.UTF8Encoding $false
 try { $lock = [IO.File]::Open((Join-Path $work "fetch.lock"), "OpenOrCreate", "ReadWrite", "None") }
 catch { Write-Output "RESULT ほかの収集が動いているので止めた"; exit 0 }
 
-function BMjoy-Open { [bool](Get-Process | Where-Object { $_.Name -eq "bmjoy" -or $_.Name -eq "BMjoybody" }) }
+# 遊んでいるか（設定アプリか本体が開いている）。譜面の配信（--serve）と曲データベースの読み直し（--rescan）は遊んでいないものとする
+function BMjoy-Open {
+    [bool](Get-CimInstance Win32_Process -Filter "Name='bmjoy.exe' OR Name='BMjoybody.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -notmatch '--serve|--rescan' })
+}
 # 取っている途中のプロセス（cmd とその下の bms-get）を一時停止・再開する（遊んでいるあいだ HDD とネットを使わないように）
 Add-Type -Namespace BmsFetch -Name Proc -MemberDefinition @'
 [DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h);

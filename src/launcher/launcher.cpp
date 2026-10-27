@@ -113,6 +113,49 @@ bool launch_body(std::string& err) {
 }
 
 
+// 譜面を貸す（BMjoybody --serve）を、ログインしている間ずっと動かす（Windows のタスクスケジューラ）。
+// 設定を変えたら、動いているものを止めて登録し直し、すぐ動かす。貸さないなら登録を消す
+void apply_serve(const AppConfig& cfg, std::string& message) {
+#ifdef _WIN32
+    const char* base = SDL_GetBasePath();
+    const std::string dir = base ? base : "";
+    auto wide = [](const std::string& s) {
+        int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+        std::wstring w(n, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+        w.resize(n > 0 ? n - 1 : 0);
+        return w;
+    };
+    // schtasks を黒い窓を出さずに動かし、終わるのを待つ
+    auto run = [](std::wstring cmd) {
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return false;
+        WaitForSingleObject(pi.hProcess, 15000);
+        DWORD code = 1;
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return code == 0;
+    };
+    const std::wstring task = L"BMjoy 譜面の配信";
+    run(L"schtasks /End /TN \"" + task + L"\"");
+    if (!cfg.serve || cfg.serve_key.empty()) {
+        run(L"schtasks /Delete /F /TN \"" + task + L"\"");
+        if (cfg.serve) message = "合言葉が無いので、譜面を貸しません";
+        return;
+    }
+    const std::wstring exe = wide(dir + "BMjoybody.exe");
+    const bool ok = run(L"schtasks /Create /F /SC ONLOGON /RL LIMITED /TN \"" + task + L"\" /TR \"\\\"" + exe + L"\\\" --serve\"") &&
+                    run(L"schtasks /Run /TN \"" + task + L"\"");
+    message = ok ? "譜面を貸し始めました（ポート " + std::to_string(cfg.serve_port) + "）" : "譜面の配信を登録できません";
+#else
+    (void)cfg;
+    if (cfg.serve) message = "譜面を貸すのは Windows だけです（BMjoybody --serve を動かしてください）";
+#endif
+}
+
 // 1フレームごとに部品を並べて描く（押されたかどうかはその場で返す）
 struct Gui {
     SDL_Renderer* r = nullptr;
@@ -973,6 +1016,9 @@ int main(int, char**) {
     // 初めての起動（設定ファイルがまだ無い）なら、案内の画面から始める
     const bool first_run = !fs::exists(fs::u8path(cfg_path), first_ec);
     cfg.load(cfg_path);
+    // 譜面を貸す設定（変わったら、保存するときに配信を登録し直す）
+    auto serve_state = [](const AppConfig& c) { return std::make_tuple(c.serve, c.serve_port, c.serve_key); };
+    auto serve_applied = serve_state(cfg);
 
     SDL_Window* window = SDL_CreateWindow("BMjoy SETUP", kW, kH, SDL_WINDOW_HIGH_PIXEL_DENSITY);
     SDL_Renderer* r = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
@@ -1146,12 +1192,12 @@ int main(int, char**) {
         g.label(6, 3, "Language");
 
         // タブ（クラシック：選んでいるタブは少し大きく、ページとつながる）
-        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY", "PLAY", "MOD"};
+        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY", "PLAY", "MOD", "SHARE"};
         const SDL_FRect page{10, 56, 590, 368};
         g.fill(page, kFace);
         g.raised(page);
         float tx = 12;
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < 10; ++i) {
             float w = text.get(g.font, 0, tabs[i]).w + 10.0f;
             bool on = i == tab;
             SDL_FRect rc{on ? tx - 2 : tx, on ? 38.0f : 40.0f, on ? w + 4 : w, on ? 19.0f : 16.0f};
@@ -1411,6 +1457,21 @@ int main(int, char**) {
 #ifdef _WIN32
             g.check(X + 280, by + 26, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
 #endif
+        } else if (tab == 9) {
+            // 譜面の貸し借り（仕様書10章「借りて返す」）。持っていない譜面を、遊ぶときだけ自分のほかの PC から借りる
+            g.label(X + 20, Y + 16, "貸す（この PC の譜面を、ほかの PC に）");
+            g.check(X + 34, Y + 40, "譜面を貸す", cfg.serve);
+            g.label(X + 34, Y + 70, "ポート");
+            g.edit_int(cfg.serve_port, X + 124, Y + 64, 70, 20, true, 1, 65535);
+            g.label(X + 34, Y + 98, "合言葉");
+            g.edit_str(cfg.serve_key, X + 124, Y + 92, 240, 20);
+            g.label(X + 20, Y + 140, "借りる（ほかの PC の譜面を）");
+            g.label(X + 34, Y + 168, "借りる先");
+            g.edit_str(cfg.borrow_url, X + 124, Y + 162, 300, 20);
+            g.label(X + 34, Y + 196, "合言葉");
+            g.edit_str(cfg.borrow_key, X + 124, Y + 190, 240, 20);
+            g.label(X + 34, Y + 224, "置き場の上限（MB）");
+            g.edit_int(cfg.borrow_cache_mb, X + 170, Y + 218, 90, 20, true, 100, 10000000);
         } else if (tab == 8 && mod_detail >= 0 && mod_detail < static_cast<int>(mods.size())) {
             draw_mod_detail(g, mods, mods[mod_detail], cfg.enabled_mods, cfg.lr2_root.empty() ? base_dir() : from_portable(cfg.lr2_root), X, Y, det_page, det_sel, det_scroll, det_add, [&] { mod_detail = -1; });
         } else if (tab == 8) {
@@ -1519,6 +1580,7 @@ int main(int, char**) {
         if (g.button(514, kH - 29, 87, 21, "終了")) {
             g.unfocus();
             cfg.save(cfg_path);
+            if (serve_state(cfg) != serve_applied) apply_serve(cfg, message), serve_applied = serve_state(cfg);
             quit = true;
         }
 
@@ -1526,6 +1588,8 @@ int main(int, char**) {
             start = false;
             g.unfocus();
             std::string err;
+            // 配信は起動したそばから設定を読むので、先に保存してから登録し直す
+            if (serve_state(cfg) != serve_applied) cfg.save(cfg_path), apply_serve(cfg, message), serve_applied = serve_state(cfg);
             if (!cfg.save(cfg_path)) {
                 message = "設定を保存できません: " + cfg_path;
             } else if (save_changed_settings(), std::printf("本体を起動します\n"), !launch_body(err)) {

@@ -162,6 +162,12 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "joystick_directinput") joystick_directinput = iv != 0;
         else if (key == "audio_exclusive") audio_exclusive = iv != 0;
         else if (key == "audio_buffer") audio_buffer = iv;
+        else if (key == "serve") serve = iv != 0;
+        else if (key == "serve_port") serve_port = iv;
+        else if (key == "serve_key") serve_key = val;
+        else if (key == "borrow_url") borrow_url = val;
+        else if (key == "borrow_key") borrow_key = val;
+        else if (key == "borrow_cache_mb") borrow_cache_mb = iv;
         else if (key.rfind("skin_custom ", 0) == 0)
             skin_custom[from_portable(std::string(trim(std::string_view(key).substr(12))))] = parse_skin_custom(val);
         else if (key.rfind("skin_parts ", 0) == 0) {
@@ -299,6 +305,12 @@ bool AppConfig::save(const std::string& path) const {
     f << "joystick_directinput = " << (joystick_directinput ? 1 : 0) << "  # Windows：1 にすると SDL の DirectInput も使う（起動が遅くなる環境がある）\n";
     f << "audio_exclusive = " << (audio_exclusive ? 1 : 0) << "  # 1 = Windows の WASAPI 排他モード（音の遅れが小さい）\n";
     f << "audio_buffer = " << audio_buffer << "  # 1 回分のフレーム数。0 = 自動\n";
+    f << "serve = " << (serve ? 1 : 0) << "  # 1 = 譜面を貸す（ログインしている間、裏で）\n";
+    f << "serve_port = " << serve_port << "\n";
+    f << "serve_key = " << serve_key << "\n";
+    f << "borrow_url = " << borrow_url << "\n";
+    f << "borrow_key = " << borrow_key << "\n";
+    f << "borrow_cache_mb = " << borrow_cache_mb << "  # 借りた譜面の置き場の上限（MB）\n";
     for (const auto& [skin, sel] : skin_custom) f << "skin_custom " << to_portable(skin) << " = " << format_skin_custom(sel) << "\n";
     for (const auto& [skin, p] : skin_parts) {
         if (p.empty()) continue;

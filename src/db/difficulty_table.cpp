@@ -1,16 +1,5 @@
 #include "db/difficulty_table.h"
 
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <winhttp.h>
-#else
-#include <curl/curl.h>
-#endif
-
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -20,6 +9,7 @@
 #include <map>
 
 #include "util/hash.h"
+#include "util/http.h"
 #include "util/text.h"
 #include "yyjson.h"
 
@@ -28,92 +18,6 @@ namespace fs = std::filesystem;
 namespace bmj {
 
 namespace {
-
-#if defined(_WIN32)
-
-std::wstring widen(const std::string& s) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    std::wstring w(n, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
-    return w;
-}
-
-// Windowsでは OS の WinHTTP を使う（libcurl を同梱しなくて済む）
-bool http_get(const std::string& url, std::string& body, std::string& error) {
-    body.clear();
-    std::wstring wurl = widen(url);
-    URL_COMPONENTS uc{};
-    uc.dwStructSize = sizeof(uc);
-    wchar_t host[256] = {}, path[2048] = {};
-    uc.lpszHostName = host;
-    uc.dwHostNameLength = 256;
-    uc.lpszUrlPath = path;
-    uc.dwUrlPathLength = 2048;
-    wchar_t extra[2048] = {};
-    uc.lpszExtraInfo = extra;
-    uc.dwExtraInfoLength = 2048;
-    if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &uc)) return error = "URLが正しくない（" + url + "）", false;
-    HINTERNET ses = WinHttpOpen(L"BMjoy", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!ses) return error = "WinHTTP を開けない", false;
-    WinHttpSetTimeouts(ses, 10000, 10000, 60000, 60000);
-    HINTERNET con = WinHttpConnect(ses, host, uc.nPort, 0);
-    std::wstring target = std::wstring(path) + extra;
-    HINTERNET req = con ? WinHttpOpenRequest(con, L"GET", target.c_str(), nullptr, WINHTTP_NO_REFERER,
-                                             WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                             uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0)
-                        : nullptr;
-    bool ok = req && WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-              WinHttpReceiveResponse(req, nullptr);
-    DWORD code = 0, len = sizeof(code);
-    if (ok) WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &code, &len, nullptr);
-    while (ok) {
-        DWORD avail = 0;
-        if (!WinHttpQueryDataAvailable(req, &avail) || avail == 0) break;
-        std::string buf(avail, '\0');
-        DWORD got = 0;
-        if (!WinHttpReadData(req, buf.data(), avail, &got)) break;
-        body.append(buf.data(), got);
-    }
-    if (req) WinHttpCloseHandle(req);
-    if (con) WinHttpCloseHandle(con);
-    WinHttpCloseHandle(ses);
-    if (!ok) return error = "接続できない（" + url + "）", false;
-    if (code >= 400) return error = "HTTP " + std::to_string(code) + "（" + url + "）", false;
-    return true;
-}
-
-#else
-
-size_t write_cb(char* p, size_t size, size_t n, void* user) {
-    static_cast<std::string*>(user)->append(p, size * n);
-    return size * n;
-}
-
-bool http_get(const std::string& url, std::string& body, std::string& error) {
-    static const bool inited = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
-    (void)inited;
-    CURL* c = curl_easy_init();
-    if (!c) return error = "curl を初期化できない", false;
-    body.clear();
-    curl_easy_setopt(c, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(c, CURLOPT_MAXREDIRS, 5L);
-    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 60L);
-    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(c, CURLOPT_USERAGENT, "BMjoy");
-    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
-    CURLcode r = curl_easy_perform(c);
-    long code = 0;
-    curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
-    curl_easy_cleanup(c);
-    if (r != CURLE_OK) return error = std::string(curl_easy_strerror(r)) + "（" + url + "）", false;
-    if (code >= 400) return error = "HTTP " + std::to_string(code) + "（" + url + "）", false;
-    return true;
-}
-
-#endif
 
 std::string json_str(yyjson_val* obj, const char* key) {
     yyjson_val* v = yyjson_obj_get(obj, key);

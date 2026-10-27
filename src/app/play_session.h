@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 
 #include "game/graph.h"
@@ -40,6 +41,8 @@ struct PlayOptions {
     // 選曲画面の譜面の情報（あれば、譜面のファイルを裏で読んでいる間も、これでプレー画面の読み込み中の絵を出しておく。
     // 冷えた HDD では、決定してから譜面を読み終えるまで数秒かかることがある）
     const ChartRecord* record = nullptr;
+    // 借りた譜面を遊ぶ：リザルトの F10 で「もらう」（自分の曲フォルダに入れる）。msg に結果の言葉を入れ、できたら true
+    std::function<bool(std::string& msg)> keep;
 };
 
 enum class PlayExit { Back, Quit };

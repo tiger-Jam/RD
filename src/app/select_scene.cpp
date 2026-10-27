@@ -9,6 +9,8 @@
 #include <ctime>
 #include <filesystem>
 #include <future>
+#include "net/borrow.h"
+#include "util/data_dir.h"
 #include <condition_variable>
 #include <functional>
 #include <unordered_set>
@@ -1768,8 +1770,116 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             return;
         }
     };
-    auto decide = [&] {
-        const Entry* e = current();
+    // 譜面を借りる（仕様書10章「借りて返す」）。配信先の一覧（md5・sha256）は、選曲画面に入るたびに裏で取り直す
+    std::unordered_set<std::string> borrowable;
+    std::future<std::unordered_set<std::string>> borrowable_job;
+    const BorrowSource borrow_src{app.cfg.borrow_url, app.cfg.borrow_key};
+    if (borrow_src.ok())
+        borrowable_job = std::async(std::launch::async, [borrow_src] {
+            std::unordered_set<std::string> out;
+            std::vector<std::pair<std::string, std::string>> list;
+            std::string err;
+            if (borrow_list(borrow_src, list, err)) {
+                for (const auto& [md5, sha] : list) out.insert(md5), out.insert(sha);
+                std::printf("借りられる譜面：%zu\n", list.size());
+            } else {
+                std::printf("借りる先につながらない：%s\n", err.c_str());
+            }
+            return out;
+        });
+    ChartRecord borrowed_rec;  // 借りた譜面（遊んでいる間だけ）
+    Entry borrowed_entry;
+    BorrowFolder borrowed_folder;
+    bool borrowing = false, kept = false;
+    // もらう：借りた曲のフォルダを丸ごと、1 つ目の曲フォルダの下の Received に入れて読み直す（ほかの譜面も取る）
+    auto keep_borrowed = [&](std::string& msg) {
+        if (app.cfg.song_dirs.empty()) return msg = "曲フォルダが無い", false;
+        std::string name = borrowed_folder.name;
+        if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\:") != std::string::npos) name = borrowed_folder.id;
+        const fs::path dest = fs::u8path(app.cfg.song_dirs[0]) / "Received" / fs::u8path(name);
+        std::error_code ec;
+        fs::create_directories(dest, ec);
+        // 借りた分は置き場から写し、残り（ほかの譜面など）を取る
+        fs::copy(fs::u8path(data_dir() + "Borrowed/" + borrowed_folder.id), dest,
+                 fs::copy_options::recursive | fs::copy_options::skip_existing, ec);
+        fs::remove(dest / ".bmjoy-used", ec);
+        std::string err;
+        if (!borrow_fetch(borrow_src, borrowed_folder, dest.string(), true, nullptr, err)) return msg = "もらえない：" + err, false;
+        fs::remove(dest / ".bmjoy-used", ec);
+        const int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
+        ScanStats s = app.db.scan(app.cfg.song_dirs, threads, nullptr, dest.string());
+        std::printf("もらった：%s（%d 譜面）\n", dest.string().c_str(), s.added + s.updated);
+        kept = true;
+        msg = "もらいました";
+        return true;
+    };
+    // 借りる：譜面と、使う音・画像・動画を置き場に取る。取っている間は進み具合を出し、Esc でやめる
+    auto run_borrow = [&](const std::string& hash, std::string& chart_path) {
+        struct Job {
+            std::atomic<int64_t> done{0}, total{0};
+            std::atomic<bool> cancel{false}, finished{false}, ok{false};
+            std::string error, chart, dir;
+            BorrowFolder folder;
+        };
+        auto job = std::make_shared<Job>();
+        const std::string root = data_dir() + "Borrowed";
+        const int64_t limit = static_cast<int64_t>(std::max(1, app.cfg.borrow_cache_mb)) * 1024 * 1024;
+        std::thread th([job, hash, root, limit, src = borrow_src] {
+            if (borrow_info(src, hash, job->folder, job->error)) {
+                job->dir = root + "/" + job->folder.id;
+                int64_t need = 0;
+                for (const auto& [size, rel] : job->folder.files) need += size;
+                borrow_trim(root, std::max<int64_t>(0, limit - need), job->dir);  // 先に場所を空ける
+                job->ok = borrow_fetch(src, job->folder, job->dir, false,
+                                       [&](int64_t d, int64_t t) {
+                                           job->done = d, job->total = t;
+                                           return !job->cancel.load();
+                                       },
+                                       job->error);
+                if (job->ok) job->chart = job->dir + "/" + job->folder.chart;
+            }
+            job->finished = true;
+        });
+        const float vw = sk ? static_cast<float>(sk->width) : 1280.0f, vh = sk ? static_cast<float>(sk->height) : 720.0f;
+        const float k = vh / 720.0f;
+        while (!job->finished) {
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev)) {
+                if (ev.type == SDL_EVENT_QUIT) job->cancel = true, quit = true;
+                if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) job->cancel = true;
+            }
+            SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+            SDL_RenderClear(r);
+            const SDL_Color white{235, 235, 240, 255}, dim{140, 140, 150, 255};
+            char line[96];
+            std::snprintf(line, sizeof(line), "%.1f / %.1f MB", job->done / 1048576.0, job->total / 1048576.0);
+            text.draw(vw / 2, vh / 2 - 60 * k, static_cast<int>(24 * k), white, "借りています", 1);
+            text.draw(vw / 2, vh / 2 + 30 * k, static_cast<int>(18 * k), dim, line, 1);
+            const float bw = 600 * k, bx = (vw - bw) / 2, by = vh / 2;
+            SDL_FRect bar{bx, by, bw, 8 * k};
+            SDL_SetRenderDrawColor(r, 60, 60, 60, 255);
+            SDL_RenderFillRect(r, &bar);
+            if (job->total > 0) bar.w = bw * static_cast<float>(job->done) / static_cast<float>(job->total);
+            else bar.w = 0;
+            SDL_SetRenderDrawColor(r, 235, 235, 240, 255);
+            SDL_RenderFillRect(r, &bar);
+            frame_present(r);
+            SDL_Delay(16);
+        }
+        th.join();
+        if (!job->ok) {
+            std::printf("借りられない：%s\n", job->error.c_str());
+            std::lock_guard<std::mutex> lock(mu);
+            status = "借りられない：" + job->error;
+            return false;
+        }
+        borrowed_folder = job->folder;
+        chart_path = job->chart;
+        return true;
+    };
+    std::function<void(const Entry*)> decide_entry;
+    auto decide = [&] { decide_entry(current()); };
+    decide_entry = [&](const Entry* e) {
         if (!e) return;
         if (e->kind == Entry::Kind::Folder) {
             if (e->custom && (!e->custom_loaded || e->custom->max_tracks == 1)) {
@@ -1794,6 +1904,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (SavedRandom sr; !po.replay && e->kind == Entry::Kind::Chart && e->chart && app.db.used_random(e->chart->sha256, sr) &&
                                 sr.version == kRandomAlgorithmVersion)
                 po.seed = sr.seed, po.layout_random = sr.random;
+            if (borrowing) po.keep = keep_borrowed;  // 借りた譜面：リザルトで「もらう」
             if (const char* cap = dev_env("BMJ_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
             std::string path = e->chart ? e->chart->path : "";
             std::shared_ptr<Course> course = e->course;
@@ -1827,6 +1938,9 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (course)
                 for (const CourseStage& st : course->stages)
                     if (st.chart && st.chart->sha256.rfind("md5:", 0) == 0) refreshed = app.db.refresh_chart(st.chart->path) || refreshed;
+            // 借りた譜面をもらったら、持っている譜面として一覧を作り直す
+            refreshed = refreshed || kept;
+            kept = false;
             app.save_config();  // 演奏中に変えたハイスピードやカバーを残す
             bgm_pending = true;
             set_select_view();
@@ -1842,8 +1956,39 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             reload_after_play(refreshed, played);
             if (ex == PlayExit::Quit) quit = true;
         } else if (e->kind == Entry::Kind::Missing) {
-            std::lock_guard<std::mutex> lock(mu);
-            status = "この譜面は持っていない：" + e->missing().title;
+            // 配信先にあれば借りて遊ぶ
+            const TableChart& m = e->missing();
+            // 一覧を取っている途中なら、取り終わるまで待つ（つながらないときも 15 秒まで）
+            if (borrowable_job.valid() && borrowable_job.wait_for(std::chrono::seconds(15)) == std::future_status::ready)
+                borrowable = borrowable_job.get();
+            auto low = [](std::string s) {
+                for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                return s;
+            };
+            const std::string hash = !m.sha256.empty() && borrowable.count(low(m.sha256)) ? low(m.sha256)
+                                     : !m.md5.empty() && borrowable.count(low(m.md5))     ? low(m.md5)
+                                                                                          : std::string();
+            if (hash.empty()) {
+                std::lock_guard<std::mutex> lock(mu);
+                status = "この譜面は持っていない：" + m.title;
+                return;
+            }
+            stop_preview(false);
+            std::string chart_path;
+            if (!run_borrow(hash, chart_path)) return;
+            if (!make_chart_record(chart_path, borrowed_rec)) {
+                std::lock_guard<std::mutex> lock(mu);
+                status = "借りた譜面を読めない：" + m.title;
+                return;
+            }
+            borrowed_rec.path = chart_path;
+            borrowed_entry = Entry{};
+            borrowed_entry.kind = Entry::Kind::Chart;
+            borrowed_entry.chart = &borrowed_rec;
+            borrowed_entry.label = e->label;
+            borrowing = true;
+            decide_entry(&borrowed_entry);
+            borrowing = false;
         } else if (e->kind == Entry::Kind::ModBar) {
             // MOD に、今の一覧に見えている譜面から 1 つ選ばせる。選んだ譜面にカーソルを移して、そのまま決定する
             const ModManifest* mod = nullptr;
@@ -3509,7 +3654,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     std::vector<std::string> chain;  // 開くフォルダの名前と、最後に目当ての名前
                     std::function<bool(const std::vector<Entry>&)> dfs = [&](const std::vector<Entry>& l) {
                         for (const Entry& x : l) {
-                            if ((x.kind == Entry::Kind::Course || x.kind == Entry::Kind::Chart) && x.label.find(want) != std::string::npos) {
+                            if ((x.kind == Entry::Kind::Course || x.kind == Entry::Kind::Chart || x.kind == Entry::Kind::Missing) &&
+                                x.label.find(want) != std::string::npos) {
                                 chain.push_back(x.label);
                                 return true;
                             }

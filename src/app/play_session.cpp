@@ -568,7 +568,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     uint64_t frame_ns = (cfg.vsync || cfg.fps < 0) ? 0 : static_cast<uint64_t>(1e9 / std::max(1.0, fps));
 
     TextCache overlay_text(app.renderer);  // スキンの位置の調整の表示
-    uint64_t layout_saved_ns = 0;          // リザルトで配置を保存した時刻（2 秒だけ知らせる）
+    std::string toast;                     // リザルトで知らせる言葉（配置を保存した・もらった。2 秒だけ）
+    uint64_t toast_ns = 0;
+    bool kept_borrowed = false;            // 借りた譜面をもらった
     bool quit = false, retry = true, retried = false;
     PlayExit exit = PlayExit::Back;
     for (; retry && !quit; retried = true) {
@@ -754,6 +756,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 return;
             }
             phase = Phase::Result;
+            if (dev_env("BMJ_RESULT_KEEP")) {
+                // 開発用：リザルトに入ったら F10（借りた譜面をもらう）を押したことにする
+                SDL_Event ev{};
+                ev.type = SDL_EVENT_KEY_DOWN, ev.key.down = true, ev.key.key = SDLK_F10;
+                SDL_PushEvent(&ev);
+            }
             if (dev_env("BMJ_RESULT_SAVE_LAYOUT")) {
                 // 開発用：リザルトに入ったら F9（この配置を保存）を押したことにする
                 SDL_Event ev{};
@@ -1138,13 +1146,19 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         result_input();
                     } else if (e.key.key == SDLK_F5 && phase == Phase::Result && !course && !opt.replay) {
                         retry = true, done = true;
+                    } else if (e.key.key == SDLK_F10 && phase == Phase::Result && opt.keep && !kept_borrowed) {
+                        // 借りた譜面を「もらう」（自分の曲フォルダに入れる）
+                        std::string msg;
+                        kept_borrowed = opt.keep(msg);
+                        toast = msg, toast_ns = SDL_GetTicksNS();
+                        app.mixer.play_system(kSysOptionChange);
                     } else if (e.key.key == SDLK_F9 && phase == Phase::Result && !course) {
                         // この配置を保存する（BMjoy。仕様書6章「ランダム配置の保存」）
                         SavedRandom sr;
                         sr.sha256 = sha256, sr.random = cfg.random, sr.seed = chart_seed;
                         sr.version = kRandomAlgorithmVersion, sr.saved_at = static_cast<int64_t>(std::time(nullptr));
                         if (app.db.save_random(sr) > 0) {
-                            layout_saved_ns = SDL_GetTicksNS();
+                            toast = "配置を保存しました", toast_ns = SDL_GetTicksNS();
                             app.mixer.play_system(kSysOptionChange);
                         }
                     } else if (e.key.key == SDLK_F4) {
@@ -1688,8 +1702,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 draw_play(renderer, chart, judge, view);
             }
 
-            if (layout_saved_ns && SDL_GetTicksNS() - layout_saved_ns < 2'000'000'000ull)
-                overlay_text.draw(4, 2, 14, SDL_Color{255, 255, 255, 255}, "配置を保存しました");
+            if (toast_ns && SDL_GetTicksNS() - toast_ns < 2'000'000'000ull) overlay_text.draw(4, 2, 14, SDL_Color{255, 255, 255, 255}, toast);
             dev_save_frame(renderer, (SDL_GetTicksNS() - prelude_ns) / 1e6);
             if (!opt.capture_dir.empty() && now_ms / 1000 >= next_capture_s * 2) {
                 if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {

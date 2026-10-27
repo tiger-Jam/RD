@@ -130,6 +130,13 @@ struct AppConfig {
     // バッファは 1 回分のフレーム数。0 なら自動（共有 128、排他 64）
     bool audio_exclusive = false;
     int audio_buffer = 0;
+    // 譜面を貸す（配信。仕様書10章「借りて返す」）。設定アプリでオンにすると、ログインしている間ずっと裏で貸す。合言葉が要る
+    bool serve = false;
+    int serve_port = 7275;
+    std::string serve_key;
+    // 譜面を借りる先（例 http://tiger-pc:7275）と合言葉、借りた譜面の置き場の上限（MB）
+    std::string borrow_url, borrow_key;
+    int borrow_cache_mb = 20480;
 
     bool load(const std::string& path);
     bool save(const std::string& path) const;

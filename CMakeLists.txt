@@ -63,6 +63,9 @@ add_library(bmj_core STATIC
     src/skin/skin_color.cpp
     src/skin/skin_compose.cpp
     src/util/hash.cpp
+    src/util/http.cpp
+    src/net/http_server.cpp
+    src/net/borrow.cpp
     src/db/song_db.cpp
     src/db/difficulty_table.cpp
     src/db/custom_folder.cpp
@@ -78,7 +81,7 @@ if(BMJ_DEV)
 endif()
 target_link_libraries(bmj_core PUBLIC bmj_third_party)
 if(WIN32)
-    target_link_libraries(bmj_core PUBLIC winhttp hid shell32)
+    target_link_libraries(bmj_core PUBLIC winhttp ws2_32 hid shell32)
 else()
     target_link_libraries(bmj_core PUBLIC CURL::libcurl)
 endif()
@@ -140,7 +143,7 @@ if(WIN32)
 endif()
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
-    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp tests/test_dsp.cpp tests/test_mod.cpp tests/test_mod_script.cpp src/input/input.cpp src/input/keyconfig.cpp src/input/midi.cpp
+    tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp tests/test_dsp.cpp tests/test_mod.cpp tests/test_mod_script.cpp tests/test_borrow.cpp src/input/input.cpp src/input/keyconfig.cpp src/input/midi.cpp
     src/app/config.cpp src/util/data_dir.cpp src/app/course.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/keyconfig_editor.cpp src/audio/sound_bank.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
