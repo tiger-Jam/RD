@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cctype>
 #include <cmath>
+#include <ctime>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -326,6 +327,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         cfg.lane_cover = saved_cfg.lane_cover, cfg.lane_cover_v = saved_cfg.lane_cover_v, cfg.judge_timing = saved_cfg.judge_timing;
         cfg.custom_gauge = saved_cfg.custom_gauge;
     }};
+    // 保存した配置で遊ぶ：そのときのオプションで並べ替え、終わったら戻す
+    struct RestoreLayout {
+        std::function<void()> f;
+        ~RestoreLayout() { f(); }
+    } restore_layout{[&] {
+        if (opt.layout_random >= 0) cfg.random = saved_cfg.random;
+    }};
+    if (opt.layout_random >= 0 && !opt.replay) cfg.random = opt.layout_random;
     // 開発用：BMJ_INPUT_REPLAY のファイルの入力を、手で押したものとして流す（記録・ゴースト・リプレイの保存はふだんどおり）
     bool feed_input = false;
     if (const char* f = dev_env("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) {
@@ -362,6 +371,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     if (seven_key) parsed.chart.drop_scratch();
     // 配置のオプション（LR2: bmsload:3354）。#RANDOM を評価した乱数の続きで並べ替える
     apply_random_option(parsed.chart, cfg.random, parsed.rng, !seven_key);
+    if (dev_env("BMJ_PRINT_LAYOUT")) {
+        // 開発用：配置のオプション・種と、並べ替えたあとの最初の 40 個のノーツのレーン
+        std::string lanes;
+        for (const Note& n : parsed.chart.notes)
+            if (n.kind != NoteKind::Invisible && lanes.size() < 40) lanes += static_cast<char>('0' + n.lane);
+        std::printf("配置: random=%d seed=%u lanes=%s\n", cfg.random, chart_seed, lanes.c_str());
+    }
     // TOTAL の既定式は、並べ替えで重なったノーツを捨てたあとの数で（LR2: bmsload:3789）
     if (!parsed.chart.total_defined) parsed.chart.total = lr2_default_total(parsed.chart.judgeable_notes());
     // HS-FIX の CONSTANT：一定の速さで流す
@@ -552,6 +568,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     uint64_t frame_ns = (cfg.vsync || cfg.fps < 0) ? 0 : static_cast<uint64_t>(1e9 / std::max(1.0, fps));
 
     TextCache overlay_text(app.renderer);  // スキンの位置の調整の表示
+    uint64_t layout_saved_ns = 0;          // リザルトで配置を保存した時刻（2 秒だけ知らせる）
     bool quit = false, retry = true, retried = false;
     PlayExit exit = PlayExit::Back;
     for (; retry && !quit; retried = true) {
@@ -737,6 +754,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 return;
             }
             phase = Phase::Result;
+            if (dev_env("BMJ_RESULT_SAVE_LAYOUT")) {
+                // 開発用：リザルトに入ったら F9（この配置を保存）を押したことにする
+                SDL_Event ev{};
+                ev.type = SDL_EVENT_KEY_DOWN, ev.key.down = true, ev.key.key = SDLK_F9;
+                SDL_PushEvent(&ev);
+            }
             // 途中でやめたときと閉店したときはゲージを0にして、グラフの残りを埋める（LR2: Play.cpp:1659）
             std::array<double, kGaugeCount> hp{};
             for (int g = 0; g < kGaugeCount; ++g) hp[g] = quit_early || judge.failed() ? 0.0 : judge.gauge().hp(g);
@@ -1115,6 +1138,15 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         result_input();
                     } else if (e.key.key == SDLK_F5 && phase == Phase::Result && !course && !opt.replay) {
                         retry = true, done = true;
+                    } else if (e.key.key == SDLK_F9 && phase == Phase::Result && !course) {
+                        // この配置を保存する（BMjoy。仕様書6章「ランダム配置の保存」）
+                        SavedRandom sr;
+                        sr.sha256 = sha256, sr.random = cfg.random, sr.seed = chart_seed;
+                        sr.version = kRandomAlgorithmVersion, sr.saved_at = static_cast<int64_t>(std::time(nullptr));
+                        if (app.db.save_random(sr) > 0) {
+                            layout_saved_ns = SDL_GetTicksNS();
+                            app.mixer.play_system(kSysOptionChange);
+                        }
                     } else if (e.key.key == SDLK_F4) {
                         app.toggle_fullscreen();
                     } else if ((e.key.key == SDLK_UP || e.key.key == SDLK_DOWN || e.key.key == SDLK_LEFT || e.key.key == SDLK_RIGHT) &&
@@ -1656,6 +1688,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 draw_play(renderer, chart, judge, view);
             }
 
+            if (layout_saved_ns && SDL_GetTicksNS() - layout_saved_ns < 2'000'000'000ull)
+                overlay_text.draw(4, 2, 14, SDL_Color{255, 255, 255, 255}, "配置を保存しました");
             dev_save_frame(renderer, (SDL_GetTicksNS() - prelude_ns) / 1e6);
             if (!opt.capture_dir.empty() && now_ms / 1000 >= next_capture_s * 2) {
                 if (SDL_Surface* shot = SDL_RenderReadPixels(renderer, nullptr)) {

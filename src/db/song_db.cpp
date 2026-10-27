@@ -73,6 +73,9 @@ CREATE TABLE IF NOT EXISTS score(
     pg INTEGER DEFAULT 0, gr INTEGER DEFAULT 0, gd INTEGER DEFAULT 0, bd INTEGER DEFAULT 0, pr INTEGER DEFAULT 0,
     op_history INTEGER DEFAULT 0, rseed INTEGER DEFAULT -1, op_best INTEGER DEFAULT 0, ghost TEXT,
     PRIMARY KEY(sha256, ln_mode, judge_profile));
+CREATE TABLE IF NOT EXISTS saved_random(
+    id INTEGER PRIMARY KEY, sha256 TEXT, random INTEGER, seed INTEGER, version INTEGER, saved_at INTEGER, used INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS saved_random_sha ON saved_random(sha256);
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER);
 CREATE TABLE IF NOT EXISTS player(
     id INTEGER PRIMARY KEY, playcount INTEGER, clear INTEGER, fail INTEGER,
@@ -630,6 +633,59 @@ void SongDb::set_favorite(const std::string& md5, int value) {
     }
     Stmt st(db_, "INSERT OR REPLACE INTO favorite(md5, value) VALUES(?, ?)");
     st.text(1, md5).i64(2, value).run();
+}
+
+int64_t SongDb::save_random(const SavedRandom& r) {
+    if (!db_) return 0;
+    {
+        Stmt st(db_, "SELECT id FROM saved_random WHERE sha256 = ? AND random = ? AND seed = ? AND version = ?");
+        st.text(1, r.sha256).i64(2, r.random).i64(3, r.seed).i64(4, r.version);
+        if (st.step()) return st.col_i64(0);
+    }
+    Stmt st(db_, "INSERT INTO saved_random(sha256, random, seed, version, saved_at, used) VALUES(?,?,?,?,?,0)");
+    st.text(1, r.sha256).i64(2, r.random).i64(3, r.seed).i64(4, r.version).i64(5, r.saved_at).run();
+    return sqlite3_last_insert_rowid(db_);
+}
+
+static SavedRandom read_saved_random(const Stmt& st) {
+    SavedRandom r;
+    r.id = st.col_i64(0), r.sha256 = st.col_text(1), r.random = static_cast<int>(st.col_i64(2));
+    r.seed = static_cast<uint32_t>(st.col_i64(3)), r.version = static_cast<int>(st.col_i64(4));
+    r.saved_at = st.col_i64(5), r.used = st.col_i64(6) != 0;
+    return r;
+}
+
+std::vector<SavedRandom> SongDb::saved_randoms(const std::string& sha256) const {
+    std::vector<SavedRandom> out;
+    if (!db_) return out;
+    Stmt st(db_, "SELECT id, sha256, random, seed, version, saved_at, used FROM saved_random WHERE sha256 = ? ORDER BY saved_at DESC, id DESC");
+    st.text(1, sha256);
+    while (st.step()) out.push_back(read_saved_random(st));
+    return out;
+}
+
+void SongDb::use_saved_random(const std::string& sha256, int64_t id) {
+    if (!db_) return;
+    Stmt clear(db_, "UPDATE saved_random SET used = 0 WHERE sha256 = ?");
+    clear.text(1, sha256).run();
+    if (id <= 0) return;
+    Stmt st(db_, "UPDATE saved_random SET used = 1 WHERE id = ? AND sha256 = ?");
+    st.i64(1, id).text(2, sha256).run();
+}
+
+void SongDb::delete_saved_random(int64_t id) {
+    if (!db_) return;
+    Stmt st(db_, "DELETE FROM saved_random WHERE id = ?");
+    st.i64(1, id).run();
+}
+
+bool SongDb::used_random(const std::string& sha256, SavedRandom& out) const {
+    if (!db_) return false;
+    Stmt st(db_, "SELECT id, sha256, random, seed, version, saved_at, used FROM saved_random WHERE sha256 = ? AND used = 1 LIMIT 1");
+    st.text(1, sha256);
+    if (!st.step()) return false;
+    out = read_saved_random(st);
+    return true;
 }
 
 bool SongDb::find_by_md5(const std::string& md5, ChartRecord& out) const {

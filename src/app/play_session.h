@@ -30,6 +30,7 @@ struct CourseRun {
 struct PlayOptions {
     bool autoplay = false;
     uint32_t seed = 0;
+    int layout_random = -1;  // 保存した配置で遊ぶ：配置のオプション（seed と組で使う。-1 は使わない。オプションは終わったら戻す）
     std::string capture_dir;  // 開発用：描画結果を2秒ごとにBMPで保存する
     double quit_after = 0;    // 開発用：指定秒数で終了する
     bool save_score = true;

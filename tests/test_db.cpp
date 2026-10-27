@@ -346,3 +346,38 @@ TEST(custom_folder_query) {
     CHECK(!q.cached(d, got));
     CHECK(q.run(d).size() == 2);
 }
+
+// 保存したランダムの配置：同じものは 1 つ、新しい順、譜面ごとに使うのは 1 つまで、消せる
+TEST(song_db_saved_random) {
+    fs::path dir = fs::temp_directory_path() / "bmj_test_saved_random";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    SongDb db;
+    CHECK(db.open((dir / "songs.db").string()));
+    SavedRandom a;
+    a.sha256 = "aaa", a.random = 2, a.seed = 1234, a.version = 1, a.saved_at = 100;
+    const int64_t ia = db.save_random(a);
+    CHECK(ia > 0);
+    CHECK_EQ(db.save_random(a), ia);  // 同じ配置は増やさない
+    SavedRandom b = a;
+    b.seed = 99, b.random = 3, b.saved_at = 200;
+    const int64_t ib = db.save_random(b);
+    SavedRandom other = a;
+    other.sha256 = "bbb";
+    db.save_random(other);
+    std::vector<SavedRandom> list = db.saved_randoms("aaa");
+    CHECK_EQ(list.size(), size_t(2));
+    CHECK(list[0].id == ib && list[0].seed == 99u && list[0].random == 3);  // 新しい順
+    SavedRandom used;
+    CHECK(!db.used_random("aaa", used));
+    db.use_saved_random("aaa", ia);
+    db.use_saved_random("aaa", ib);  // 使うのは 1 つだけ
+    CHECK(db.used_random("aaa", used) && used.id == ib);
+    CHECK(!db.used_random("bbb", used));
+    db.use_saved_random("aaa", 0);
+    CHECK(!db.used_random("aaa", used));
+    db.delete_saved_random(ia);
+    CHECK_EQ(db.saved_randoms("aaa").size(), size_t(1));
+    db.close();
+    fs::remove_all(dir);
+}

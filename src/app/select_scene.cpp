@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <future>
 #include <condition_variable>
@@ -35,6 +36,7 @@
 #include "db/difficulty_table.h"
 #include "db/folder_watch.h"
 #include "game/gauge.h"
+#include "game/lane_option.h"
 #include "input/input.h"
 #include "input/joystick_init.h"
 #include "input/win_rawhid.h"
@@ -1391,6 +1393,41 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         sctx.timers.reset(15);
         sctx.timers.set(16, scene_ms());
     };
+    // 保存したランダムの配置の一覧（F9。BMjoy。仕様書6章「ランダム配置の保存」）。0 行目は「使わない」、1 行目から新しい順
+    bool layout_open = false;
+    std::vector<SavedRandom> layouts;
+    std::string layout_sha;
+    int layout_cursor = 0;
+    auto open_layouts = [&](const std::string& sha256) {
+        layout_sha = sha256;
+        layouts = app.db.saved_randoms(sha256);
+        layout_cursor = 0;
+        for (size_t i = 0; i < layouts.size(); ++i)
+            if (layouts[i].used) layout_cursor = static_cast<int>(i) + 1;
+        layout_open = true;
+        app.mixer.play_system(kSysOptionChange);
+    };
+    auto close_layouts = [&] {
+        if (!layout_open) return;
+        layout_open = false;
+        app.mixer.play_system(kSysOptionChange);
+    };
+    auto step_layout = [&](int d) {
+        const int n = static_cast<int>(layouts.size()) + 1;
+        layout_cursor = ((layout_cursor + d) % n + n) % n;
+    };
+    // カーソルの配置を、この譜面で使う配置にする（「使わない」なら外す）
+    auto choose_layout = [&] {
+        app.db.use_saved_random(layout_sha, layout_cursor > 0 ? layouts[layout_cursor - 1].id : 0);
+        close_layouts();
+    };
+    auto delete_layout = [&] {
+        if (layout_cursor <= 0) return;
+        app.db.delete_saved_random(layouts[layout_cursor - 1].id);
+        layouts.erase(layouts.begin() + (layout_cursor - 1));
+        layout_cursor = std::min(layout_cursor, static_cast<int>(layouts.size()));
+        app.mixer.play_system(kSysOptionChange);
+    };
     // バナー（仕様 2.17）。カーソルの曲が変わるたびに裏で読み、読めたら 102 番の画像にする。
     // OpenLR2 は #RELOADBANNER のスキンだけで読むが、LR2 では指定の無い WMIX でも出るので、いつも読む
     struct BannerLoad {
@@ -1753,6 +1790,10 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             po.record = e->kind == Entry::Kind::Chart ? e->chart : nullptr;
             if (po.replay) po.autoplay = false;
             start_replay = false;
+            // この譜面で使うと決めた、保存した配置（作り方の版が今と同じものだけ）
+            if (SavedRandom sr; !po.replay && e->kind == Entry::Kind::Chart && e->chart && app.db.used_random(e->chart->sha256, sr) &&
+                                sr.version == kRandomAlgorithmVersion)
+                po.seed = sr.seed, po.layout_random = sr.random;
             if (const char* cap = dev_env("BMJ_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
             std::string path = e->chart ? e->chart->path : "";
             std::shared_ptr<Course> course = e->course;
@@ -2169,6 +2210,23 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 input.handle(e);
                 continue;
             }
+            if (layout_open) {
+                // 保存した配置の一覧を開いている間は、その中の操作だけ
+                if (e.type == SDL_EVENT_KEY_DOWN) {
+                    switch (e.key.key) {
+                    case SDLK_UP: step_layout(-1); break;
+                    case SDLK_DOWN: step_layout(1); break;
+                    case SDLK_RETURN: case SDLK_KP_ENTER: if (!e.key.repeat) choose_layout(); break;
+                    case SDLK_DELETE: if (!e.key.repeat) delete_layout(); break;
+                    case SDLK_ESCAPE: case SDLK_BACKSPACE: case SDLK_F9: if (!e.key.repeat) close_layouts(); break;
+                    default: break;
+                    }
+                }
+                if (e.type == SDL_EVENT_MOUSE_WHEEL) step_layout(e.wheel.y > 0 ? -1 : e.wheel.y < 0 ? 1 : 0);
+                if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_RIGHT) close_layouts();
+                input.handle(e);
+                continue;
+            }
             if (e.type == SDL_EVENT_MOUSE_WHEEL && sk) {
                 // ホイール：上で前の曲へ。前の移動の終わりは待たない（仕様 3.5）
                 int w = static_cast<int>(std::lround(e.wheel.y));
@@ -2461,6 +2519,11 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     if (!e.key.repeat && !stack.back().dir.empty()) refresh(true, stack.back().dir);
                     break;
                 case SDLK_SPACE: space_held = true; break;
+                case SDLK_F9:
+                    // 保存したランダムの配置の一覧（譜面のときだけ）
+                    if (!e.key.repeat)
+                        if (const Entry* cur = current(); cur && cur->kind == Entry::Kind::Chart && cur->chart) open_layouts(cur->chart->sha256);
+                    break;
                 case SDLK_F4:
                     app.toggle_fullscreen();
                     break;
@@ -2498,7 +2561,19 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (mode_filter != old_mode) reapply_view(false);
             buttons.clear();
         }
-        bool accept = sctx.timers.on(1) && !readme_open && !editing && !to_keyconfig && !to_skin_select;
+        bool accept = sctx.timers.on(1) && !readme_open && !layout_open && !editing && !to_keyconfig && !to_skin_select;
+        if (layout_open) {
+            // 皿で上下、白鍵で決める、2 番で閉じる
+            for (const ButtonInput& b : buttons) {
+                if (!b.down) continue;
+                if (b.button == kScratchA) step_layout(-1);
+                else if (b.button == kScratchB) step_layout(1);
+                else if (b.button == kKey1 || b.button == kKey1 + 2 || b.button == kKey1 + 4 || b.button == kKey1 + 6) choose_layout();
+                else if (b.button == kKey1 + 1) close_layouts();
+                if (!layout_open) break;
+            }
+            buttons.clear();
+        }
         if (editing) buttons.clear();
         if (readme_open) {
             // 鍵盤のどれかで閉じる。↑で下へ 0.6px/ms、↓で上へ 1.2px/ms（LR2 と同じく下へ送る方が速い）
@@ -3222,6 +3297,52 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         }
         if (panel == 1) draw_play_option_panel(r, text, app.cfg, (now - panel_open_ns) / 1e6);
         }  // 仮の画面
+        if (layout_open) {
+            // 保存した配置の一覧（保存した日時とオプション）。この譜面で使う配置は色を変える
+            const float vw = sk ? static_cast<float>(sk->width) : 1280.0f, vh = sk ? static_cast<float>(sk->height) : 720.0f;
+            const float k = vh / 720.0f, row = 34 * k, w = 420 * k;
+            const int shown = std::min(static_cast<int>(layouts.size()) + 1, 12);
+            const int top = std::clamp(layout_cursor - shown / 2, 0, static_cast<int>(layouts.size()) + 1 - shown);
+            const float h = (shown + 1.5f) * row, x = (vw - w) / 2, y = (vh - h) / 2;
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(r, 0, 0, 0, 245);
+            SDL_FRect bg{x, y, w, h};
+            SDL_RenderFillRect(r, &bg);
+            SDL_SetRenderDrawColor(r, 90, 90, 90, 255);
+            SDL_RenderRect(r, &bg);
+            const SDL_Color white{235, 235, 240, 255}, dim{140, 140, 150, 255}, accent{255, 210, 90, 255};
+            const int fs = static_cast<int>(18 * k);
+            text.draw(x + 16 * k, y + 8 * k, fs, dim, "保存した配置");
+            static const char* names[] = {"OFF", "MIRROR", "RANDOM", "S-RANDOM", "SCATTER", "CONVERGE"};
+            bool any_used = false;
+            for (const SavedRandom& s : layouts) any_used = any_used || s.used;
+            for (int i = top; i < top + shown; ++i) {
+                const float ry = y + (i - top + 1.2f) * row;
+                if (i == layout_cursor) {
+                    SDL_SetRenderDrawColor(r, 60, 60, 70, 255);
+                    SDL_FRect rc{x + 4 * k, ry, w - 8 * k, row - 2 * k};
+                    SDL_RenderFillRect(r, &rc);
+                }
+                const bool used = i == 0 ? !any_used : layouts[i - 1].used;
+                std::string label = "使わない", opt;
+                if (i > 0) {
+                    const SavedRandom& s = layouts[i - 1];
+                    std::time_t tt = static_cast<std::time_t>(s.saved_at);
+                    std::tm tm{};
+#ifdef _WIN32
+                    localtime_s(&tm, &tt);
+#else
+                    localtime_r(&tt, &tm);
+#endif
+                    char buf[32];
+                    std::strftime(buf, sizeof(buf), "%Y/%m/%d %H:%M", &tm);
+                    label = buf;
+                    opt = names[std::clamp(s.random, 0, 5)];
+                }
+                text.draw(x + 24 * k, ry + 6 * k, fs, used ? accent : white, label);
+                if (!opt.empty()) text.draw(x + w - 24 * k, ry + 6 * k, fs, dim, opt, 2);
+            }
+        }
         // F1 を押している間は F キーの説明（LR2 と同じ）。BMjoy に無い操作は灰色
         if (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1]) {
             const SDL_Color on{255, 255, 255, 255}, off{110, 110, 110, 255};
@@ -3238,7 +3359,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             text.draw(x, 20, 14, off, "F5 IRに接続");
             x = 4 + text.draw(4, 38, 14, on, "F6 スクリーンショット　");
             text.draw(x, 38, 14, on, "F7 FPS表示");
-            text.draw(4, 56, 14, on, "F8 フォルダのリロード");
+            x = 4 + text.draw(4, 56, 14, on, "F8 フォルダのリロード　");
+            text.draw(x, 56, 14, course ? off : on, "F9 保存した配置");
         }
         bool settled;
         {
@@ -3432,10 +3554,11 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     const Entry* cur = current();
                     if (cur && cur->kind == Entry::Kind::Chart) reload_after_play(false, {cur->chart->sha256});
                 }
-                else if (k == '6') {
-                    // F6（スクリーンショット）を押したことにする
+                else if (k == '6' || k == '9' || k == 'J' || k == 'E') {
+                    // F6（スクリーンショット）・F9（保存した配置）・↓・Enter を押したことにする
                     SDL_Event ev{};
-                    ev.type = SDL_EVENT_KEY_DOWN, ev.key.key = SDLK_F6, ev.key.down = true;
+                    ev.type = SDL_EVENT_KEY_DOWN, ev.key.down = true;
+                    ev.key.key = k == '6' ? SDLK_F6 : k == '9' ? SDLK_F9 : k == 'J' ? SDLK_DOWN : SDLK_RETURN;
                     SDL_PushEvent(&ev);
                 }
             } else {

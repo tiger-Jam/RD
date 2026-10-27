@@ -73,6 +73,17 @@ struct PlayEntry {
     int64_t played_at = 0;
 };
 
+// 保存したランダムの配置（仕様書6章「ランダム配置の保存」。saved_random の表）。譜面ではなく、作り直すための情報を残す
+struct SavedRandom {
+    int64_t id = 0;
+    std::string sha256;
+    int random = 0;         // 配置のオプション（RandomOption）
+    uint32_t seed = 0;      // 譜面の #RANDOM とレーンの並べ替えの乱数の種
+    int version = 1;        // 配置の作り方の版（kRandomAlgorithmVersion）
+    int64_t saved_at = 0;   // 保存した日時（UNIX 秒）
+    bool used = false;      // この譜面で使う配置（譜面ごとに 1 つまで）
+};
+
 // プレイヤーの累計（LR2: player 表。スキンの数値 30〜37）
 struct PlayerStats {
     int playcount = 0, clear = 0, fail = 0;
@@ -127,6 +138,15 @@ public:
     };
     std::vector<CustomLampRow> all_custom_lamps(int ln_mode, int profile) const;
     void set_favorite(const std::string& md5, int value);
+    // ランダムの配置を保存する（同じ譜面・オプション・種・版のものがあれば、それを返す）。保存したものの id
+    int64_t save_random(const SavedRandom& r);
+    // 譜面の保存した配置（新しい順）
+    std::vector<SavedRandom> saved_randoms(const std::string& sha256) const;
+    // 譜面で使う配置を決める（id が 0 なら使わない）
+    void use_saved_random(const std::string& sha256, int64_t id);
+    void delete_saved_random(int64_t id);
+    // 譜面で使う配置（無ければ false）
+    bool used_random(const std::string& sha256, SavedRandom& out) const;
     // プレイの結果を記録する（ランプ・EX・BPは良いほうを残す）
     void save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo);
     void save_score(const std::string& sha256, const PlayRecord& r);
