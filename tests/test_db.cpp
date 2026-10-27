@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -31,16 +32,18 @@ TEST(song_db_scan_diff) {
     fs::remove_all(dir);
     write(dir / "a" / "a.bme", "#TITLE A\n#BPM 120\n#00111:01\n");
     write(dir / "b" / "b.bms", "#TITLE B\n#BPM 120\n#00111:0101\n");
-    write(dir / "c" / "dp.bme", "#TITLE DP\n#BPM 120\n#00121:01\n");  // DPは一覧に出さない
+    write(dir / "c" / "dp.bme", "#TITLE DP\n#BPM 120\n#00121:01\n");  // DP は持っている譜面として載せる（鍵盤数 10）
     std::string dbp = (dir / "songs.db").string();
     SongDb db;
     CHECK(db.open(dbp));
     ScanStats s1 = db.scan({dir.string()}, 2);
     CHECK_EQ(s1.found, 3);
     CHECK_EQ(s1.added, 3);
-    CHECK_EQ(s1.failed, 1);
-    CHECK_EQ(db.all_charts().size(), size_t(2));
-    ScanStats s2 = db.scan({dir.string()}, 2);  // 変化なし（読めなかったDPも読み直さない）
+    CHECK_EQ(s1.failed, 0);
+    CHECK_EQ(db.all_charts().size(), size_t(3));
+    for (const ChartRecord& c : db.all_charts())
+        if (c.title == "DP") CHECK_EQ(c.keys, 10);
+    ScanStats s2 = db.scan({dir.string()}, 2);  // 変化なし
     CHECK_EQ(s2.added, 0);
     CHECK_EQ(s2.updated, 0);
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -50,6 +53,7 @@ TEST(song_db_scan_diff) {
     CHECK_EQ(s3.updated, 1);
     CHECK_EQ(s3.removed, 1);
     auto charts = db.all_charts();
+    charts.erase(std::remove_if(charts.begin(), charts.end(), [](const ChartRecord& c) { return c.keys >= 10; }), charts.end());
     CHECK_EQ(charts.size(), size_t(1));
     if (!charts.empty()) {
         CHECK(charts[0].title == "A2");
@@ -107,14 +111,31 @@ TEST(song_db_import_lr2) {
                  nullptr, nullptr, nullptr);
     std::string ins = "INSERT INTO score(hash, clear, perfect, great, minbp, maxcombo, playcount, clearcount) VALUES('" +
                       md5 + "', 4, 1, 1, 3, 2, 10, 7), ('ffffffffffffffffffffffffffffffff', 2, 0, 0, 0, 0, 1, 1), "
-                            "('0000000000200000000000000000519" + "0" + md5 + "', 3, 5, 5, 9, 9, 2, 1)";
+                            "('0000000000200000000000000000519" + "0" + md5 + "', 3, 5, 5, 9, 9, 2, 1), "
+                            // フルコンボで GOOD が 0（PGREAT＋GREAT＝最大コンボ）なら PERFECT。GOOD があればフルコンボのまま
+                            "('eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5, 3, 2, 1, 5, 1, 1), ('dddddddddddddddddddddddddddddddd', 5, 3, 1, 0, 5, 1, 1)";
     sqlite3_exec(db, ins.c_str(), nullptr, nullptr, nullptr);
     sqlite3_close(db);
 
     SongDb sdb;
     CHECK(sdb.open((dir / "songs.db").string()));
     sdb.scan({(dir / "songs").string()}, 1);
-    CHECK_EQ(sdb.import_lr2_scores(lr2), 3);
+    CHECK_EQ(sdb.import_lr2_scores(lr2), 5);
+    {
+        sqlite3* rd = nullptr;
+        sqlite3_open((dir / "songs.db").string().c_str(), &rd);
+        auto lamp = [&](const char* md5v) {
+            sqlite3_stmt* st = nullptr;
+            sqlite3_prepare_v2(rd, "SELECT clear FROM lr2_score WHERE md5 = ?", -1, &st, nullptr);
+            sqlite3_bind_text(st, 1, md5v, -1, SQLITE_TRANSIENT);
+            int v = sqlite3_step(st) == SQLITE_ROW ? sqlite3_column_int(st, 0) : -1;
+            sqlite3_finalize(st);
+            return v;
+        };
+        CHECK_EQ(lamp("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"), 6);
+        CHECK_EQ(lamp("dddddddddddddddddddddddddddddddd"), 5);
+        sqlite3_close(rd);
+    }
     // 読んだ曲フォルダの下には譜面がある。まだ読んでいない曲フォルダには無い
     CHECK(sdb.has_charts_under((dir / "songs").string()));
     CHECK(!sdb.has_charts_under((dir / "other").string()));

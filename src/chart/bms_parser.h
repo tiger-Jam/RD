@@ -16,6 +16,8 @@ struct BmsParseOptions {
     uint32_t random_seed = 0;  // #RANDOM の評価に使うシード
     // 選曲用（曲データベース）の読み込み。LR2 の ParseBMSMETA と同じく #RANDOM を評価せず、いつも「#IF 1」の枝を読む
     bool select_meta = false;
+    // DP の譜面も読む（曲データベース用。持っている譜面として数えるだけで、遊べない）。2P 側のノーツは捨て、double_play を立てる
+    bool allow_double = false;
 };
 
 struct BmsParseResult {
@@ -23,6 +25,7 @@ struct BmsParseResult {
     std::string error;
     std::vector<std::string> warnings;
     std::vector<int> random_values;  // 評価した #RANDOM の値（出現順）。リプレイで再現するために保存する
+    bool double_play = false;        // 2P 側のノーツがあった（DP の譜面。allow_double のときだけ ok になる）
     Lr2Random rng;                   // #RANDOM を評価したあとの乱数（レーンのランダムはこの続きを使う。LR2 と同じ）
     Chart chart;
 };

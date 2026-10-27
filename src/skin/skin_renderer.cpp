@@ -426,10 +426,12 @@ void SkinRenderer::add_gauge(const SkinObject& o, const PlaySkinState& st) {
     int tremble = hp - static_cast<int>((rand_ >> 16) % 3);
     SDL_Texture* tex = image_tex(o.src.gr);
     if (!tex) return;
+    // クリアの線（80% なら 40 個目から上が線より上の絵）
+    const int line = std::clamp(static_cast<int>(std::lround(st.gauge_border / 2)), 1, 50);
     for (int i = 1; i <= 50; ++i) {
         int f;
         if (!st.gauge_survival) {
-            if (i < 40) f = ((i < tremble || hp <= i || i == 1) && i <= hp) ? cyc + 1 : cyc + 3;
+            if (i < line) f = ((i < tremble || hp <= i || i == 1) && i <= hp) ? cyc + 1 : cyc + 3;
             else if (tremble <= i && i < hp && i != 1) f = cyc + 2;
             else if (hp < i) f = cyc + 2;
             else f = cyc;
@@ -533,7 +535,7 @@ void SkinRenderer::add_gauge_chart(const Lr2Skin& skin, const PlaySkinState& st)
     if (!st.graph || lo.src.op[0] <= 0 || lo.dst.empty()) return;
     const PlayGraph& g = *st.graph;
     int gauge = std::clamp(st.graph_gauge, 0, kGaugeCount - 1);
-    // GROOVE/EASY は 80% で描き分ける。コースの中では GROOVE/EASY も落ちたら終わりのゲージなので、HARD と同じく分けない
+    // GROOVE/EASY は 80%（カスタムゲージはそのクリアの線）で描き分ける。コースの中では GROOVE/EASY も落ちたら終わりのゲージなので、HARD と同じく分けない
     // （遊んでいる間のゲージの色とそろえる）
     bool groove = (gauge == kGroove || gauge == kEasy) && !st.gauge_survival;
     double t0 = st.timers->lapse(0, st.now_ms);
@@ -545,17 +547,17 @@ void SkinRenderer::add_gauge_chart(const Lr2Skin& skin, const PlaySkinState& st)
         int last = 0;
         // 前の点との間は、1%ずつ縦に点を打って線にする
         while (val != g.hp[gauge][axis]) {
-            const SkinObject& o = (groove && val < 80) ? lo : hi;
+            const SkinObject& o = (groove && val < st.gauge_border) ? lo : hi;
             int y = o.src.op[1] * val / -100;
             if (last != y) {
-                tint_ = groove && val < 80 ? st.gauge_tint_low : st.gauge_tint;
+                tint_ = groove && val < st.gauge_border ? st.gauge_tint_low : st.gauge_tint;
                 add_object(o, st, static_cast<float>(i), static_cast<float>(y));
                 tint_ = 0;
                 last = y;
             }
             val += val < g.hp[gauge][axis] ? 1 : -1;
         }
-        const bool low = groove && g.hp[gauge][axis] < 80;
+        const bool low = groove && g.hp[gauge][axis] < st.gauge_border;
         const SkinObject& o = low ? lo : hi;
         tint_ = low ? st.gauge_tint_low : st.gauge_tint;
         add_object(o, st, static_cast<float>(i), static_cast<float>(o.src.op[1] * g.hp[gauge][axis] / -100));

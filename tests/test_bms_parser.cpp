@@ -284,6 +284,19 @@ TEST(bms_p2_mine_only) {
     CHECK(!parse("#BPM 120\n#00141:01\n#00111:01\n").ok);  // 2P の不可視は DP
 }
 
+TEST(bms_double_for_database) {
+    // 曲データベース用には DP の譜面も読む（2P 側のノーツは捨て、DP の印を立てる）。遊ぶときは読まない
+    const std::string dp = "#BPM 120\n#00111:01\n#00121:01\n#00129:01\n";
+    auto play = parse(dp);
+    CHECK(!play.ok && play.double_play);
+    BmsParseOptions o;
+    o.random_seed = 1, o.allow_double = true;
+    auto r = parse_bms_text(dp, o);
+    CHECK(r.ok && r.double_play);
+    CHECK_EQ(r.chart.notes.size(), size_t(1));
+    CHECK(!parse_bms_text("#BPM 120\n#00111:01\n", o).double_play);
+}
+
 TEST(bms_zero_length_ln) {
     // 長さ 0 の LN は、同じ時刻の通常ノーツを上書きしない（LR2: bmsload:3678）
     auto r = parse("#BPM 120\n#00111:02\n#00151:01\n#00151:01\n");

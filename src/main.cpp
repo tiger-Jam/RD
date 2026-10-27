@@ -85,6 +85,7 @@ struct Options {
     std::string import_lr2_courses;
     // 持っていない譜面の一覧（難易度表の名前・記号・URL のどれか）。--level で絞る（何度でも）。出したら終わる
     std::string list_missing;
+    bool list_all = false;  // --list-charts：持っている譜面も出す
     std::vector<std::string> levels;
     bool list_owned = false;  // 持っている譜面の md5 とフォルダを 1 行ずつ出して終わる
     // 外の道具（曲を集める道具）から使う：登録した難易度表を取り直す（その日の 2 回目からは手元の版）／登録した曲フォルダを全部読み直す
@@ -129,6 +130,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--copy-lr2-assets") o.copy_assets = true;  // 今の素材のフォルダ（LR2）の素材を、実行ファイルの横に写して付け替える
         else if (a == "--import-lr2-courses") o.import_lr2_courses = next();
         else if (a == "--list-missing") o.list_missing = next();
+        else if (a == "--list-charts") o.list_missing = next(), o.list_all = true;
         else if (a == "--list-owned") o.list_owned = true;
         else if (a == "--update-tables") o.update_tables = true;
         else if (a == "--rescan") o.rescan = true;
@@ -444,7 +446,9 @@ std::vector<std::string> table_urls_with(const AppConfig& cfg, const std::string
     return urls;
 }
 
-int list_missing(const std::string& which, const std::vector<std::string>& levels, const std::string& tables_file) {
+// 難易度表の、持っていない譜面を 1 行ずつ出す（md5・記号とレベル・曲名・作者・表の名前・本体の URL・差分の URL）。
+// all なら持っている譜面も出し、行の終わりに持っているか（1 / 0）と表の URL を足す
+int list_missing(const std::string& which, const std::vector<std::string>& levels, const std::string& tables_file, bool all = false) {
     AppConfig cfg;
     migrate_old_data();
     cfg.load(config_path());
@@ -470,7 +474,8 @@ int list_missing(const std::string& which, const std::vector<std::string>& level
         ++tables;
         std::unordered_set<std::string> seen;
         for (const TableChart& c : t.charts) {
-            if (c.md5.size() != 32 || owned.count(low(c.md5)) || !seen.insert(low(c.md5)).second) continue;
+            const bool have = owned.count(low(c.md5)) > 0;
+            if (c.md5.size() != 32 || (have && !all) || !seen.insert(low(c.md5)).second) continue;
             if (!levels.empty() && std::find(levels.begin(), levels.end(), c.level) == levels.end()) continue;
             // タブと改行は区切りなので、曲名などに混ざっていれば空白にする
             auto field = [](std::string v) {
@@ -478,9 +483,11 @@ int list_missing(const std::string& which, const std::vector<std::string>& level
                     if (ch == '\t' || ch == '\n' || ch == '\r') ch = ' ';
                 return v;
             };
-            std::printf("%s\t%s%s\t%s\t%s\t%s\t%s\t%s\n", low(c.md5).c_str(), field(t.symbol).c_str(), field(c.level).c_str(),
+            std::printf("%s\t%s%s\t%s\t%s\t%s\t%s\t%s", low(c.md5).c_str(), field(t.symbol).c_str(), field(c.level).c_str(),
                         field(c.title).c_str(), field(c.artist).c_str(), field(t.name).c_str(), field(c.url).c_str(), field(c.url_diff).c_str());
-            ++missing;
+            if (all) std::printf("\t%d\t%s", have ? 1 : 0, field(url).c_str());
+            std::printf("\n");
+            if (!have) ++missing;
         }
     }
     std::fprintf(stderr, "難易度表 %d 個、持っていない譜面 %d 件\n", tables, missing);
@@ -543,7 +550,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
-    if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file);
+    if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file, opt.list_all);
     if (opt.update_tables || opt.rescan) {
         AppConfig cfg;
         migrate_old_data();

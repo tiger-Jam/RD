@@ -675,9 +675,16 @@ void fill_difficulties(std::vector<ChartRecord>& charts) {
 }
 
 // 曲の一覧を読む（登録した曲フォルダ・譜面と、難易度の補い）
+// 選曲画面に出す譜面（DP の譜面は、持っている譜面として曲データベースに載せるが、遊べないので出さない）
+std::vector<ChartRecord> playable_charts(const SongDb& db) {
+    std::vector<ChartRecord> v = db.all_charts();
+    v.erase(std::remove_if(v.begin(), v.end(), [](const ChartRecord& c) { return c.keys >= 10; }), v.end());
+    return v;
+}
+
 void load_charts(Library& lib, const SongDb& db, const AppConfig& cfg) {
     lib.roots = cfg.song_dirs;
-    lib.charts = db.all_charts();
+    lib.charts = playable_charts(db);
     // 登録した曲フォルダそのものが無い（ドライブが無い・別の PC へ持ってきた）ときは、その中の譜面を持っていない扱いにする。
     // 曲データベースからは消さない（つなぎ直せば戻る）。見るのは曲フォルダの 1 段目だけ（譜面ごとには確かめない）
     std::vector<std::string> gone;
@@ -1025,7 +1032,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 st = wdb.scan(dirs, static_cast<int>(std::max(2u, std::thread::hardware_concurrency())), nullptr, only_under);
             auto next = std::make_shared<Library>();
             next->roots = dirs;
-            next->charts = wdb.all_charts();
+            next->charts = playable_charts(wdb);
             fill_difficulties(next->charts);
             next->load_records(wdb, ln_mode, profile);
             if (keep_from) next->tables = keep_from->tables;
@@ -1054,7 +1061,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 if (finished || std::chrono::steady_clock::now() - last > std::chrono::minutes(10)) {
                     auto lib2 = std::make_shared<Library>();
                     lib2->roots = dirs;
-                    lib2->charts = wdb.all_charts();
+                    lib2->charts = playable_charts(wdb);
                     fill_difficulties(lib2->charts);
                     lib2->load_records(wdb, ln_mode, profile);
                     lib2->tables = next->tables;

@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 #include "app/select_context.h"
 #include "audio/system_sound.h"
+#include "chart/chart_loader.h"
+#include "game/judge.h"
 #include "render/skin_play.h"
 #include "render/frame_hooks.h"
 #include "util/dev.h"
@@ -14,7 +17,9 @@ namespace bmj {
 namespace {
 
 // 選んでいるスキンのプレビュー（LR2: MakeSkinPreview / DrawSkinPreview）。スキンを読み込んで動かし、
-// 画像 105 の大きさの絵に縮めて描く。サウンドセットは #INFORMATION の 4 番目の欄の画像（無ければ黒）
+// 画像 105 の大きさの絵に縮めて描く。サウンドセットは #INFORMATION の 4 番目の欄の画像（無ければ黒）。
+// 7 鍵・5 鍵のプレースキンは、LR2 と同じく見本の譜面（LR2files/Config/sample_7.bme・sample_5.bme）をオートで流し、
+// 終わったら頭から繰り返す（ノーツ・ボム・キーフラッシュ・判定の絵が見える。音は鳴らさない）
 class SkinPreview {
 public:
     SkinPreview(App& app, int w, int h) : app_(app), renderer_(app.renderer) {
@@ -39,6 +44,7 @@ public:
         if (want == path_ && type == type_) return;
         path_ = want, type_ = type;
         skin_.reset();
+        demo_judge_.reset(), demo_.reset(), demo_start_ = -1;
         if (thumb_) SDL_DestroyTexture(thumb_), thumb_ = nullptr;
         start_ns_ = SDL_GetTicksNS();
         timers_ = SkinTimers();
@@ -71,6 +77,15 @@ public:
         }
         skin_ = std::move(sk);
         ctx_.skin = skin_.get();
+        if (type == 0 || type == 1) {
+            const std::string sample =
+                resolve_lr2_path(app_.lr2_root, type == 1 ? "LR2files/Config/sample_5.bme" : "LR2files/Config/sample_7.bme", false);
+            BmsParseOptions popt;
+            popt.random_seed = 1;
+            if (!sample.empty())
+                if (BmsParseResult r = parse_chart_file(sample, popt); r.ok) demo_ = std::make_unique<Chart>(std::move(r.chart));
+        }
+        ctx_.chart = demo_.get();
     }
 
     // 1 フレーム分を描く（タイマー 1・40・41 は、LR2 と同じく時間が来たら立てる）
@@ -94,6 +109,7 @@ public:
             if (!timers_.on(1) && t > skin_->startinput) timers_.set(1, t);
             if (!timers_.on(40) && t > skin_->loadstart + skin_->loadend) timers_.set(40, t);
             if (timers_.on(40) && !timers_.on(41) && timers_.lapse(40, t) > skin_->playstart) timers_.set(41, t);
+            if (demo_ && timers_.on(41)) play_demo(t);
             ctx_.timers = timers_;
             ctx_.now_ms = t;
             PlaySkinState st;
@@ -105,6 +121,16 @@ public:
             st.slider = [&](int ty, int& v, int& lo, int& hi) { return ctx_.slider(ty, v, lo, hi); };
             st.text = [&](int id) { return ctx_.text(id); };
             st.button = [&](int ty) { return ctx_.button(ty); };
+            if (demo_judge_) {
+                const int64_t us = static_cast<int64_t>((t - demo_start_) * 1000);
+                st.chart = demo_.get(), st.judge = demo_judge_.get();
+                st.notes_visible = true, st.autoplay = true;
+                st.render_beat = demo_->pos_at(us);
+                st.hi_speed = app_.cfg.hi_speed, st.base_speed = app_.cfg.base_speed;
+                st.judge_draw = ctx_.judge_draw;
+                st.combo_draw = demo_judge_->stats().combo;
+                st.gauge_hp = demo_judge_->play_hp();
+            }
             if (type_ <= 4) renderer_.draw_play(*skin_, st);
             else if (type_ == 7 || type_ == 15) renderer_.draw_result(*skin_, st);
             else renderer_.draw_select(*skin_, st);
@@ -119,12 +145,50 @@ public:
     }
 
 private:
+    // 見本の譜面を t（シーンの時刻）まで進め、判定でボム・キーフラッシュ・判定の絵のタイマーを立てる（遊ぶときと同じ）
+    void play_demo(double t) {
+        if (!demo_judge_ || t - demo_start_ > demo_->end_us / 1000.0 + 2000) {
+            JudgeConfig jc;
+            jc.autoplay = true;
+            demo_judge_ = std::make_unique<JudgeEngine>(*demo_, jc);
+            demo_start_ = t;
+        }
+        demo_judge_->advance(static_cast<int64_t>((t - demo_start_) * 1000));
+        for (const JudgeEvent& je : demo_judge_->events()) {
+            if (je.mine) continue;
+            const double at = demo_start_ + je.time_us / 1000.0;
+            const int j = je.judge >= 100 ? je.judge - 100 : je.judge;
+            if (je.judge >= 100) {
+                if (j >= kGood) timers_.set(70 + je.lane, at);
+                continue;
+            }
+            if (je.ln_start && j >= kGood) timers_.set(70 + je.lane, at);
+            if (j >= kGreat && !je.ln_release) timers_.set(50 + je.lane, at);
+            ctx_.judge_draw = j;
+            timers_.set(46, at);
+            timers_.set(100 + je.lane, at);
+            timers_.reset(120 + je.lane);
+        }
+        demo_judge_->events().clear();
+        for (int lane = 0; lane < kLaneCount; ++lane) {
+            if (!demo_judge_->lane_ln_holding(lane)) timers_.reset(70 + lane);
+            // 自動演奏の鍵盤の光は 80ms で消す（遊ぶときと同じ）
+            if (timers_.lapse(50 + lane, t) >= 80 && timers_.lapse(100 + lane, t) > 0) {
+                timers_.reset(100 + lane);
+                timers_.set(120 + lane, t);
+            }
+        }
+    }
+
     App& app_;
     SkinRenderer renderer_;
     SDL_Texture* tex_ = nullptr;
     SDL_Texture* thumb_ = nullptr;
     SDL_Texture* full_ = nullptr;  // スキン本来の大きさの描き先
     std::unique_ptr<Lr2Skin> skin_;
+    std::unique_ptr<Chart> demo_;               // 見本の譜面（7 鍵・5 鍵のプレースキン）
+    std::unique_ptr<JudgeEngine> demo_judge_;   // その自動演奏
+    double demo_start_ = -1;                    // 見本の譜面の頭のシーンの時刻
     PlayContext ctx_;
     SkinTimers timers_;
     std::string path_;
@@ -274,8 +338,9 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         renderer.draw_select(skin, st);
-        if (const char* shot = dev_env("BMJ_SKINSELECT_SHOT"); shot && t > 800) {
-            // 開発用：1 枚保存して閉じる
+        const char* wait = dev_env("BMJ_SKINSELECT_WAIT");
+        if (const char* shot = dev_env("BMJ_SKINSELECT_SHOT"); shot && t > (wait ? std::atof(wait) : 800)) {
+            // 開発用：1 枚保存して閉じる（BMJ_SKINSELECT_WAIT ms 待ってから。既定 800）
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             done = true;
         }

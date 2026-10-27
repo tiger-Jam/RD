@@ -274,13 +274,18 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     // DP（2P側）とPMSはこのプレイヤーの対象外。2P 側の地雷（E1〜E9）は LR2 も鍵盤数の判定に数えない
     // （songmanage:2996）ので、それだけなら SP の譜面として読み、地雷は捨てる
     bool p2_mine = false;
+    auto p2_note = [](const Obj& o) { return (o.op >= 20 && o.op <= 29) || (o.op >= 40 && o.op <= 49) || (o.op >= 60 && o.op <= 69); };
     for (const Obj& o : objs) {
-        if ((o.op >= 20 && o.op <= 29) || (o.op >= 40 && o.op <= 49) || (o.op >= 60 && o.op <= 69)) {
-            res.error = "2P側のノーツがある（DP譜面は非対応）";
-            return res;
+        if (p2_note(o)) {
+            res.double_play = true;
+            if (!opts.allow_double) {
+                res.error = "2P側のノーツがある（DP譜面は非対応）";
+                return res;
+            }
         }
         if (o.op >= 140 && o.op <= 149) p2_mine = true;
     }
+    if (res.double_play) objs.erase(std::remove_if(objs.begin(), objs.end(), p2_note), objs.end());
     if (p2_mine) res.warnings.push_back("2P 側の地雷を捨てた");
 
     // 小節0の頭にノーツがあれば、全体を1小節後ろにずらす（LR2: bmsload:2581）

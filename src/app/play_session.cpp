@@ -104,11 +104,13 @@ uint32_t option_history(int lamp, int gauge_type, const AppConfig& cfg) {
 }
 
 // ゲージの絵を染める色：カスタムゲージならその色、本体のゲージなら MOD で変えた色（無ければスキンの絵のまま）。
-// 1 色なら 80% 未満も同じ色
+// 1 色なら 80% 未満も同じ色。絵を描き分ける境はカスタムゲージならそのクリアの線
 void set_gauge_tint(PlaySkinState& st, const JudgeEngine& j, const App& app) {
     st.gauge_tint = st.gauge_tint_low = 0;
+    st.gauge_border = 80;
     if (const int c = j.custom_play(); c >= 0) {
         const CustomGaugeDef& g = j.custom_def(c);
+        st.gauge_border = g.border;
         st.gauge_tint = 0xff000000u | g.color;
         st.gauge_tint_low = 0xff000000u | (g.colors == 2 ? g.color_low : g.color);
     } else if (const GaugeColors* g = app.standard_gauge_colors(j.display_gauge_type())) {

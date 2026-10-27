@@ -113,6 +113,7 @@ struct PlaySkinState {
     bool gauge_survival = false;
     // カスタムゲージの色（0xff000000 | RGB。0 ならスキンの絵のまま）。上はクリアの線より上（落ちたら終わりのゲージは全部）、下は線より下
     uint32_t gauge_tint = 0, gauge_tint_low = 0;
+    double gauge_border = 80;    // ゲージの絵を線より上・下で描き分ける境（%）。カスタムゲージはそのクリアの線
     float scratch_angle = 0;     // 皿の回転（度）
     // BGA（LR2: bgaLayer1 / bgaLayer2 / missLayer）。番号は #BMP のID、-1 は無し
     const std::vector<SDL_Texture*>* bga = nullptr;

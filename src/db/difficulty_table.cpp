@@ -238,6 +238,34 @@ std::string resolve_url(const std::string& base, const std::string& rel) {
     return dir + r;
 }
 
+// 属性の値の文字参照（&amp; など）を戻す。header.json の URL のクエリに & があると、HTML には &amp; で書かれる
+static std::string unescape_attr(const std::string& v) {
+    std::string out;
+    for (size_t i = 0; i < v.size(); ++i) {
+        size_t semi = v[i] == '&' ? v.find(';', i) : std::string::npos;
+        if (semi == std::string::npos || semi - i > 10) {
+            out += v[i];
+            continue;
+        }
+        const std::string ent = v.substr(i + 1, semi - i - 1);
+        long code = -1;
+        if (ent == "amp") code = '&';
+        else if (ent == "lt") code = '<';
+        else if (ent == "gt") code = '>';
+        else if (ent == "quot") code = '"';
+        else if (ent == "apos") code = '\'';
+        else if (ent.size() > 1 && ent[0] == '#') code = std::strtol(ent.c_str() + 1 + (ent[1] == 'x' || ent[1] == 'X'), nullptr,
+                                                                     ent[1] == 'x' || ent[1] == 'X' ? 16 : 10);
+        if (code <= 0 || code > 0x7f) {  // 知らない参照と ASCII でない文字はそのまま
+            out += v[i];
+            continue;
+        }
+        out += static_cast<char>(code);
+        i = semi;
+    }
+    return out;
+}
+
 std::string find_bmstable_meta(const std::string& html) {
     std::string low = html;
     for (char& c : low) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -253,7 +281,7 @@ std::string find_bmstable_meta(const std::string& html) {
                 if (q != std::string::npos) {
                     char quote = tag[q];
                     size_t q2 = tag.find(quote, q + 1);
-                    if (q2 != std::string::npos) return html.substr(pos + q + 1, q2 - q - 1);  // 元の大文字小文字で返す
+                    if (q2 != std::string::npos) return unescape_attr(html.substr(pos + q + 1, q2 - q - 1));  // 元の大文字小文字で返す
                 }
             }
         }

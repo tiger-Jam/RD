@@ -18,6 +18,9 @@ TEST(table_meta) {
     CHECK(find_bmstable_meta("<html><head><meta name=\"bmstable\" content=\"header.json\" /></head>") == "header.json");
     CHECK(find_bmstable_meta("<META content='Head.JSON' NAME=bmstable>") == "Head.JSON");
     CHECK(find_bmstable_meta("<meta name=\"x\" content=\"y\">").empty());
+    // 属性の値の &amp; などは戻す（クエリの付いた header.json）
+    CHECK(find_bmstable_meta("<meta name=\"bmstable\" content=\"header.json?name=a&amp;symbol=%E2&#38;x=1\">") ==
+          "header.json?name=a&symbol=%E2&x=1");
 }
 
 TEST(table_parse) {

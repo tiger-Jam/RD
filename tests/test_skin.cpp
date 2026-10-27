@@ -193,6 +193,24 @@ TEST(skin_customfile_candidates) {
     std::filesystem::remove_all(root);
 }
 
+// パスの終わりの " は、LR2（Windows のファイル検索）と同じく無いものとして探す。拡張子の大文字小文字も見ない
+TEST(skin_customfile_trailing_quote) {
+    auto root = skin_test_dir("bmj_test_skin_quote");
+    std::filesystem::create_directories(root / "parts");
+    for (const char* n : {"#RED.PNG", "BLUE.PNG"}) std::ofstream(root / "parts" / n) << "x";
+    std::ofstream(root / "test.lr2skin") << "#INFORMATION,0,T,me\n#CUSTOMFILE,Flash,.\\parts\\*.png\",#RED\n";
+    SkinHeader h;
+    CHECK(read_skin_header(root.string(), (root / "test.lr2skin").string(), h));
+    CHECK_EQ(h.customs.size(), size_t(1));
+    const std::vector<std::string> want = {"#RED", "BLUE", "RANDOM"};
+    if (!h.customs.empty()) {
+        CHECK(h.customs[0].labels == want);
+        CHECK_EQ(h.customs[0].selected, 0);
+    }
+    CHECK(!resolve_lr2_path(root.string(), ".\\parts\\#RED.png\"", false).empty());
+    std::filesystem::remove_all(root);
+}
+
 // #CUSTOMFILE は名前で残すので、候補のファイルが増えても選択がずれない。古い形式（番号）も読める
 TEST(skin_custom_choice_by_name) {
     auto root = skin_test_dir("bmj_test_skin_cfname");

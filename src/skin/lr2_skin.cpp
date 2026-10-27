@@ -88,9 +88,13 @@ std::mt19937& rng() {
     return r;
 }
 
+// パスを段に分ける（\ と / のどちらでもよい。"." の段は除く）。
+// パスの終わりの " は消す：LR2 は欄の前後が両方 " のときだけ " を外し、残った " は Windows のファイル検索に渡る。
+// Windows は名前の中の " を「. か名前の終わり」として探すので、「*.png"」は「*.png」と同じものに当たる
 std::vector<std::string> split_path(std::string p) {
     for (char& c : p)
         if (c == '\\') c = '/';
+    while (!p.empty() && (p.back() == '"' || p.back() == ' ' || p.back() == '\t')) p.pop_back();
     std::vector<std::string> parts;
     std::string cur;
     for (char c : p) {

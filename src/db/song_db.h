@@ -24,7 +24,7 @@ struct ChartRecord {
     int length_ms = 0;
     bool scratch = true;
     int64_t added = 0;  // 初めて見つけた日時（UNIX 秒。0 は不明。NEW SONG と新曲の色に使う）
-    int keys = 7;  // 鍵盤数（5 か 7。6・7 鍵にノーツが無ければ 5。LR2: songmanage:3003）
+    int keys = 7;  // 鍵盤数（5 か 7。6・7 鍵にノーツが無ければ 5。LR2: songmanage:3003）。DP は 10 か 14（遊べないので選曲画面には出さない）
     std::string banner, stagefile, backbmp;  // 譜面に書かれた画像のファイル名（譜面のフォルダからの相対）
     int64_t mtime = 0, size = 0;
 };

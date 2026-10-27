@@ -74,14 +74,24 @@ if ($UpdateTables) {
 $levelArgs = ($Level | ForEach-Object { "--level `"$_`"" }) -join " "
 $list = Join-Path $work "missing.tsv"
 $which = if ($Table) { $Table } else { "*" }
-cmd /c "`"$bmjoy`" --list-missing `"$which`" $levelArgs $tablesArg > `"$list`" 2> `"$work\list.err`""
+# 持っている譜面も含めて出す（行の 8 つ目が 1 なら持っている）。全部の表のときは、表ごとの譜面の一覧（Excel の表）も作り直す
+cmd /c "`"$bmjoy`" --list-charts `"$which`" $levelArgs $tablesArg > `"$list`" 2> `"$work\list.err`""
 Get-Content -Encoding UTF8 "$work\list.err" | ForEach-Object { Say $_ }
+if (-not $Table -and -not $DryRun -and $Level.Count -eq 0) {
+    $sheet = Join-Path ([Environment]::GetFolderPath("Desktop")) "BMS譜面一覧.xlsx"
+    # 作れなくても収集は続ける（エラー出力があると、ErrorActionPreference が Stop なので止まってしまう）
+    try {
+        $r = & py -3 "C:\Users\mmzkq\Tools\chart-sheet.py" $list "C:\Users\mmzkq\Tools\bms-get-data\mirror-index.tsv" $sheet 2>&1
+        $r | ForEach-Object { Say "$_" }
+    } catch { Say "譜面の一覧を作れなかった：$_" }
+}
 # 表に書いてある本体と差分の URL は、いくつもの表のぶんをまとめて bms-get に渡す
 $seen = @{}
 $rows = New-Object Collections.Generic.List[object]
 foreach ($line in [IO.File]::ReadLines($list, [Text.Encoding]::UTF8)) {
     if ($line -notmatch "^[0-9a-f]{32}\t") { continue }
     $f = $line -split "`t"
+    if ($f.Count -gt 7 -and $f[7] -eq "1") { continue }  # 持っている
     $main = if ($f.Count -gt 5) { $f[5].Trim() } else { "" }
     $diff = if ($f.Count -gt 6) { $f[6].Trim() } else { "" }
     if (-not $seen.ContainsKey($f[0])) {

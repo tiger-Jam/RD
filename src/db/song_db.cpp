@@ -173,6 +173,7 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     BmsParseOptions opt;
     opt.random_seed = 1;
     opt.select_meta = true;  // LR2 と同じく、#RANDOM はいつも 1 番の枝で数える
+    opt.allow_double = true;  // DP の譜面も持っている譜面として載せる（鍵盤数 10・14。選曲画面には出さない）
     BmsParseResult res = parse_chart_bytes(path, bytes, opt);
     if (!res.ok) return false;
     const Chart& c = res.chart;
@@ -207,7 +208,7 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     r.bpm_main = c.main_bpm;
     r.length_ms = static_cast<int>(c.end_us / 1000);
     r.scratch = c.layout == KeyLayout::K7S;
-    r.keys = key_count(c);
+    r.keys = key_count(c) * (res.double_play ? 2 : 1);
     r.banner = c.meta.banner;
     r.stagefile = c.meta.stagefile;
     r.backbmp = c.meta.backbmp;
@@ -324,6 +325,22 @@ bool SongDb::open(const std::string& path) {
                      "ALTER TABLE chart ADD COLUMN keys INTEGER DEFAULT 7; "
                      "UPDATE chart SET mtime = 0;",
                      nullptr, nullptr, nullptr);
+    }
+    // DP の譜面を曲データベースに載せるようにした（2026-10-25）。前に読み飛ばした譜面を、次の読み直しで読ませる
+    {
+        Stmt get(db_, "SELECT value FROM meta WHERE key = 'dp_charts'");
+        if (!get.step())
+            sqlite3_exec(db_, "DELETE FROM skipped; INSERT OR REPLACE INTO meta(key, value) VALUES('dp_charts', 1);", nullptr, nullptr, nullptr);
+    }
+    // LR2 から取り込んだフルコンボのうち、GOOD が 0 のものを PERFECT にする（2026-10-25 より前に取り込んだ分。lr2_clear と同じ決め方）
+    {
+        Stmt get(db_, "SELECT value FROM meta WHERE key = 'lr2_perfect'");
+        if (!get.step()) {
+            sqlite3_exec(db_,
+                         "UPDATE lr2_score SET clear = 6 WHERE clear = 5 AND max_combo > 0 AND pg + gr = max_combo;"
+                         "INSERT OR REPLACE INTO meta(key, value) VALUES('lr2_perfect', 1);",
+                         nullptr, nullptr, nullptr);
+        }
     }
     // EX-HARD・ASSIST EASY は「カスタムゲージ」MOD の中から、それぞれの公式 MOD に移った（2026-10-24）。前の鍵の記録を移す
     sqlite3_exec(db_,
@@ -747,6 +764,12 @@ int SongDb::import_lr2_favorites(const std::string& lr2_song_db) {
     return static_cast<int>(favs.size());
 }
 
+// LR2 のランプを BMjoy のランプにする。LR2 に PERFECT は無いので、フルコンボで GOOD が 0（PGREAT と GREAT だけで
+// 最大コンボになる。空 POOR は見ない）なら PERFECT にする。GOOD の数を持たない版の LR2 でも分かるように、最大コンボで比べる
+static int64_t lr2_clear(int64_t clear, int64_t pg, int64_t gr, int64_t max_combo) {
+    return clear == 5 && max_combo > 0 && pg + gr == max_combo ? 6 : clear;
+}
+
 int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* error) {
     if (!db_) return -1;
     sqlite3* src = nullptr;
@@ -780,7 +803,7 @@ int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* erro
             // コースの頭は種類（11 文字目）だけを残す。作者などは BMjoy のコースのハッシュ（course.cpp）に無い
             if (md5.size() > 32) md5 = std::string(10, '0') + md5[10] + std::string(21, '0') + md5.substr(32);
             int ex = static_cast<int>(rd.col_i64(2) * 2 + rd.col_i64(3));
-            wr.text(1, md5).i64(2, rd.col_i64(1)).i64(3, ex).i64(4, rd.col_i64(4)).i64(5, rd.col_i64(5))
+            wr.text(1, md5).i64(2, lr2_clear(rd.col_i64(1), rd.col_i64(2), rd.col_i64(3), rd.col_i64(5))).i64(3, ex).i64(4, rd.col_i64(4)).i64(5, rd.col_i64(5))
                 .i64(6, rd.col_i64(6)).i64(7, rd.col_i64(7)).i64(8, rd.col_i64(2)).i64(9, rd.col_i64(3)).i64(10, rd.col_i64(8))
                 .i64(11, rd.col_i64(9)).i64(12, rd.col_i64(10)).i64(13, rd.col_i64(11)).i64(14, rd.col_i64(12))
                 .i64(15, rd.col_i64(13)).text(16, rd.col_text(14));
