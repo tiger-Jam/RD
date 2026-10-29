@@ -87,6 +87,7 @@ struct PlayContext {
     int number(int id) const;
     bool bargraph(int type, double& val, double& max) const;
     bool option_raw(int op) const;
+    bool option_value(int id) const;  // 条件 id（正の番号）が成り立つか
     int number_raw(int id) const;
     bool bargraph_raw(int type, double& val, double& max) const;
     bool slider(int type, int& val, int& lo, int& hi) const;

@@ -240,43 +240,37 @@ void SkinRenderer::add_object(const SkinObject& o, const PlaySkinState& st, floa
 // LR2: AddDrawingBuffer_Numbers（skindraw:575）
 void SkinRenderer::add_numbers(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, int number, float x,
                                float y) {
-    if (dst.empty() || !src.valid || src.op[2] <= 0 || src.op[1] < 0 || src.op[1] >= 3) return;
-    int count = src.graphcount();
-    double tsrc = st.timers->lapse(src.timer, st.now_ms);
-    int cyc = 0, kind = 0;
-    auto cycle_of = [&](int unit) {
-        return src.cycle > 0 ? (count / unit) * (static_cast<int>(tsrc) % src.cycle) / src.cycle * unit : 0;
-    };
-    if (count % 10 == 0) kind = 1, cyc = cycle_of(10);
-    if (count % 11 == 0) kind = 2, cyc = cycle_of(11);
-    if (count % 24 == 0) kind = 3, cyc = cycle_of(24);
-    if (kind == 0) return;
-    if (kind != 3 && number < 0) return;
+    const int align = src.op[1];  // 0 右寄せ・1 左寄せ・2 中央
+    if (dst.empty() || !src.valid || src.op[2] <= 0 || align < 0 || align > 2) return;
+    // 絵の並び：10 コマ（0〜9）・11 コマ（0〜9 と空白）・24 コマ（0〜9・空白・＋ と、負の数用の 0〜9・空白・−）。
+    // 何組かあれば、src のタイマーで組を送る。どれにも割り切れる数なら 24、11、10 の順に優先
+    const int frames = src.graphcount();
+    const int unit = frames % 24 == 0 ? 24 : frames % 11 == 0 ? 11 : frames % 10 == 0 ? 10 : 0;
+    if (unit == 0) return;
+    if (unit != 24 && number < 0) return;  // 符号のコマが無い絵では、負の数は出さない
+    int base = 0;
+    if (src.cycle > 0) base = (frames / unit) * (static_cast<int>(st.timers->lapse(src.timer, st.now_ms)) % src.cycle) / src.cycle * unit;
     SkinDraw d = eval_dst(dst, st.timers->lapse(dst.timer, st.now_ms));
     if (!d.visible) return;
     d.x += x;
     d.y += y;
-    char buf[32];
-    std::string s;
-    int digits = src.op[2];
-    if (st.grow_digits && count_digit(number) > digits) {
+    int width = src.op[2];  // 桁数
+    const int len = count_digit(number);
+    if (st.grow_digits && len > width) {
         // スキンが決めた枠（桁数 × 1 文字の幅）の中に収まるよう、1 文字の幅を詰める（枠の外の絵に重ならないように）
-        const int need = count_digit(number);
-        d.w = d.w * digits / need;
-        digits = need;
+        d.w = d.w * width / len;
+        width = len;
     }
-    if (src.op[1] == 0) {
-        std::snprintf(buf, sizeof(buf), "%10d", std::abs(number));
-        s = buf;
-        if (static_cast<int>(s.size()) > digits) s = s.substr(s.size() - digits);
+    // 桁を並べる（-1 は空白）。右寄せは 10 桁の枠に右から詰めて下の width 桁、左寄せ・中央は左から詰めて空白 10 個を足し、上の width 桁
+    std::vector<int> cells;
+    for (char ch : std::to_string(std::abs(number))) cells.push_back(ch - '0');
+    if (align == 0) {
+        cells.insert(cells.begin(), std::max(0, 10 - static_cast<int>(cells.size())), -1);
+        if (static_cast<int>(cells.size()) > width) cells.erase(cells.begin(), cells.end() - width);
     } else {
-        if (src.op[1] == 2) {
-            int blanks = std::max(0, digits - count_digit(number));
-            d.x += blanks * d.w * 0.5f;
-        }
-        std::snprintf(buf, sizeof(buf), "%d          ", std::abs(number));
-        s = buf;
-        if (static_cast<int>(s.size()) > digits) s.resize(digits);
+        if (align == 2) d.x += std::max(0, width - len) * d.w * 0.5f;  // 中央：余った桁の半分だけ右へ
+        cells.insert(cells.end(), 10, -1);
+        if (static_cast<int>(cells.size()) > width) cells.resize(width);
     }
     SDL_Texture* tex = image_tex(src.gr);
     if (!tex) return;
@@ -288,17 +282,14 @@ void SkinRenderer::add_numbers(const SkinSrc& src, const SkinDst& dst, const Pla
         it.d = d;
         items_.push_back(it);
     };
-    if (kind == 3) {
-        put(cyc + (number < 0 ? 23 : 11));
+    if (unit == 24) {
+        put(base + (number < 0 ? 23 : 11));  // 符号
         d.x += d.w;
+        if (number < 0 && frames == 24) base += 12;  // 負の数の組（組が 1 つだけの絵のとき）
     }
-    if (number < 0 && count == 24) cyc += 12;
-    for (char ch : s) {
-        if (ch == ' ') {
-            if (kind != 1) put(cyc + 10);
-        } else if (ch >= '0' && ch <= '9') {
-            put(cyc + (ch - '0'));
-        }
+    for (int cell : cells) {
+        if (cell >= 0) put(base + cell);
+        else if (unit != 10) put(base + 10);  // 空白のコマ（10 コマの絵には無いので、場所だけ空ける）
         d.x += d.w;
     }
 }
@@ -335,31 +326,35 @@ void SkinRenderer::add_play_area(const SkinSrc& src, const SkinDst& dst, const P
 void SkinRenderer::add_ln(const SkinSrc& s, const SkinSrc& e, const SkinSrc& b, const SkinDst& dst,
                           const PlaySkinState& st, float shift_y, float long_y, int active, float shift_x, float size_x, float size_y) {
     if (dst.empty() || !s.valid || !e.valid || !b.valid) return;
-    int alpha = active != -1 ? 255 : 128;
+    // active：-1 は押していない（取り逃した）LN で半透明、0 は止めた絵、それ以外は src のタイマーで動かす
+    const int opacity = active == -1 ? 128 : 255;
     SkinDraw base = eval_dst(dst, st.timers->lapse(dst.timer, st.now_ms));
     base.w += size_x, base.h += size_y;
     base.x -= size_x * 0.5f - shift_x, base.y -= size_y * 0.5f;
-    auto part = [&](const SkinSrc& src, SkinDraw d) {
+    auto put = [&](const SkinSrc& src, SkinDraw d) {
         d.blend = 1;
-        d.a = alpha;
+        d.a = opacity;
         add(src, d, active == 0 ? -1.0 : src_time(src, dst, st));
     };
+    // 中身：終点のノーツの下の端（long_y の下）から、始点のノーツ（shift_y）まで
     SkinDraw body = base;
-    body.y += long_y + body.h;
-    body.h = shift_y - long_y - body.h;
+    const float body_from = long_y + base.h;
+    body.y += body_from;
+    body.h = shift_y - long_y - base.h;
     // 始点の高さを変えていれば、中身は始点の上の端まで伸ばす（すき間を作らない）
     if (s.draw_h > 0) body.h += base.h - (s.draw_h + size_y);
-    part(b, body);
-    SkinDraw start = base;
-    start.sort += 2;
-    start.y += shift_y;
-    fit_note_height(s, start, size_y);
-    part(s, start);
-    SkinDraw end = base;
-    end.sort += 1;
-    end.y += long_y;
-    fit_note_height(e, end, size_y);
-    part(e, end);
+    put(b, body);
+    // 始点と終点（中身より手前に描く）
+    SkinDraw head = base;
+    head.sort += 2;
+    head.y += shift_y;
+    fit_note_height(s, head, size_y);
+    put(s, head);
+    SkinDraw tail = base;
+    tail.sort += 1;
+    tail.y += long_y;
+    fit_note_height(e, tail, size_y);
+    put(e, tail);
 }
 
 // LR2: DrawNotes（Scene04_Play.cpp:310）。1P側（スキンのレーン番号0..7）だけ
@@ -438,36 +433,37 @@ void SkinRenderer::add_gauge(const SkinObject& o, const PlaySkinState& st) {
     if (o.dst.empty() || !o.src.valid) return;
     SkinDraw d = eval_dst(o.dst, st.timers->lapse(o.dst.timer, st.now_ms));
     if (!d.visible) return;
-    int count = o.src.graphcount();
-    int cyc = 0;
-    if (count > 4 && o.src.cycle > 0)
-        cyc = (count / 4) * (static_cast<int>(st.timers->lapse(o.src.timer, st.now_ms)) % o.src.cycle) / o.src.cycle * 4;
-    int hp = static_cast<int>(st.gauge_hp) / 2;
-    rand_ = rand_ * 1103515245u + 12345u;
-    int tremble = hp - static_cast<int>((rand_ >> 16) % 3);
+    // ゲージは 50 個の目盛り（1 個 2%）。いまの値のすぐ下の 0〜2 個は、毎フレームちらつかせる（消えて見える）。
+    // ちらつきの乱数は、描けない絵でも進める（同じ画面のほかのゲージと同じ並びにする）
+    constexpr int kSegments = 50;
+    const int filled_to = static_cast<int>(st.gauge_hp) / 2;
+    flicker_ = flicker_ * 1103515245u + 12345u;
+    const int flicker_from = filled_to - static_cast<int>((flicker_ >> 16) % 3);
     SDL_Texture* tex = image_tex(o.src.gr);
     if (!tex) return;
-    // クリアの線（80% なら 40 個目から上が線より上の絵）
-    const int line = std::clamp(static_cast<int>(std::lround(st.gauge_border / 2)), 1, 50);
-    for (int i = 1; i <= 50; ++i) {
-        int f;
-        if (!st.gauge_survival) {
-            if (i < line) f = ((i < tremble || hp <= i || i == 1) && i <= hp) ? cyc + 1 : cyc + 3;
-            else if (tremble <= i && i < hp && i != 1) f = cyc + 2;
-            else if (hp < i) f = cyc + 2;
-            else f = cyc;
-        } else if (i < tremble || hp <= i || i == 1) {
-            f = hp < i ? cyc + 2 : cyc;
-        } else {
-            f = cyc + 2;
-        }
+    // 絵のコマは 4 つで 1 組（0 線より上で点いている・1 線より下で点いている・2 線より上で消えている・3 線より下で消えている）。
+    // 組が複数あれば、src のタイマーで順に送る（光って流れるゲージ）
+    const int frames = o.src.graphcount();
+    const int sets = frames / 4;
+    int set_base = 0;
+    if (sets > 1 && o.src.cycle > 0) {
+        const int phase = static_cast<int>(st.timers->lapse(o.src.timer, st.now_ms)) % o.src.cycle;
+        set_base = sets * phase / o.src.cycle * 4;
+    }
+    const int border = std::clamp(static_cast<int>(std::lround(st.gauge_border / 2)), 1, kSegments);  // クリアの線（80% なら 40 個目から上）
+    for (int seg = 1; seg <= kSegments; ++seg) {
+        const bool steady = seg < flicker_from || seg >= filled_to || seg == 1;  // 1 個目はちらつかない
+        const bool lit = seg <= filled_to && steady;
+        // 落ちたら終わりのゲージは、線の上下を分けない
+        const bool below_border = !st.gauge_survival && seg < border;
+        const int frame = set_base + (lit ? 0 : 2) + (below_border ? 1 : 0);
         Item it;
         it.sort = d.sort;
         it.tex = tex;
-        it.src = frame_rect(o.src, std::min(f, count - 1));
+        it.src = frame_rect(o.src, std::min(frame, frames - 1));
         it.d = d;
-        // カスタムゲージの色：コマの 0・2 はクリアの線より上（落ちたら終わりのゲージは全部）、1・3 は線より下の色
-        if (const uint32_t tint = (f - cyc) % 2 ? st.gauge_tint_low : st.gauge_tint) {
+        // カスタムゲージの色：線より上の目盛り（落ちたら終わりのゲージは全部）と、線より下の目盛りで色を分ける
+        if (const uint32_t tint = below_border ? st.gauge_tint_low : st.gauge_tint) {
             if (SDL_Texture* g = gray_tex(o.src.gr)) {
                 it.tex = g;
                 it.d.r = d.r * static_cast<int>((tint >> 16) & 0xff) / 255;
@@ -499,19 +495,20 @@ void SkinRenderer::add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st)
     }
     const SkinObject& j = *jp;
     const SkinObject& c = *cp;
-    int digit = 0;
-    if (combo > 0) digit = count_digit(combo);
-    float pos = 0, posn = 0;
-    double jt = st.timers->lapse(j.dst.timer, st.now_ms);
-    SkinDraw cd = eval_dst(c.dst, jt);
-    if (j.src.op[0] == 0 && combo > 0) pos = -(digit * cd.w * 0.5f);
-    else posn = -((digit - 1) * cd.w * 0.5f);
+    const int digits = combo > 0 ? count_digit(combo) : 0;
+    const double jt = st.timers->lapse(j.dst.timer, st.now_ms);
+    const float digit_w = eval_dst(c.dst, jt).w;
+    // 判定の SRC の op1 が 0 なら、判定の文字ごと左へずらして「文字＋数字」をまとめて真ん中にする。
+    // そうでなければ文字は動かさず、数字だけを（1 桁ぶん引いた幅の）真ん中にする
+    const bool shift_together = j.src.op[0] == 0 && combo > 0;
+    const float judge_dx = shift_together ? -(digits * digit_w * 0.5f) : 0.0f;
+    const float number_dx = shift_together ? judge_dx : -((digits - 1) * digit_w * 0.5f);
     // 判定の表示の位置の調整（LR2: Play.cpp:710 の judge_x / judge_y）
     const float ax = static_cast<float>(st.adjust.judge_x), ay = static_cast<float>(st.adjust.judge_y);
-    add_object(j, st, pos + ax, -st.lift_px + ay);
+    add_object(j, st, judge_dx + ax, -st.lift_px + ay);
     if (combo > 0) {
-        SkinDraw jd = eval_dst(j.dst, jt);
-        add_numbers(c.src, c.dst, st, combo, pos + posn + jd.x + ax, jd.y - st.lift_px + ay);
+        const SkinDraw jd = eval_dst(j.dst, jt);
+        add_numbers(c.src, c.dst, st, combo, number_dx + jd.x + ax, jd.y - st.lift_px + ay);
     }
 }
 
@@ -964,6 +961,24 @@ void SkinRenderer::flush(const Lr2Skin& skin) {
             it.d.w *= rx, it.d.h *= ry;
             if (it.clip_top >= 0) it.clip_top = (it.clip_top + adjust_.shift_y) * ry, it.clip_bottom = (it.clip_bottom + adjust_.shift_y) * ry;
         }
+    }
+    if (record_) {
+        // 絵は、読み込んだ順の番号で書く（テクスチャの場所は毎回違うので）
+        auto tex_no = [&](SDL_Texture* t) {
+            for (size_t i = 0; i < textures_.size(); ++i)
+                if (textures_[i] == t) return static_cast<int>(i);
+            return t ? -2 : -1;
+        };
+        char buf[256];
+        for (const Item& it : items_) {
+            const SkinDraw& d = it.d;
+            std::snprintf(buf, sizeof(buf), "%s %d %.2f %.2f %.2f %.2f | %.2f %.2f %.2f %.2f %d %d %d %d %d %d %.2f %d %.1f %.1f %d %d %d ",
+                          it.is_text ? "T" : "I", it.is_text ? it.font : tex_no(it.tex), it.src.x, it.src.y, it.src.w, it.src.h, d.x, d.y,
+                          d.w, d.h, d.a, d.r, d.g, d.b, d.blend, d.filter, d.angle, d.center, it.clip_top, it.clip_bottom, it.align,
+                          it.backbox ? 1 : 0, static_cast<int>(it.sort));
+            *record_ += buf + it.str + "\n";
+        }
+        *record_ += "--\n";
     }
     for (Item& it : items_) {
         if (it.is_text) draw_text(skin, it);

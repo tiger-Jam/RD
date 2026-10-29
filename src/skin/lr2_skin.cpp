@@ -376,41 +376,34 @@ struct Loader {
             return 0;
         }
         int t_skin = skin_num;
-        int if_count = 0;
-        int if_switch[100] = {};
+        // #IF の入れ子。それぞれの段は「その枝を読んでいる／まだ成立した枝が無い／もう成立した枝があった」のどれか。
+        // 入れ子は 99 段まで（それより深い #IF は無いものとして扱う）。外の段が偽でも、中の段だけで読むかを決める（LR2 と同じ）
+        enum class Branch { Taking, Waiting, Done };
+        constexpr size_t kMaxIfDepth = 99;
+        std::vector<Branch> branches;
         for (std::string line : lines_of(bytes)) {
             // LR2 は改行を含めて 7 文字以上の行だけを読む（skinload:888）。改行を除けば 6 文字以上。
             // 素の #ENDIF（6 文字）は読み、素の #ELSE（5 文字）は読まない
             if (line.size() < 6 || line[0] != '#') continue;
             line = std::string(trim(line));
 
-            // #IF / #ELSEIF / #ELSE / #ENDIF（LR2: skinload:888）。欄の値がすべて真なら成立。負の値は常に偽
-            auto cond = [&](const Csv& c) {
-                for (int i = 1; i < 10; ++i) {
-                    int v = c.val(i);
-                    if (v < 0 || v > 999 || !sk.op[v]) return false;
-                }
+            // #IF / #ELSEIF / #ELSE / #ENDIF（LR2: skinload:888）。欄 1〜9 の番号のオプションがすべて真なら成立。範囲の外の番号は偽
+            auto holds = [&](const Csv& c) {
+                for (int i = 1; i < 10; ++i)
+                    if (const int v = c.val(i); v < 0 || v > 999 || !sk.op[v]) return false;
                 return true;
             };
+            const bool open = !branches.empty() && branches.back() != Branch::Done;
             if (line.rfind("#IF", 0) == 0) {
-                if (if_count != 99) {
-                    if_switch[if_count + 1] = cond(split_csv(line)) ? 1 : 2;
-                    if_count++;
-                }
-            } else if (line.rfind("#ELSEIF", 0) == 0 && if_switch[if_count] != 3) {
-                if (if_count) {
-                    if (if_switch[if_count] == 1) if_switch[if_count] = 3;
-                    else if_switch[if_count] = cond(split_csv(line)) ? 1 : 2;
-                }
-            } else if (line.rfind("#ELSE", 0) == 0 && if_switch[if_count] != 3) {
-                if (if_count) if_switch[if_count] = if_switch[if_count] == 1 ? 3 : 1;
+                if (branches.size() < kMaxIfDepth) branches.push_back(holds(split_csv(line)) ? Branch::Taking : Branch::Waiting);
+            } else if (line.rfind("#ELSEIF", 0) == 0) {
+                if (open) branches.back() = branches.back() == Branch::Taking ? Branch::Done : holds(split_csv(line)) ? Branch::Taking : Branch::Waiting;
+            } else if (line.rfind("#ELSE", 0) == 0) {
+                if (open) branches.back() = branches.back() == Branch::Taking ? Branch::Done : Branch::Taking;
             } else if (line.rfind("#ENDIF", 0) == 0) {
-                if (if_count) {
-                    if_switch[if_count] = 0;
-                    if_count--;
-                }
+                if (!branches.empty()) branches.pop_back();
             }
-            if (if_count > 0 && if_switch[if_count] > 1) continue;
+            if (!branches.empty() && branches.back() != Branch::Taking) continue;
 
             Csv c = split_csv(line);
             std::string cmd = to_upper_ascii(c.s(0));
@@ -1008,58 +1001,69 @@ static double change_value(double v1, double v2, double t1, double t2, double t,
     return v1 + (v2 - v1) * r;
 }
 
-SkinDraw eval_dst(const SkinDst& dst, double time) {
-    SkinDraw o;
-    if (dst.keys.empty()) return o;
-    int t = static_cast<int>(time);
-    int t_start = dst.keys.front().time, t_end = dst.keys.back().time;
-    int t2 = t_end;
-    if (!(t_start <= t_end && t_start <= t && (0 <= dst.loop || t <= t_end))) return o;
-    if (t_start == t_end || dst.loop == t_end) {
-        if (t < t2) t2 = t;
-    } else if (dst.loop < t_end) {
-        t2 = t;
-        if (t_end < t) t2 = (t - dst.loop) % (t_end - dst.loop) + dst.loop;
-    } else {
-        t2 = 0;
-    }
-    size_t sel = 0;
-    for (size_t i = 0; i < dst.keys.size(); ++i)
-        if (dst.keys[i].time <= t2) sel = i;
-    const SkinDstKey& k = dst.keys[sel];
-    o.visible = true;
-    o.blend = k.blend;
-    o.center = k.center;
-    o.filter = k.filter;
-    if (t2 != k.time && sel != dst.keys.size() - 1) {
-        const SkinDstKey& n = dst.keys[sel + 1];
-        auto lerp = [&](double a, double b) { return change_value(a, b, k.time, n.time, t2, k.acc); };
-        o.x = static_cast<float>(lerp(k.x, n.x));
-        o.y = static_cast<float>(lerp(k.y, n.y));
-        o.w = static_cast<float>(lerp(k.w, n.w));
-        o.h = static_cast<float>(lerp(k.h, n.h));
-        o.sort = static_cast<float>(lerp(k.sort, n.sort));
-        o.a = static_cast<int>(lerp(k.a, n.a));
-        o.r = static_cast<int>(lerp(k.r, n.r));
-        o.g = static_cast<int>(lerp(k.g, n.g));
-        o.b = static_cast<int>(lerp(k.b, n.b));
-        o.angle = static_cast<float>(lerp(k.angle, n.angle));
-        return o;
-    }
+namespace {
+
+// タイマーの経過時間を、キーフレームの並びの上の時刻（at）にする。見せない時刻なら false。
+// 終わりを過ぎたら：loop が負なら消える、loop が終わりと同じ（か全部が同じ時刻）なら最後の形のまま、
+// loop が終わりより前ならそこから繰り返す、終わりより後なら最初の形に戻る
+bool dst_local_time(const SkinDst& dst, int elapsed, int& at) {
+    const int first = dst.keys.front().time, last = dst.keys.back().time;
+    if (first > last || elapsed < first) return false;
+    if (elapsed > last && dst.loop < 0) return false;
+    if (first == last || dst.loop == last) at = std::min(elapsed, last);
+    else if (dst.loop > last) at = 0;
+    else if (elapsed <= last) at = elapsed;
+    else at = dst.loop + (elapsed - dst.loop) % (last - dst.loop);
+    return true;
+}
+
+void set_from_key(SkinDraw& o, const SkinDstKey& k) {
     o.x = k.x, o.y = k.y, o.w = k.w, o.h = k.h;
     o.a = k.a, o.r = k.r, o.g = k.g, o.b = k.b;
     o.sort = k.sort;
     o.angle = k.angle;
+}
+
+}  // namespace
+
+SkinDraw eval_dst(const SkinDst& dst, double time) {
+    SkinDraw o;
+    if (dst.keys.empty()) return o;
+    int at = 0;
+    if (!dst_local_time(dst, static_cast<int>(time), at)) return o;
+    // その時刻までのキーフレームのうち、並びの一番後ろのもの（無ければ最初のもの。時刻の順に並んでいない DST もそのまま扱う）
+    size_t cur = 0;
+    for (size_t i = dst.keys.size(); i-- > 0;)
+        if (dst.keys[i].time <= at) {
+            cur = i;
+            break;
+        }
+    const SkinDstKey& from = dst.keys[cur];
+    o.visible = true;
+    o.blend = from.blend, o.center = from.center, o.filter = from.filter;
+    if (at == from.time || cur + 1 == dst.keys.size()) {
+        set_from_key(o, from);
+        return o;
+    }
+    // 次のキーフレームとのあいだを補間する（加速の種類は前のキーフレームのもの）
+    const SkinDstKey& to = dst.keys[cur + 1];
+    auto mix = [&](double a, double b) { return change_value(a, b, from.time, to.time, at, from.acc); };
+    o.x = static_cast<float>(mix(from.x, to.x)), o.y = static_cast<float>(mix(from.y, to.y));
+    o.w = static_cast<float>(mix(from.w, to.w)), o.h = static_cast<float>(mix(from.h, to.h));
+    o.a = static_cast<int>(mix(from.a, to.a)), o.r = static_cast<int>(mix(from.r, to.r));
+    o.g = static_cast<int>(mix(from.g, to.g)), o.b = static_cast<int>(mix(from.b, to.b));
+    o.sort = static_cast<float>(mix(from.sort, to.sort));
+    o.angle = static_cast<float>(mix(from.angle, to.angle));
     return o;
 }
 
 int src_frame(const SkinSrc& src, double time) {
-    if (time < 0.0) return 0;
-    int count = src.graphcount();
-    if (count <= 0 || src.cycle <= 0) return 0;
-    int r = (static_cast<int>(time) % src.cycle) * count / src.cycle;
-    if (r >= count || r < 0) r = 0;
-    return r;
+    const int frames = src.graphcount();
+    if (time < 0.0 || frames <= 0 || src.cycle <= 0) return 0;
+    // 1 周（cycle ms）の中のどこにいるかで、コマを等分に割り当てる
+    const int in_cycle = static_cast<int>(time) % src.cycle;
+    const int frame = in_cycle * frames / src.cycle;
+    return frame >= 0 && frame < frames ? frame : 0;
 }
 
 }  // namespace bmj

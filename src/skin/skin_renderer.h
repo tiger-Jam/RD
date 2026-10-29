@@ -147,6 +147,8 @@ public:
     SDL_Texture* create_texture(const SkinImage& img);
     // 特別な番号の画像（LR2: 100=STAGEFILE 101=BACKBMP 102=BANNER）を差し替える。tex が null なら外す（破棄は呼び出し側）
     void set_image_override(int gr, SDL_Texture* tex);
+    // 開発用：描くものを 1 つ 1 行の文字にして out に足していく（null で止める）。書き直しの前後で描くものが同じかを比べるのに使う
+    void set_recorder(std::string* out) { record_ = out; }
 
 private:
     struct Item {
@@ -213,8 +215,9 @@ private:
     void update_movies(const PlaySkinState& st);
     std::vector<std::vector<SDL_Texture*>> font_textures_;  // 画像フォントごとの画像
     std::vector<Item> items_;
+    std::string* record_ = nullptr;
     TextCache text_;
-    uint32_t rand_ = 12345;
+    uint32_t flicker_ = 12345;  // ゲージのちらつきの乱数
 };
 
 }  // namespace bmj

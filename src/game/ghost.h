@@ -26,7 +26,7 @@ public:
     // 列があれば、空POOR を読み飛ばしながら次のノーツの判定を 1 つ進める
     void deal();
     bool has_queue() const { return !queue_.empty(); }
-    int exscore() const { return rate_; }  // LR2の PLAYSCORE::rate（その時点のEXスコア）
+    int exscore() const { return ex_; }  // その時点の EX スコア（LR2 の PLAYSCORE::rate）
     int final_exscore() const { return expect_[4] + expect_[5] * 2; }  // LR2の PLAYSCORE::exscore
     int judge(int j) const { return judge_[j]; }
     int expect(int j) const { return expect_[j]; }
@@ -35,7 +35,7 @@ public:
     const std::string& name() const { return name_; }
 
 private:
-    int total_notes_ = 0, now_note_ = 0, rate_ = 0;
+    int total_notes_ = 0, now_note_ = 0, ex_ = 0;
     std::array<int, 6> expect_{}, judge_{};
     std::vector<int8_t> queue_;
     size_t read_ = 0;

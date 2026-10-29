@@ -42,40 +42,59 @@ int hex_char(char c) {
 
 bool starts_with(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
 
-// 生のチャンネル番号を、LR2内部のop番号に変換する（LR2: channelConvert）。-1は捨てる
-int channel_convert(int ch) {
-    switch (ch) {
-    case 0: case 10: case 20: case 30: case 40: case 50: case 60: case 130: case 140:
-        return -1;
-    default: break;
-    }
-    // 1P/2Pの可視・不可視・LN・地雷はどれも「x6が皿、x7は捨てる、x8/x9が6/7鍵」
-    auto lane_group = [](int c, int base) -> int {
-        int d = c - base;
-        if (d >= 1 && d <= 5) return c;
-        if (d == 6) return base;
-        if (d == 7) return -1;
-        if (d == 8) return base + 6;
-        if (d == 9) return base + 7;
-        return c;
-    };
-    for (int base : {10, 20, 30, 40, 50, 60, 130, 140}) {
-        if (ch > base && ch < base + 10) return lane_group(ch, base);
-    }
-    return ch;
-}
+// 譜面の中の 1 つのもの（チャンネルの 1 つの値）の種類
+enum class ObjType : uint8_t {
+    Other,      // 使わないチャンネル（並びと時刻の計算にだけ入る）
+    Bgm, Measure, Bpm, Bga, BgaPoor, BgaLayer, ExBpm, Stop,
+    Note,       // 見えるノーツ（LN の始点もこれになる）
+    Invisible,  // 見えないノーツ
+    LnMark,     // 5x/6x の LN の端（始点か終点かは並べてから決まる）
+    LnEnd,      // LN の終点になったもの（以後は使わない）
+    Mine,       // 地雷
+};
 
 struct Obj {
     double pos = 0.0;  // 小節番号 + 小節内の位置
-    int op = 0;
+    ObjType type = ObjType::Other;
+    int side = 1, lane = 0;  // 1P/2P と、レーン（0 = 皿、1〜7 = 鍵盤）
+    int key = 0;       // 同じ位置で並べる順（チャンネルの番号の順。レーンは皿・1〜7 鍵の順）
     double val = 0.0;
-    int order = 0;     // 同じ位置・同じopの並びを安定させるため
+    int order = 0;     // 同じ位置・同じ key の並びを安定させるため
     double real_ms = 0.0;
     double beat = 0.0;  // スクロール位置（拍）
     double real_ln = -1.0, beat_ln = 0.0;
     double bpm = 0.0;   // この位置での BPM（主 BPM を数えるため）
     int mine = 0;
 };
+
+// チャンネルの番号（16 進の上の桁 × 10 + 下の桁）から、種類・1P/2P・レーンを決める。捨てるチャンネルなら false。
+// ノーツのチャンネル（1x/2x 見える、3x/4x 見えない、5x/6x LN、Dx/Ex 地雷）は、どれも「x1〜x5 が 1〜5 鍵、x6 が皿、x8・x9 が 6・7 鍵。
+// x0・x7 は捨てる」
+bool decode_channel(int ch, Obj& o) {
+    struct Group {
+        int base;
+        ObjType type;
+        int side;
+    };
+    static const Group kGroups[] = {{10, ObjType::Note, 1},      {20, ObjType::Note, 2},   {30, ObjType::Invisible, 1},
+                                    {40, ObjType::Invisible, 2}, {50, ObjType::LnMark, 1}, {60, ObjType::LnMark, 2},
+                                    {130, ObjType::Mine, 1},     {140, ObjType::Mine, 2}};
+    for (const Group& g : kGroups) {
+        const int digit = ch - g.base;
+        if (digit < 0 || digit > 9) continue;
+        static const int kLaneOfDigit[10] = {-1, 1, 2, 3, 4, 5, 0, -1, 6, 7};
+        const int lane = kLaneOfDigit[digit];
+        if (lane < 0) return false;
+        o.type = g.type, o.side = g.side, o.lane = lane, o.key = g.base + lane;
+        return true;
+    }
+    static const ObjType kLow[10] = {ObjType::Other, ObjType::Bgm,      ObjType::Measure,  ObjType::Bpm,   ObjType::Bga,
+                                     ObjType::Other, ObjType::BgaPoor, ObjType::BgaLayer, ObjType::ExBpm, ObjType::Stop};
+    if (ch == 0) return false;
+    o.type = ch < 10 ? kLow[ch] : ObjType::Other;
+    o.key = ch;
+    return true;
+}
 
 // 選曲用のテキストのヘッダー「#NAME 値」。名前の直後の 1 文字（空白かタブ）を区切りとする（LR2: fileutil:271）
 bool text_header(const std::string& up, const std::string& org, const char* name, std::string& out) {
@@ -197,8 +216,8 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
                 if (len > 0 && measure <= 4999) measure_len[measure] = len;
                 continue;
             }
-            int op = channel_convert(ch);
-            if (op < 0) continue;
+            Obj kind;
+            if (!decode_channel(ch, kind)) continue;
             int div = static_cast<int>(data.size() / 2);
             for (int i = 0; i < div; ++i) {
                 double val;
@@ -208,9 +227,8 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
                     val = base_id(data[i * 2], data[i * 2 + 1], base62);
                 }
                 if (val == 0) continue;
-                Obj o;
+                Obj o = kind;
                 o.pos = measure + static_cast<double>(i) / div;
-                o.op = op;
                 o.val = val;
                 o.order = order++;
                 objs.push_back(o);
@@ -274,7 +292,9 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     // DP（2P側）とPMSはこのプレイヤーの対象外。2P 側の地雷（E1〜E9）は LR2 も鍵盤数の判定に数えない
     // （songmanage:2996）ので、それだけなら SP の譜面として読み、地雷は捨てる
     bool p2_mine = false;
-    auto p2_note = [](const Obj& o) { return (o.op >= 20 && o.op <= 29) || (o.op >= 40 && o.op <= 49) || (o.op >= 60 && o.op <= 69); };
+    auto p2_note = [](const Obj& o) {
+        return o.side == 2 && (o.type == ObjType::Note || o.type == ObjType::Invisible || o.type == ObjType::LnMark);
+    };
     for (const Obj& o : objs) {
         if (p2_note(o)) {
             res.double_play = true;
@@ -283,7 +303,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
                 return res;
             }
         }
-        if (o.op >= 140 && o.op <= 149) p2_mine = true;
+        if (o.side == 2 && o.type == ObjType::Mine) p2_mine = true;
     }
     if (res.double_play) objs.erase(std::remove_if(objs.begin(), objs.end(), p2_note), objs.end());
     if (p2_mine) res.warnings.push_back("2P 側の地雷を捨てた");
@@ -291,7 +311,7 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     // 小節0の頭にノーツがあれば、全体を1小節後ろにずらす（LR2: bmsload:2581）
     bool shift = false;
     for (const Obj& o : objs)
-        if (o.pos == 0.0 && ((o.op >= 10 && o.op <= 28) || (o.op >= 30 && o.op <= 48))) shift = true;
+        if (o.pos == 0.0 && (o.type == ObjType::Note || o.type == ObjType::Invisible)) shift = true;
     if (shift) {
         for (Obj& o : objs) o.pos += 1.0;
         std::map<int, double> shifted;
@@ -307,16 +327,16 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     for (int m = 0; m <= max_measure + 1; ++m) {
         Obj o;
         o.pos = m;
-        o.op = 2;
+        o.type = ObjType::Measure, o.key = 2;
         o.val = measure_len.count(m) ? measure_len[m] : 1.0;
         o.order = order++;
         objs.push_back(o);
     }
 
-    // 位置、同じ位置ならop番号の順（LR2: CMP_NotesByBmsTiming）
+    // 位置、同じ位置ならチャンネルの順（LR2: CMP_NotesByBmsTiming）
     std::stable_sort(objs.begin(), objs.end(), [](const Obj& a, const Obj& b) {
         if (a.pos != b.pos) return a.pos < b.pos;
-        return a.op < b.op;
+        return a.key < b.key;
     });
 
     // 時刻とスクロール位置を求める（LR2: bmsload:2670-2935）。
@@ -361,15 +381,15 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
         o.real_ms = real_ms;
         o.beat = beat;
         o.bpm = now_bpm;  // 同じ位置の BPM の変更は先に処理してある
-        if (o.op == 2) {
+        if (o.type == ObjType::Measure) {
             mea_len = o.val;
             BarLine bl;
             bl.time_us = static_cast<int64_t>(std::llround(real_ms * 1000.0));
             bl.pos = beat;
             chart.bars.push_back(bl);
-        } else if (o.op == 3 || o.op == 8) {
+        } else if (o.type == ObjType::Bpm || o.type == ObjType::ExBpm) {
             double bpm = o.val;
-            if (o.op == 8) {
+            if (o.type == ObjType::ExBpm) {
                 int id = static_cast<int>(o.val);
                 bpm = (id >= 0 && id < kSlots) ? bpm_slot[id] : -1.0;
                 if (bpm == -1.0) bpm = 1.0;  // 未定義の #BPMxx は1.0（LR2: bmsload:2844）
@@ -381,49 +401,48 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
                 now_bpm = bpm;
                 push_seg(real_ms, beat, now_bpm, false);
             }
-        } else if (o.op == 9) {
+        } else if (o.type == ObjType::Stop) {
             int id = static_cast<int>(o.val);
             pending_stop = (id >= 0 && id < kSlots) ? stop_slot[id] : -1;  // 同じ位置のSTOPは最後のものだけ
         }
     }
     chart.initial_bpm = header_bpm > 0.0 ? header_bpm : chart.scroll.front().bpm;
 
-    // LNの組み立て。時刻順に見て、5x/6xは始点と終点を交互に、#LNOBJは直前のノーツの終点にする（LR2: bmsload:2755）
+    // LNの組み立て（LR2: bmsload:2755）。時刻順に見て、5x/6x の端は始点と終点を交互に、#LNOBJ の値のノーツは直前のノーツの終点にする。
+    // 「始点が開いている」はレーンごとに 1 つで、5x/6x と #LNOBJ で同じものを使う（混ざった譜面でもそのまま組になる）
     std::stable_sort(objs.begin(), objs.end(), [](const Obj& a, const Obj& b) {
         if (a.real_ms != b.real_ms) return a.real_ms < b.real_ms;
         if (a.pos != b.pos) return a.pos < b.pos;
-        return a.op < b.op;
+        return a.key < b.key;
     });
-    int open[30];
-    std::fill(std::begin(open), std::end(open), -1);
+    int open_head[3][kLaneCount];  // [1P/2P][レーン] → 始点の objs の番号（-1 = 開いていない）
+    for (auto& row : open_head) std::fill(std::begin(row), std::end(row), -1);
+    auto close_ln = [&](Obj& end, int& head) {
+        Obj& h = objs[static_cast<size_t>(head)];
+        h.real_ln = end.real_ms;
+        h.beat_ln = end.beat;
+        head = -1;
+        end.type = ObjType::LnEnd;  // 終点は以後使わない（終点のキー音は鳴らない）
+    };
     for (size_t i = 0; i < objs.size(); ++i) {
         Obj& o = objs[i];
-        if (o.op >= 50 && o.op <= 69) {
-            int lane_op = o.op - 40;
-            if (open[lane_op] == -1) {
-                o.op = lane_op;
-                open[lane_op] = static_cast<int>(i);
+        if (o.type == ObjType::LnMark) {
+            int& head = open_head[o.side][o.lane];
+            if (head == -1) {
+                o.type = ObjType::Note;  // 始点はふつうのノーツとしてレーンに入る
+                head = static_cast<int>(i);
             } else {
-                Obj& head = objs[open[lane_op]];
-                head.real_ln = o.real_ms;
-                head.beat_ln = o.beat;
-                open[lane_op] = -1;
+                close_ln(o, head);
             }
-        } else if (lnobj != -1 && o.op >= 10 && o.op <= 29) {
-            if (static_cast<int>(o.val) != lnobj || open[o.op] == -1) {
-                open[o.op] = static_cast<int>(i);
-            } else {
-                Obj& head = objs[open[o.op]];
-                head.real_ln = o.real_ms;
-                head.beat_ln = o.beat;
-                open[o.op] = -1;
-                o.op += 40;  // 終点は以後無視される（終点のキー音は鳴らない）
-            }
-        }
-        if (o.op >= 130 && o.op < 149) {
-            o.op -= 120;
+        } else if (o.type == ObjType::Note && lnobj != -1) {
+            int& head = open_head[o.side][o.lane];
+            if (static_cast<int>(o.val) == lnobj && head != -1) close_ln(o, head);
+            else head = static_cast<int>(i);
+        } else if (o.type == ObjType::Mine) {
+            // 地雷：値はダメージ。レーンにはノーツとして入れる（2P 側の地雷は使わない）
             o.mine = static_cast<int>(o.val);
             o.val = 0;
+            o.type = o.side == 1 ? ObjType::Note : ObjType::Other;
         }
     }
 
@@ -436,31 +455,31 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
     bool has_scratch = false;
     std::map<double, int> per_bpm;  // 主 BPM 用。重なりで捨てるノーツも数える（LR2: bmsload:2899）
     for (const Obj& o : objs) {
-        if (o.op == 1) {
+        if (o.type == ObjType::Bgm) {
             chart.bgm.push_back({to_us(o.real_ms), static_cast<uint16_t>(o.val)});
             continue;
         }
-        if (o.op >= 4 && o.op <= 7 && o.op != 5) {
+        if (o.type == ObjType::Bga || o.type == ObjType::BgaPoor || o.type == ObjType::BgaLayer) {
             BgaEvent e;
             e.time_us = to_us(o.real_ms);
-            e.layer = o.op == 4 ? BgaEvent::Layer::Base : o.op == 6 ? BgaEvent::Layer::Poor : BgaEvent::Layer::Layer;
+            e.layer = o.type == ObjType::Bga ? BgaEvent::Layer::Base : o.type == ObjType::BgaPoor ? BgaEvent::Layer::Poor : BgaEvent::Layer::Layer;
             e.image = static_cast<uint16_t>(o.val);
             chart.bga.push_back(e);
             continue;
         }
-        if (o.op >= 30 && o.op <= 37) {
+        if (o.type == ObjType::Invisible && o.side == 1) {
             Note n;
             n.time_us = to_us(o.real_ms);
             n.pos = o.beat;
-            n.lane = static_cast<uint8_t>(o.op - 30);
+            n.lane = static_cast<uint8_t>(o.lane);
             n.kind = NoteKind::Invisible;
             n.sound = static_cast<uint16_t>(o.val);
             lane_notes.push_back(n);
             continue;
         }
-        if (o.op < 10 || o.op > 17) continue;
+        if (o.type != ObjType::Note || o.side != 1) continue;
         per_bpm[o.bpm]++;
-        int lane = o.op - 10;
+        const int lane = o.lane;
         Note n;
         n.time_us = to_us(o.real_ms);
         n.pos = o.beat;

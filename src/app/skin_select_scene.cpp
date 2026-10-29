@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
+#include <filesystem>
 
 #include "app/select_context.h"
 #include "audio/system_sound.h"
@@ -104,8 +106,9 @@ public:
         ctx_.skin = skin_.get();
     }
 
-    // 1 フレーム分を描く（タイマー 1・40・41 は、LR2 と同じく時間が来たら立てる）
-    void draw() {
+    void set_recorder(std::string* out) { renderer_.set_recorder(out); }
+    // 1 フレーム分を描く（タイマー 1・40・41 は、LR2 と同じく時間が来たら立てる）。at_ms を渡せば、その時刻で描く（開発用）
+    void draw(double at_ms = -1) {
         if (!tex_) return;
         SDL_Renderer* r = app_.renderer;
         SDL_Texture* prev_target = SDL_GetRenderTarget(r);  // 画面の描き先（frame_target_set）に戻す
@@ -121,7 +124,7 @@ public:
             SDL_SetRenderTarget(r, full_);
             SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
             SDL_RenderClear(r);
-            double t = (SDL_GetTicksNS() - start_ns_) / 1e6;
+            double t = at_ms >= 0 ? at_ms : (SDL_GetTicksNS() - start_ns_) / 1e6;
             if (!timers_.on(1) && t > skin_->startinput) timers_.set(1, t);
             if (!timers_.on(40) && t > skin_->loadstart + skin_->loadend) timers_.set(40, t);
             if (timers_.on(40) && !timers_.on(41) && timers_.lapse(40, t) > skin_->playstart) timers_.set(41, t);
@@ -251,6 +254,23 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         if (o.src.gr == 105 && o.src.w > 0 && o.src.h > 0) pw = o.src.w, ph = o.src.h;
     SkinPreview preview(app, pw, ph);
     renderer.set_image_override(105, preview.texture());
+    // 開発用：BMJ_RENDER_DUMP のファイルに、プレー・選曲・リザルトのスキンの試し見で描くものを、決まった時刻ごとに書いて終わる
+    if (const char* dump = dev_env("BMJ_RENDER_DUMP")) {
+        std::string out;
+        for (int type : {0, 5, 7}) {
+            catalog.select_type(type, app.cfg);
+            preview.select(catalog.current(app.cfg), type);
+            out += "== type " + std::to_string(type) + "\n";
+            preview.set_recorder(&out);
+            for (int ms = 0; ms <= 20000; ms += 125) {
+                out += "t " + std::to_string(ms) + "\n";
+                preview.draw(ms);
+            }
+            preview.set_recorder(nullptr);
+        }
+        std::ofstream(std::filesystem::u8path(dump), std::ios::binary) << out;
+        return false;
+    }
 
     SkinTimers timers;
     timers.set(0, 0);

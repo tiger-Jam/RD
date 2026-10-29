@@ -104,7 +104,8 @@ void Ghost::set_default(int target, int notes) {
     else if (target == 77) pg = static_cast<int>(notes * 5.0 / 9.0), name_ = "RANK AA";
     else if (target == 66) pg = static_cast<int>(notes * 3.0 / 9.0), name_ = "RANK A";
     else if (target >= 50 && target <= 100) {
-        pg = static_cast<int>(((target + target) - 100.0) * notes) / 100;
+        // 割合 target% の EX スコアになる PGREAT の数（残りは GREAT）。PGREAT の割合は 2 × target − 100 %
+        pg = static_cast<int>((2.0 * target - 100.0) * notes) / 100;
         name_ = std::to_string(target) + "%";
     } else {
         name_ = "NO TARGET";
@@ -135,28 +136,33 @@ void Ghost::set_from_judges(std::vector<int8_t> judges, std::string name) {
 
 void Ghost::deal() {
     if (total_notes_ < 1) return;
-    if (!queue_.empty()) {
-        // 空POOR はノーツを進めずに POOR に足し、次のノーツの判定まで読む。列が尽きたら止まる
-        while (read_ < queue_.size()) {
-            int8_t j = queue_[read_++];
-            if (j == 0) {
-                judge_[1]++;
-                rate_ = judge_[4] + judge_[5] * 2;
-                continue;
-            }
-            if (j > 0 && j < 6) {
-                judge_[j]++;
-                now_note_++;
-                rate_ = judge_[4] + judge_[5] * 2;
-            }
-            return;
+    auto update_ex = [&] { ex_ = judge_[5] * 2 + judge_[4]; };
+    if (queue_.empty()) {
+        // 判定の列が無い：何ノーツ目かに比例して、最後の判定の数を割り振る（1 ノーツ目では、まだ何も数えない）
+        if (now_note_ > 0) {
+            const int reached = now_note_ + 1;
+            for (int i = 0; i < 6; ++i) judge_[i] = reached * expect_[i] / total_notes_;
+        }
+        update_ex();
+        ++now_note_;
+        return;
+    }
+    // 判定の列がある：空POOR（0）はノーツを進めずに POOR に足して読み進め、ノーツ 1 つ分の判定を読んだら止まる。列が尽きたら何もしない
+    for (; read_ < queue_.size(); ++read_) {
+        const int8_t j = queue_[read_];
+        if (j == 0) {
+            judge_[1]++;
+            update_ex();
+            continue;
+        }
+        ++read_;
+        if (j > 0 && j < 6) {
+            judge_[j]++;
+            ++now_note_;
+            update_ex();
         }
         return;
     }
-    if (now_note_ > 0)
-        for (int i = 0; i < 6; ++i) judge_[i] = ((now_note_ + 1) * expect_[i]) / total_notes_;
-    rate_ = judge_[4] + judge_[5] * 2;
-    now_note_++;
 }
 
 }  // namespace bmj

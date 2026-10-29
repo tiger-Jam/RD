@@ -41,6 +41,7 @@
 #include "app/skin_catalog.h"
 #include "chart/bms_parser.h"
 #include "chart/chart_loader.h"
+#include "util/hash.h"
 #include "db/difficulty_table.h"
 #include "app/lr2_import.h"
 #include "db/song_db.h"
@@ -87,6 +88,7 @@ struct Options {
     bool copy_assets = false;
     std::string import_lr2_courses;
     std::string chart_attr_list;
+    std::string chart_dump_list;
     bool fill_chart_attrs = false;
     std::string export_chart_attrs;
     // 持っていない譜面の一覧（難易度表の名前・記号・URL のどれか）。--level で絞る（何度でも）。出したら終わる
@@ -142,7 +144,8 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--skin-parts") o.skin_parts = next();
         else if (a == "--list-owned") o.list_owned = true;
         else if (a == "--chart-attr") o.chart_attr_list = next();  // 開発用：ファイルの 1 行ずつの譜面を分析して出す
-        else if (a == "--fill-chart-attrs") o.fill_chart_attrs = true;  // まだ傾向を分析していない譜面を全部分析して終わる
+        else if (a == "--fill-chart-attrs") o.fill_chart_attrs = true;
+        else if (a == "--chart-dump") o.chart_dump_list = next();  // 開発用：ファイルの 1 行ずつの譜面を読み、ノーツの中身の要約を出す  // まだ傾向を分析していない譜面を全部分析して終わる
         else if (a == "--export-chart-attrs") o.export_chart_attrs = next();  // 分析した傾向を書き出して終わる（配る分析の結果を作る）
         else if (a == "--serve") o.serve = true;
         else if (a == "--update-tables") o.update_tables = true;
@@ -661,6 +664,31 @@ int main(int argc, char** argv) {
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
     if (opt.serve) return serve_charts();
     if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file, opt.list_all);
+    if (!opt.chart_dump_list.empty()) {
+        // 開発用：読み込みを書き直す前後で、ノーツが同じかを比べる。1 行に「パス<TAB>ノーツ数<TAB>中身の md5」
+        std::ifstream in(std::filesystem::u8path(opt.chart_dump_list));
+        for (std::string path; std::getline(in, path);) {
+            if (!path.empty() && path.back() == '\r') path.pop_back();
+            std::ifstream f(std::filesystem::u8path(path), std::ios::binary);
+            std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            BmsParseOptions popt;
+            popt.random_seed = 1;
+            BmsParseResult r = parse_chart_bytes(path, bytes, popt);
+            if (!r.ok) {
+                std::printf("%s\t-\n", path.c_str());
+                continue;
+            }
+            std::string s;
+            char buf[160];
+            for (const Note& n : r.chart.notes) {
+                std::snprintf(buf, sizeof(buf), "%lld,%lld,%d,%d,%d,%d,%d,%d;", static_cast<long long>(n.time_us), static_cast<long long>(n.end_us),
+                              n.lane, static_cast<int>(n.kind), n.sound, n.end_sound, n.damage, n.ln_type);
+                s += buf;
+            }
+            std::printf("%s\t%zu\t%s\n", path.c_str(), r.chart.notes.size(), md5_hex(s).c_str());
+        }
+        return 0;
+    }
     if (!opt.chart_attr_list.empty()) {
         // 開発用：譜面の傾向の分析（oraja-constellator と比べるため）。1 行に「パス<TAB>傾向<TAB>二番目<TAB>副分類<TAB>複合<TAB>特徴量…」
         std::ifstream in(std::filesystem::u8path(opt.chart_attr_list));

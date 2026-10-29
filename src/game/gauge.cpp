@@ -10,21 +10,20 @@ void GaugeSet::init(int total, int notes, int course) {
     if (course_) hp_[kGroove] = hp_[kEasy] = 100.0;
     if (notes <= 0) return;
 
-    // HARD系のダメージ係数（LR2: bmsload:3853）
-    double dmg_notebase;
-    if (notes < 20) dmg_notebase = 10.0;
-    else if (notes < 30) dmg_notebase = 10.0 - (notes - 20.0) / 10.0 * 2.0;
-    else if (notes < 45) dmg_notebase = 7.0 - (notes - 30.0) / 15.0;
-    else if (notes < 60) dmg_notebase = 6.0 - (notes - 45.0) / 15.0;
-    else if (notes < 125) dmg_notebase = 5.0 - (notes - 60.0) / 65.0;
-    else if (notes < 250) dmg_notebase = 4.0 - (notes - 125.0) / 125.0;
-    else if (notes < 500) dmg_notebase = 3.0 - (notes - 250.0) / 250.0;
-    else if (notes < 1000) dmg_notebase = 2.0 - (notes - 500.0) / 500.0;
-    else dmg_notebase = 1;
-    int recover = static_cast<int>((total - 80.0) * 0.125 / 2);
-    if (recover <= 0) recover = 1;
-    double dmg_totalbase = 100.0 / static_cast<double>(recover);
-    double dmg = std::max(dmg_notebase * 10, dmg_totalbase) / 10.0;
+    // HARD系の減りの倍率（LR2: bmsload:3853）。ノーツ数から決まるものと TOTAL から決まるものの、大きいほう。
+    // ノーツ数の側は、区切りの間を直線でつなぐ（区切りでは次の区間の値に飛ぶ）。20 未満は 10、1000 以上は 1
+    struct Span {
+        double from, to, at_from, at_to;
+    };
+    static const Span kNoteSpans[] = {{20, 30, 10, 8}, {30, 45, 7, 6},    {45, 60, 6, 5},     {60, 125, 5, 4},
+                                      {125, 250, 4, 3}, {250, 500, 3, 2}, {500, 1000, 2, 1}};
+    double by_notes = notes < 20 ? 10.0 : 1.0;
+    for (const Span& sp : kNoteSpans)
+        if (notes >= sp.from && notes < sp.to) by_notes = sp.at_from - (sp.at_from - sp.at_to) * (notes - sp.from) / (sp.to - sp.from);
+    // TOTAL の側：TOTAL が小さい（回復が少ない）譜面ほど、減りを大きくする
+    const int heal_steps = std::max(1, static_cast<int>((total - 80.0) * 0.125 / 2));
+    const double by_total = 100.0 / heal_steps;
+    const double dmg = std::max(by_notes * 10, by_total) / 10.0;
 
     // LR2はTOTAL/ノーツ数をfloatで計算している
     double per = total / static_cast<float>(notes);

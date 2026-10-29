@@ -34,157 +34,162 @@ bool PlayContext::bargraph(int type, double& val, double& max) const {
     return bargraph_raw(type, val, max);
 }
 
+// スキンの条件の番号。負の番号は、その条件が偽のときに真（0 はいつも真）
 bool PlayContext::option_raw(int option) const {
-    bool ret = option >= 0;
-    if (!ret) option = -option;
+    const bool negated = option < 0;
+    const bool value = option_value(negated ? -option : option);
+    return negated ? !value : value;
+}
+
+bool PlayContext::option_value(int option) const {
     const PlayStats* st = stats();
     double hp = gauge_hp();
     int gtype = judge ? judge->gauge_type() : gauge_type;
-    if (bool v; course_option(course, option, v)) return v ? ret : !ret;
+    if (bool v; course_option(course, option, v)) return v;
     // コースでは GROOVE/EASY も赤いゲージ（42/44 は偽、43/45 は真）
     const bool normal_gauge = (gtype == kGroove || gtype == kEasy) && !course;
     auto rank_of = [](int ex, int notes) { return notes > 0 ? ex * 9 / (notes * 2) : 0; };
     switch (option) {
     case 0: return true;
-    case 30: return bga_size == 0 ? ret : !ret;  // BGA の大きさ NORMAL / EXTEND
-    case 31: return bga_size == 1 ? ret : !ret;
-    case 32: return autoplay ? !ret : ret;
-    case 33: return autoplay ? ret : !ret;
+    case 30: return bga_size == 0;  // BGA の大きさ NORMAL / EXTEND
+    case 31: return bga_size == 1;
+    case 32: return !autoplay;
+    case 33: return autoplay;
     // ゴーストの位置（SILENT のときは出さない）
-    case 34: return ghost_pos == 0 || silent ? ret : !ret;
-    case 35: case 36: case 37: return ghost_pos == option - 34 && !silent ? ret : !ret;
-    case 38: return score_graph ? !ret : ret;  // スコアグラフ OFF / ON
-    case 39: return score_graph ? ret : !ret;
-    case 40: return bga_shown ? !ret : ret;  // BGA OFF / ON
-    case 41: return bga_shown ? ret : !ret;
-    case 42: case 44: return normal_gauge ? ret : !ret;
-    case 43: case 45: return normal_gauge ? !ret : ret;
+    case 34: return ghost_pos == 0 || silent;
+    case 35: case 36: case 37: return ghost_pos == option - 34 && !silent;
+    case 38: return !score_graph;  // スコアグラフ OFF / ON
+    case 39: return score_graph;
+    case 40: return !bga_shown;  // BGA OFF / ON
+    case 41: return bga_shown;
+    case 42: case 44: return normal_gauge;
+    case 43: case 45: return !normal_gauge;
     // いまのステージ（280〜288 は 1〜9 ステージ目、289 は最後のステージ。最後のステージは 280 番台より優先。単曲でも 289 は真）
     case 280: case 281: case 282: case 283: case 284: case 285: case 286: case 287: case 288:
-        return course_stage == option - 280 && course_stage != course_stages - 1 ? ret : !ret;
-    case 289: return course_stage == course_stages - 1 ? ret : !ret;
-    case 46: return ret;
-    case 47: return !ret;
-    case 50: return ret;              // オフライン
-    case 80: return in_result || !timers.on(40) ? ret : !ret;  // 読み込み中（リザルトではタイマー40が立たないので真）
-    case 81: return !in_result && timers.on(40) ? ret : !ret;
-    case 54: return ret;  // 皿の自動演奏 OFF / ON（BMjoy には無い）
-    case 55: return !ret;
-    case 308: return st && st->exscore() == 0 ? ret : !ret;  // このプレイの EX スコアが 0
+        return course_stage == option - 280 && course_stage != course_stages - 1;
+    case 289: return course_stage == course_stages - 1;
+    case 46: return true;
+    case 47: return false;
+    case 50: return true;              // オフライン
+    case 80: return in_result || !timers.on(40);  // 読み込み中（リザルトではタイマー40が立たないので真）
+    case 81: return !in_result && timers.on(40);
+    case 54: return true;  // 皿の自動演奏 OFF / ON（BMjoy には無い）
+    case 55: return false;
+    case 308: return st && st->exscore() == 0;  // このプレイの EX スコアが 0
     case 318: {  // 2P 側の EX が 0（ターゲット無しを含む）
         const Ghost* g = p2_ghost();
-        return !g || g->exscore() == 0 || !st || st->total_notes == 0 ? ret : !ret;
+        return !g || g->exscore() == 0 || !st || st->total_notes == 0;
     }
-    case 350: return result_flip ? !ret : ret;  // リザルトのフリップ無効 / 有効
-    case 351: return result_flip ? ret : !ret;
-    case 622: return ret;  // ゴーストバトルではない
+    case 350: return !result_flip;  // リザルトのフリップ無効 / 有効
+    case 351: return result_flip;
+    case 622: return true;  // ゴーストバトルではない
     // リプレイ：82=記録も再生もしない 83=記録している 84=再生している
-    case 82: return !replay && !replay_rec ? ret : !ret;
-    case 83: return replay_rec ? ret : !ret;
-    case 84: return replay ? ret : !ret;
-    case 90: return result_clear >= 2 ? ret : !ret;  // クリア
-    case 91: return result_clear < 2 ? ret : !ret;   // 失敗
+    case 82: return !replay && !replay_rec;
+    case 83: return replay_rec;
+    case 84: return replay;
+    case 90: return result_clear >= 2;  // クリア
+    case 91: return result_clear < 2;   // 失敗
     case 176: case 177: {
         // BPMが変わらない曲／変わる曲
-        if (!chart || chart->scroll.empty()) return option == 176 ? ret : !ret;
+        if (!chart || chart->scroll.empty()) return option == 176;
         double lo = 1e9, hi = 0;
         for (const ScrollSeg& s : chart->scroll) lo = std::min(lo, s.bpm), hi = std::max(hi, s.bpm);
-        return (hi != lo) == (option == 177) ? ret : !ret;
+        return (hi != lo) == (option == 177);
     }
-    case 180: return chart && chart->judge_rank < 1 ? ret : !ret;  // 判定ランク VERY HARD
-    case 181: return chart && chart->judge_rank == 1 ? ret : !ret;
-    case 182: return chart && chart->judge_rank == 2 ? ret : !ret;
-    case 183: return chart && chart->judge_rank > 2 ? ret : !ret;
+    case 180: return chart && chart->judge_rank < 1;  // 判定ランク VERY HARD
+    case 181: return chart && chart->judge_rank == 1;
+    case 182: return chart && chart->judge_rank == 2;
+    case 183: return chart && chart->judge_rank > 2;
     case 300: case 301: case 302: case 303: case 304: case 305: case 306: case 307:
     case 340: case 341: case 342: case 343: case 344: case 345: case 346: case 347: {
         // このプレイのランク（AAA..F）。総ノーツ数に対して（LR2: 300-307 / 340-347）
-        if (!st || st->total_notes == 0) return !ret;
+        if (!st || st->total_notes == 0) return false;
         int r = rank_of(st->exscore(), st->total_notes);
         int k = (option % 10) % 8;  // 0=AAA .. 7=F
-        if (k == 0) return r >= 8 ? ret : !ret;
-        if (k == 7) return (st->exscore() > 0 && r <= 1) ? ret : !ret;
-        return r == 8 - k ? ret : !ret;
+        if (k == 0) return r >= 8;
+        if (k == 7) return (st->exscore() > 0 && r <= 1);
+        return r == 8 - k;
     }
     case 320: case 321: case 322: case 323: case 324: case 325: case 326: case 327: {
         // このプレイの前の自己ベストのランク
-        if (old_total_notes == 0) return !ret;
+        if (old_total_notes == 0) return false;
         int r = rank_of(old_exscore, old_total_notes);
         int k = option - 320;
-        if (k == 0) return r >= 8 ? ret : !ret;
-        if (k == 7) return r <= 1 ? ret : !ret;
-        return r == 8 - k ? ret : !ret;
+        if (k == 0) return r >= 8;
+        if (k == 7) return r <= 1;
+        return r == 8 - k;
     }
-    case 330: return st && st->exscore() > old_exscore ? ret : !ret;    // スコア更新
-    case 331: return st && st->max_combo > old_maxcombo ? ret : !ret;   // コンボ更新
-    case 332: return st && old_minbp >= 0 && bp_now() < old_minbp ? ret : !ret;  // BP更新
+    case 330: return st && st->exscore() > old_exscore;    // スコア更新
+    case 331: return st && st->max_combo > old_maxcombo;   // コンボ更新
+    case 332: return st && old_minbp >= 0 && bp_now() < old_minbp;  // BP更新
     case 335: {
         // ランク更新
-        if (!st || st->total_notes == 0 || old_total_notes == 0) return !ret;
-        return rank_of(old_exscore, old_total_notes) < rank_of(st->exscore(), st->total_notes) ? ret : !ret;
+        if (!st || st->total_notes == 0 || old_total_notes == 0) return false;
+        return rank_of(old_exscore, old_total_notes) < rank_of(st->exscore(), st->total_notes);
     }
     case 100: case 101: case 102: case 103: case 104: case 105:
-        return skin_lamp(best_clear) == option - 100 ? ret : !ret;  // この譜面の自己ベストのランプ
+        return skin_lamp(best_clear) == option - 100;  // この譜面の自己ベストのランプ
     case 150: case 151: case 152: case 153: case 154: case 155:
-        return chart && chart->meta.difficulty == option - 150 ? ret : !ret;  // 譜面の #DIFFICULTY
-    case 190: return has_stagefile ? !ret : ret;
-    case 191: return has_stagefile ? ret : !ret;
-    case 194: return has_backbmp ? !ret : ret;
-    case 195: return has_backbmp ? ret : !ret;
+        return chart && chart->meta.difficulty == option - 150;  // 譜面の #DIFFICULTY
+    case 190: return !has_stagefile;
+    case 191: return has_stagefile;
+    case 194: return !has_backbmp;
+    case 195: return has_backbmp;
     // 対戦・ゴーストバトル・コース・レーンカバーの調整中は、単曲プレイでは偽
-    case 270: return cover_adjusting && lane_cover_on ? ret : !ret;
+    case 270: return cover_adjusting && lane_cover_on;
     case 10: case 11: case 12: case 13: case 271: case 623:
-        return !ret;
-    case 160: return ret;             // 7KEYS
-    case 161: case 162: case 163: case 164: return !ret;
+        return false;
+    case 160: return true;             // 7KEYS
+    case 161: case 162: case 163: case 164: return false;
     case 200: case 201: case 202: case 203: case 204: case 205: case 206: case 207: {
         // 判定済みノーツ数に対するランク（AAA..F）
-        if (!st || st->note_current == 0) return !ret;
+        if (!st || st->note_current == 0) return false;
         int r = rank_of(st->exscore(), st->note_current);
         int want = 8 - (option - 200);  // 200=AAA(8)
-        if (option == 200) return r >= 8 ? ret : !ret;
-        if (option == 207) return r < 2 ? ret : !ret;
-        return (r < want + 1 && r > want - 1) ? ret : !ret;
+        if (option == 200) return r >= 8;
+        if (option == 207) return r < 2;
+        return (r < want + 1 && r > want - 1);
     }
     case 210: case 211: case 212: case 213: case 214: case 215: case 216: case 217: {
         // 2P 側（ゴースト）の判定済みノーツ数に対するランク
         const Ghost* g = p2_ghost();
-        if (!g || g->now_note() == 0) return !ret;
+        if (!g || g->now_note() == 0) return false;
         int r = rank_of(g->exscore(), g->now_note());
-        if (option == 210) return r >= 8 ? ret : !ret;
-        if (option == 217) return r < 2 ? ret : !ret;
-        return r == 8 - (option - 210) ? ret : !ret;
+        if (option == 210) return r >= 8;
+        if (option == 217) return r < 2;
+        return r == 8 - (option - 210);
     }
     case 310: case 311: case 312: case 313: case 314: case 315: case 316: case 317: {
         // リザルトの 2P 側（ゴースト）のランク（総ノーツ数に対して）
         const Ghost* g = p2_ghost();
         int n = st ? st->total_notes : 0;
-        if (!g || n == 0) return !ret;
+        if (!g || n == 0) return false;
         int r = rank_of(g->exscore(), n);
-        if (option == 310) return r >= 8 ? ret : !ret;
-        if (option == 317) return g->exscore() > 0 && r <= 1 ? ret : !ret;
-        return r == 8 - (option - 310) ? ret : !ret;
+        if (option == 310) return r >= 8;
+        if (option == 317) return g->exscore() > 0 && r <= 1;
+        return r == 8 - (option - 310);
     }
     case 220: case 221: case 222: case 223: case 224: case 225: case 226: case 227: {
         // 総ノーツ数に対するランク（以上）
-        if (!st || st->total_notes == 0) return !ret;
+        if (!st || st->total_notes == 0) return false;
         int r = rank_of(st->exscore(), st->total_notes);
-        if (option == 220) return r >= 8 ? ret : !ret;
-        if (option == 227) return r > 1 ? !ret : ret;
-        return r > 6 - (option - 221) ? ret : !ret;
+        if (option == 220) return r >= 8;
+        if (option == 227) return !(r > 1);
+        return r > 6 - (option - 221);
     }
     case 230: case 231: case 232: case 233: case 234: case 235: case 236: case 237: case 238: case 239: {
         double lo = (option - 230) * 10.0, hi = lo + 10.0;
-        if (hp < lo) return !ret;
-        return hp < hi ? ret : !ret;
+        if (hp < lo) return false;
+        return hp < hi;
     }
-    case 240: return hp >= 100.0 ? ret : !ret;
+    case 240: return hp >= 100.0;
     case 241: case 242: case 243: case 244: case 245: case 246:
-        return judge_draw == 5 - (option - 241) ? ret : !ret;
-    case 247: return now_ms - last_miss_ms >= 1000.0 ? ret : !ret;
-    case 248: return now_ms - last_miss_ms >= 1000.0 ? !ret : ret;
+        return judge_draw == 5 - (option - 241);
+    case 247: return now_ms - last_miss_ms >= 1000.0;
+    case 248: return !(now_ms - last_miss_ms >= 1000.0);
     default:
-        if (option < 1000 && skin) return skin->op[option] ? ret : !ret;
-        return !ret;
+        if (option < 1000 && skin) return skin->op[option];
+        return false;
     }
 }
 
