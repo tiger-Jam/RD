@@ -664,7 +664,7 @@ int serve_charts(int dev_port, const std::string& dev_key) {
                 }
             }
             return res;
-        }, err)) {
+        }, err, dev)) {  // 開発用の配信は、この PC の中からだけ（ファイアウォールの確かめを出さない）
         std::fprintf(stderr, "%s\n", err.c_str());
         return 1;
     }
@@ -685,7 +685,9 @@ int main(int argc, char** argv) {
     startup_clock_start();
     // ログをファイルに流しても、落ちたり止まったりしたときに残るようにする
 #if defined(_WIN32)
-    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    // コンソールへはすぐ出す。ファイルやパイプ（ほかの道具が読む一覧など）へは、まとめて書く（1 行ずつ書くと何十倍も遅い）
+    if (output_is_redirected()) std::setvbuf(stdout, nullptr, _IOFBF, 1 << 16);
+    else std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     // コマンドプロンプトから動かしたときに、日本語のログを読めるようにする
     SetConsoleOutputCP(CP_UTF8);

@@ -85,7 +85,7 @@ std::string url_encode(const std::string& in) {
     return out;
 }
 
-bool HttpServer::start(int port, Handler handler, std::string& error) {
+bool HttpServer::start(int port, Handler handler, std::string& error, bool loopback_only) {
     stop();
 #if defined(_WIN32)
     static const bool wsa = [] {
@@ -104,7 +104,7 @@ bool HttpServer::start(int port, Handler handler, std::string& error) {
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_addr.s_addr = htonl(loopback_only ? INADDR_LOOPBACK : INADDR_ANY);
     addr.sin_port = htons(static_cast<uint16_t>(port));
     if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 || listen(s, 16) != 0) {
         close_socket(static_cast<intptr_t>(s));

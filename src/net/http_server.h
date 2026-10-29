@@ -26,8 +26,8 @@ class HttpServer {
 public:
     using Handler = std::function<HttpResponse(const HttpRequest&)>;
     ~HttpServer() { stop(); }
-    // port で待ち受ける（0 なら空いている番号）。すべての口で待つ
-    bool start(int port, Handler handler, std::string& error);
+    // port で待ち受ける（0 なら空いている番号）。すべての口で待つ（loopback_only なら、この PC の中からだけ）
+    bool start(int port, Handler handler, std::string& error, bool loopback_only = false);
     void stop();
     int port() const { return port_; }
 

@@ -116,6 +116,7 @@ void finish_log() {
 #if defined(_WIN32)
 // 落ちたとき：読む側が書き切るのを少し待ち、ダンプを残す
 LONG WINAPI on_crash(EXCEPTION_POINTERS* info) {
+    std::fflush(stdout);
     std::fprintf(stderr, "落ちた（例外 0x%08lX）\n", info && info->ExceptionRecord ? info->ExceptionRecord->ExceptionCode : 0ul);
     std::fflush(stderr);
     Sleep(300);
@@ -233,6 +234,15 @@ void start_log(const char* who) {
     fcntl(g_console, F_SETFD, FD_CLOEXEC);
     for (int sig : {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT}) signal(sig, on_signal);
 #endif
+    // ログのパイプへは行ごとに流す（Windows の CRT には行ごとの区切りが無いので、小さくまとめて、落ちたときにも流す）
+    std::setvbuf(stdout, nullptr, _IOLBF, 4096);
+    // 止まったときにも直前の行が残るように、1 秒ごとに流す
+    std::thread([] {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::fflush(stdout);
+        }
+    }).detach();
     g_pipe_read = fds[0];
     g_reader = std::thread(read_loop);
     std::atexit(finish_log);

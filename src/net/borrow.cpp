@@ -1,6 +1,9 @@
 #include "net/borrow.h"
 
 #include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <thread>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -19,6 +22,7 @@ constexpr const char* kPrefix = "/bmjoy/v1/";
 constexpr const char* kKeyHeader = "X-BMjoy-Key";
 constexpr int kMaxFiles = 20000;  // 1 つのフォルダから返すファイルの数の上限
 constexpr const char* kUsedMark = ".bmjoy-used";
+constexpr int kFetchThreads = 6;  // 並べて取るファイルの数
 
 std::string lower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -188,7 +192,7 @@ bool borrow_fetch(const BorrowSource& src, const BorrowFolder& f, const std::str
                   const std::function<bool(int64_t, int64_t)>& progress, std::string& error) {
     // 取るもの：譜面と、譜面でないファイル（もらうときは譜面も全部）
     std::vector<std::pair<int64_t, std::string>> want;
-    int64_t total = 0, done = 0;
+    int64_t total = 0;
     for (const auto& [size, rel] : f.files) {
         if (!whole && borrow_chart_file(rel) && rel != f.chart) continue;
         want.emplace_back(size, rel);
@@ -197,37 +201,61 @@ bool borrow_fetch(const BorrowSource& src, const BorrowFolder& f, const std::str
     std::error_code ec;
     const fs::path root = fs::u8path(dir);
     fs::create_directories(root, ec);
-    for (const auto& [size, rel] : want) {
-        const fs::path to = root / fs::u8path(rel);
-        if (fs::is_regular_file(to, ec) && static_cast<int64_t>(fs::file_size(to, ec)) == size) {
-            done += size;
-            if (progress && !progress(done, total)) return error = "やめた", false;
-            continue;
-        }
-        fs::create_directories(to.parent_path(), ec);
-        fs::path tmp = to;
-        tmp += ".part";
-        {
-            std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-            if (!out) return error = "書けない: " + to.string(), false;
-            const int64_t start = done;
-            bool ok = http_get_stream(base_url(src) + "file/" + f.id + "/" + url_encode(rel),
-                                      [&](const char* p, size_t n) {
-                                          out.write(p, static_cast<std::streamsize>(n));
-                                          done += static_cast<int64_t>(n);
-                                          return static_cast<bool>(out) && (!progress || progress(done, total));
-                                      },
-                                      error, key_header(src));
-            if (!ok) {
-                out.close();
-                fs::remove(tmp, ec);
-                return false;
+    // いくつか並べて取る（ファイルごとにつなぎ直すので、1 つずつだと待ち時間ばかりになる）
+    std::atomic<size_t> next{0};
+    std::atomic<int64_t> got{0};
+    std::atomic<bool> stop{false};
+    std::mutex mu;  // progress を呼ぶのと、error を書くのは 1 つずつ
+    auto report = [&](int64_t n) {
+        const int64_t now = got += n;
+        std::lock_guard<std::mutex> lock(mu);
+        if (progress && !stop && !progress(now, total)) stop = true, error = "やめた";
+        return !stop;
+    };
+    auto fail = [&](const std::string& why) {
+        std::lock_guard<std::mutex> lock(mu);
+        if (!stop) error = why;
+        stop = true;
+    };
+    auto worker = [&] {
+        for (size_t i; !stop && (i = next++) < want.size();) {
+            const auto& [size, rel] = want[i];
+            std::error_code e2;
+            const fs::path to = root / fs::u8path(rel);
+            if (fs::is_regular_file(to, e2) && static_cast<int64_t>(fs::file_size(to, e2)) == size) {
+                report(size);
+                continue;
             }
-            done = start + size;
+            fs::create_directories(to.parent_path(), e2);
+            fs::path tmp = to;
+            tmp += ".part";
+            std::string err;
+            int64_t mine = 0;
+            bool ok;
+            {
+                std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+                if (!out) return fail("書けない: " + to.string());
+                ok = http_get_stream(base_url(src) + "file/" + f.id + "/" + url_encode(rel),
+                                     [&](const char* p, size_t n) {
+                                         out.write(p, static_cast<std::streamsize>(n));
+                                         mine += static_cast<int64_t>(n);
+                                         return static_cast<bool>(out) && report(static_cast<int64_t>(n));
+                                     },
+                                     err, key_header(src));
+            }
+            if (!ok) {
+                fs::remove(tmp, e2);
+                return fail(err);
+            }
+            report(size - mine);  // 大きさが一覧と違っても、進み具合はファイルの大きさで数える
+            fs::rename(tmp, to, e2);
+            if (e2) return fail("置けない: " + to.string());
         }
-        fs::rename(tmp, to, ec);
-        if (ec) return error = "置けない: " + to.string(), false;
-    }
+    };
+    std::vector<std::thread> workers;
+    for (int t = 0; t < kFetchThreads; ++t) workers.emplace_back(worker);
+    for (std::thread& t : workers) t.join();
+    if (stop) return false;
     borrow_touch(dir);
     return true;
 }
