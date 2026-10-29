@@ -84,6 +84,9 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "player") player = bare(val);
         else if (key == "lr2_player") lr2_player = bare(val);
         else if (key == "lr2_export") lr2_export = iv != 0;
+        else if (key == "log_upload") log_upload = iv != 0;
+        else if (key == "auto_update") auto_update = iv != 0;
+        else if (key == "service_url") service_url = val;
         else if (key == "play_skin") play_skin = from_portable(val);
         else if (key == "result_skin") result_skin = from_portable(val);
         else if (key == "courseresult_skin") courseresult_skin = from_portable(val);
@@ -232,6 +235,10 @@ void AppConfig::write(std::ostream& f) const {
     f << "player = " << player << "\n";
     f << "lr2_root = " << to_portable(lr2_root) << "\n";
     f << "lr2_export = " << (lr2_export ? 1 : 0) << "  # 外部ツールのために LR2 の形の曲データベースとスコアを Database に書き出す\n";
+    f << "# ログを作者へ送る（1）・起動するときに新しい版を確かめて入れ替える（1）\n";
+    f << "log_upload = " << (log_upload ? 1 : 0) << "\n";
+    f << "auto_update = " << (auto_update ? 1 : 0) << "\n";
+    if (!service_url.empty()) f << "service_url = " << service_url << "\n";
     f << "lr2_player = " << lr2_player << "\n";  // 書き出すスコアの名前（Database/Score/<名前>.db。空なら LR2 から引き継いだ ID かプレイヤーの ID）
     f << "play_skin = " << to_portable(play_skin) << "\n";
     f << "result_skin = " << to_portable(result_skin) << "\n";

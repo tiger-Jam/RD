@@ -21,9 +21,17 @@ BMjoy は、次のソフトウェアとデータを使っています。
 | walkure-offline（推定のモデルと計算） | リコメンド（mods/walkure） | MIT | mods/walkure/LICENSE・NOTICE.txt |
 | oraja-constellator（譜面の傾向の分析とフォルダの分け方） | 譜面の傾向（mods/constellator）と本体の src/chart/chart_attr.cpp | MIT | mods/constellator/LICENSE・NOTICE.txt |
 
+## 配る版に同梱するもの
+
+| もの | 版 | ライセンス | 表記 |
+| --- | --- | --- | --- |
+| FFmpeg（avcodec・avformat・avutil・swscale など） | 8.1.1 | LGPL 2.1 以降 | licenses/FFmpeg-LGPL-2.1.txt |
+
+- FFmpeg は動画の BGA を出すときだけ、実行ファイルの横の DLL を実行時に読み込みます。BMjoy には組み込んでいません（ソースには型を合わせるためのヘッダーだけがあります）。DLL は差し替えられます（8 系か 9 系）。
+- FFmpeg のソースは https://ffmpeg.org/releases/ffmpeg-8.1.1.tar.xz から入手できます。
+
 ## 同梱しないもの
 
-- **FFmpeg**（LGPL 2.1 以降）：動画の BGA を出すときだけ、利用者が置いた共有ライブラリ（8 系か 9 系）を実行時に読み込みます。BMjoy には含めていません（ソースには型を合わせるためのヘッダーだけがあります）。
 - **libcurl**（macOS）：OS のものを使います。Windows では OS の WinHTTP を使います。
 - **Visual C++ ランタイム**（Windows）：Microsoft の再頒布可能パッケージの条件で、実行ファイルの横に置きます。
 - **フォント**：OS のもの（Windows は MS UI ゴシック、macOS はヒラギノ角ゴシック）を使い、同梱しません。

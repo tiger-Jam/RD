@@ -691,7 +691,11 @@ struct Loader {
             // .dxa の中にあるときは、フォルダとしては見つからない。パスをそのまま組み立てて dxa を探させる
             std::vector<std::string> parts = split_path(lr2path);
             fs::path p = root;
-            for (auto& part : parts) p /= part;
+            for (size_t i = 0; i < parts.size(); ++i) {
+                // 素材の置き場が BMjoyfiles なら、先頭の LR2files はそこに読み替える（resolve_lr2_path と同じ）
+                std::string files = i == 0 && lower(parts[i]) == "lr2files" ? find_in_dir(p, "BMjoyfiles") : std::string();
+                p /= files.empty() ? parts[i] : files;
+            }
             resolved = p.string();
         }
         std::vector<uint8_t> bytes;

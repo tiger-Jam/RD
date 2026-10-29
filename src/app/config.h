@@ -26,6 +26,9 @@ struct AppConfig {
     bool lr2_export = false;
     // LR2 の形で書き出すスコアの名前（LR2files/Database/Score/<名前>.db。空なら LR2 から引き継いだ ID、それも無ければ BMjoy）
     std::string lr2_player;
+    bool log_upload = true;        // ログを作者へ送る（app/service.h）
+    bool auto_update = true;       // 起動するときに新しい版を確かめて入れ替える
+    std::string service_url;       // ログの送り先と更新の置き場（空なら既定。開発用）
     std::string play_skin;         // プレイスキンの .lr2skin（空なら LR2 の既定）
     std::string result_skin;       // リザルトスキンの .lr2skin（空なら LR2 の既定）
     std::string courseresult_skin; // コースリザルトスキンの .lr2skin（空なら LR2 の既定）

@@ -137,8 +137,8 @@ std::string from_portable(const std::string& path) {
     if (auto it = p.begin(); it != p.end()) {
         std::string first = it->string();
         for (char& c : first) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        std::error_code ec;
-        if (first == "lr2files" && !fs::is_directory(fs::u8path(base) / *it, ec)) {
+        // （実行ファイルの横の LR2files は、外部ツールのための書き出しの置き場なので、設定が指すことはない）
+        if (first == "lr2files" && data_dir_name() == kDataDirName) {
             rel = kDataDirName;
             for (++it; it != p.end(); ++it) rel /= *it;
         }

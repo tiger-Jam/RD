@@ -6,6 +6,7 @@
 
 #include "app/config.h"
 #include "app/lr2_import.h"
+#include "app/service.h"
 #include "chart/bmson_parser.h"
 #include "chart/osu_parser.h"
 #include "audio/system_sound.h"
@@ -245,6 +246,15 @@ TEST(import_copy_lr2_assets) {
     again.lr2_root = lr2.string();
     CHECK_EQ(copy_lr2_assets(again, dst.string()).files, 0);
     fs::remove_all(root);
+}
+
+// 版の比べ方（自動の更新）
+TEST(version_compare) {
+    CHECK(compare_versions("2026.10.30.2", "2026.10.30.1") > 0);
+    CHECK(compare_versions("2026.11.1.1", "2026.10.30.9") > 0);
+    CHECK(compare_versions("2026.10.30", "2026.10.30.0") == 0);
+    CHECK(compare_versions("2026.10.30.1", "2026.10.30.10") < 0);
+    CHECK(compare_versions("2026.10.30.1", "dev") > 0);  // 比べられない版は 0 とみなす（"dev" は更新を確かめない）
 }
 
 // 設定に書くパスは、実行ファイルのフォルダの下なら相対にする（フォルダごと別の PC へ持っていける）

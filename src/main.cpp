@@ -57,6 +57,7 @@
 #include "skin/lr2_skin.h"
 #include "skin/skin_parts.h"
 #include "util/data_dir.h"
+#include "util/log.h"
 #include "util/dev.h"
 #include "util/startup_clock.h"
 
@@ -607,23 +608,6 @@ int main(int argc, char** argv) {
     startup_clock_start();
     // ログをファイルに流しても、落ちたり止まったりしたときに残るようにする
 #if defined(_WIN32)
-    {
-        // ダブルクリックで起動したとき（出力の行き先が無いとき）は、ログを LR2files/log.txt に残す。前の 1 回分は log_old.txt。
-        // 別の PC やテスターの環境で、遊べなかった・止まったときの理由を後から見られるように
-        HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
-        if (out == nullptr || out == INVALID_HANDLE_VALUE || GetFileType(out) == FILE_TYPE_UNKNOWN) {
-            const std::filesystem::path dir = std::filesystem::u8path(data_dir());
-            std::error_code ec;
-            // 譜面を貸すとき（--serve）は、遊ぶほうのログを上書きしないように別のファイルにする
-            const bool serving = std::wstring(GetCommandLineW()).find(L"--serve") != std::wstring::npos;
-            const char* name = serving ? "serve_log.txt" : "log.txt";
-            if (!serving) std::filesystem::rename(dir / "log.txt", dir / "log_old.txt", ec);
-            const std::wstring log = (dir / name).wstring();
-            FILE* f = nullptr;
-            // stderr は stdout と同じ書き先にする（別々に開くと、片方の書いた行をもう片方が上書きする）
-            if (_wfreopen_s(&f, log.c_str(), L"w", stdout) == 0) _dup2(_fileno(stdout), _fileno(stderr));
-        }
-    }
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     // コマンドプロンプトから動かしたときに、日本語のログを読めるようにする
@@ -661,6 +645,11 @@ int main(int argc, char** argv) {
                      "       bmjoy --keyconfig\n");
         return 2;
     }
+    // ログを残す（開発用の道具としてパイプやファイルに出しているときは残さない）
+#ifdef BMJ_DEV
+    if (!output_is_redirected())
+#endif
+        start_log(opt.serve ? "serve" : "body");
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
     if (opt.serve) return serve_charts();
     if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file, opt.list_all);

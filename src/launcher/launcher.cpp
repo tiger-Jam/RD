@@ -26,7 +26,9 @@
 #include "db/song_db.h"
 #include "mod/mod.h"
 #include "render/text_cache.h"
+#include "app/service.h"
 #include "util/data_dir.h"
+#include "util/log.h"
 #include "util/dev.h"
 
 namespace fs = std::filesystem;
@@ -114,6 +116,29 @@ bool launch_body(std::string& err) {
 #endif
 }
 
+// 設定アプリ（自分）を起動し直す（新しい版に入れ替えたあと）
+void relaunch_self() {
+    const char* base = SDL_GetBasePath();
+    const std::string dir = base ? base : "";
+#ifdef _WIN32
+    auto wide = [](const std::string& s) {
+        int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+        std::wstring w(n, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+        w.resize(n > 0 ? n - 1 : 0);
+        return w;
+    };
+    std::wstring exe = wide(dir + "BMjoy.exe");
+    std::wstring cmdline = L"\"" + exe + L"\"";
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, FALSE, 0, nullptr, wide(dir).c_str(), &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+#endif
+}
 
 // 譜面を貸す（BMjoybody --serve）を、ログインしている間ずっと動かす（Windows のタスクスケジューラ）。
 // 設定を変えたら、動いているものを止めて登録し直し、すぐ動かす。貸さないなら登録を消す
@@ -1108,6 +1133,13 @@ int main(int, char**) {
     // 初めての起動（設定ファイルがまだ無い）なら、案内の画面から始める
     const bool first_run = !fs::exists(fs::u8path(cfg_path), first_ec);
     load_config(cfg);
+    // ログを残し、前に残したログを送る。前の更新でどけた古いファイルを消す
+#ifdef BMJ_DEV
+    if (!output_is_redirected())
+#endif
+        start_log("launcher");
+    remove_old_update_files();
+    upload_logs_async(cfg);
     // 譜面を貸す設定（変わったら、保存するときに配信を登録し直す）
     auto serve_state = [](const AppConfig& c) { return std::make_tuple(c.serve, c.serve_port, c.serve_key); };
     auto serve_applied = serve_state(cfg);
@@ -1203,6 +1235,38 @@ int main(int, char**) {
             if (th.joinable()) th.join();
         }
     } job;
+    // 新しい版を確かめて入れ替える（裏で動かす。入れ替えている間は起動させない）
+    struct UpdateJob {
+        std::thread th;
+        std::mutex mu;
+        std::string status;
+        bool running = false, done = false, ok = false;
+        ~UpdateJob() {
+            if (th.joinable()) th.join();
+        }
+    } update;
+    if (cfg.auto_update) {
+        update.running = true;
+        update.th = std::thread([&update, c = cfg] {
+            UpdateInfo u = check_update(c);
+            std::string err;
+            bool ok = false;
+            if (u.available) {
+                std::printf("新しい版 %s がある\n", u.version.c_str());
+                ok = apply_update(u, [&update](const std::string& s) {
+                    std::lock_guard<std::mutex> lock(update.mu);
+                    update.status = s;
+                }, err);
+                if (!ok) std::printf("更新できない: %s\n", err.c_str());
+            } else if (!u.error.empty()) {
+                std::printf("新しい版を確かめられない: %s\n", u.error.c_str());
+            }
+            std::lock_guard<std::mutex> lock(update.mu);
+            update.ok = ok;
+            update.status = ok ? "新しい版 " + u.version + " に入れ替えました。起動し直します" : u.available ? "更新できません：" + err : "";
+            update.done = true;
+        });
+    }
     bool quit = false, start = false;
     bool autostart = dev_env("BMJ_LAUNCHER_AUTOSTART") != nullptr;  // 開発用：すぐ起動する
     // LR2 から引き継ぐ（BMJOY タブのボタンと、初めての起動の案内から）
@@ -1598,6 +1662,8 @@ int main(int, char**) {
             g.check(X + 20, by + 48, "キー音を 16 ビットで読み込む", cfg.sound_16bit);
             g.check(X + 280, by + 48, "メモリを節約する", cfg.low_memory);
             g.check(X + 20, by + 70, "LR2 の形でも曲とスコアを書き出す（外部ツール用）", cfg.lr2_export);
+            g.check(X + 20, by + 92, "ログを作者へ送る", cfg.log_upload);
+            g.check(X + 280, by + 92, "起動するときに新しい版を入れる", cfg.auto_update);
 #ifdef _WIN32
             g.check(X + 280, by + 26, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
 #endif
@@ -1717,8 +1783,27 @@ int main(int, char**) {
                 }
             }
         }
+        bool updating = false;
+        if (update.running) {
+            std::lock_guard<std::mutex> lock(update.mu);
+            if (!update.status.empty()) message = update.status;
+            updating = !update.done;
+            if (update.done) {
+                update.th.join();
+                update.running = false;
+                if (update.ok) {
+                    // 新しい版の設定アプリを起動し直し、譜面の配信も新しい版で動かし直す
+                    g.unfocus();
+                    save_changed_settings();
+                    save_config(cfg);
+                    if (cfg.serve) apply_serve(cfg, message);
+                    relaunch_self();
+                    quit = true;
+                }
+            }
+        }
         if (!message.empty()) g.label(10, kH - 50 + 14, message);
-        if (g.button(10, kH - 29, 87, 21, "BMjoyの起動") || autostart) start = true, autostart = false;
+        if (g.button(10, kH - 29, 87, 21, "BMjoyの起動", !updating) || (autostart && !updating)) start = true, autostart = false;
         g.button(115, kH - 29, 87, 21, "プレイオプション", false);
         g.button(409, kH - 29, 83, 21, "動画作成", false);
         if (g.button(514, kH - 29, 87, 21, "終了")) {
