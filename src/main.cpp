@@ -733,6 +733,12 @@ int main(int argc, char** argv) {
     if (!output_is_redirected())
 #endif
         start_log(opt.serve ? "serve" : "body");
+    // コマンドで動かすときも、先に設定を読んで今のプレイヤーを決める（決めずに曲データベースを開くと、
+    // songs.db に空の記録の表を作り、プレイヤーの記録が見えなくなる）
+    if (player_id().empty()) {
+        AppConfig pre;
+        load_config(pre);
+    }
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
     if (opt.serve) return serve_charts(opt.serve_dev_port, opt.serve_dev_key);
     if (!opt.borrow_test.empty()) {

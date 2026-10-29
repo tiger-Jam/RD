@@ -432,9 +432,23 @@ void SongDb::move_scores_to_player(const std::string& path) {
         Stmt st(db_, "SELECT count(*) FROM p.score");
         if (st.step()) already = st.col_i64(0);
     }
-    if (already > 0) {  // プレイヤーの側にもう記録がある：移さない（songs.db の記録は残す）
+    if (already > 0) {
+        // プレイヤーの側にもう記録がある：移さない。ただ songs.db に同じ名前の表があると、名前だけで引いたときにそちらが先に読まれ、
+        // プレイヤーの記録が見えなくなる（ランプが消える）。空の表は消し、中身のある表は名前を変えて残す（<名前>_unmoved）
+        int dropped = 0, kept = 0;
+        for (const char* table : kScoreTables) {
+            if (!has_main(table)) continue;
+            int64_t rows = 0;
+            {
+                Stmt st(db_, (std::string("SELECT count(*) FROM main.") + table).c_str());
+                if (st.step()) rows = st.col_i64(0);
+            }
+            const std::string sql = rows == 0 ? "DROP TABLE main." + std::string(table)
+                                              : "ALTER TABLE main." + std::string(table) + " RENAME TO " + table + "_unmoved";
+            if (sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK) (rows == 0 ? dropped : kept)++;
+        }
         sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
-        std::fprintf(stderr, "songs.db に前の記録が残っているが、プレイヤーの記録がもうあるので移さない\n");
+        std::printf("songs.db に残っていた記録の表を片付けた（空なので消した %d、中身があるので名前を変えて残した %d）\n", dropped, kept);
         return;
     }
     sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);

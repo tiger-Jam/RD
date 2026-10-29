@@ -509,6 +509,19 @@ TEST(song_db_players) {
         ScoreRecord r;
         CHECK(db.get_score(sha, r) && r.clear == 4);  // A の記録は A のまま
     }
+    // プレイヤーを決めずに開くと、songs.db に空の記録の表ができる。次にプレイヤーで開いたら片付けて、記録が見えるままにする
+    set_player_id("");
+    {
+        SongDb db;
+        CHECK(db.open(songs));
+    }
+    set_player_id("rd_test_player_a");
+    {
+        SongDb db;
+        CHECK(db.open(songs));
+        ScoreRecord r;
+        CHECK(db.get_score(sha, r) && r.clear == 4);
+    }
     fs::remove_all(fs::u8path(dir_a));
     set_player_id("rd_test_player_b");
     fs::remove_all(fs::u8path(player_dir()));
