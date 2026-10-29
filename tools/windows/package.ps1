@@ -37,9 +37,24 @@ if (Get-ChildItem $prog -Filter "avcodec-*.dll") {
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $upd = Join-Path $OutDir "$Name-update.zip"
 if (Test-Path $upd) { Remove-Item -Force $upd }
-# zip は Windows に付いている tar で作る（PowerShell 5 の Compress-Archive は区切りが \ の zip を作ることがある）
-tar.exe -a -cf $upd -C $prog .
-if ($LASTEXITCODE -ne 0) { throw "更新の zip を作れない" }
+# zip は 1 ファイルずつ、名前を UTF-8、区切りを / にして書く
+# （Windows の tar は日本語の名前を ? にし、PowerShell 5 の ZipFile.CreateFromDirectory は区切りを \ にしてしまう）
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+function New-Zip([string]$dir, [string]$zip, [string]$prefix) {
+    $fs = [IO.File]::Open($zip, [IO.FileMode]::Create)
+    $za = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create, $false, [Text.Encoding]::UTF8)
+    try {
+        $root = (Resolve-Path $dir).Path.TrimEnd('\')
+        Get-ChildItem $root -Recurse -File | ForEach-Object {
+            $rel = $prefix + $_.FullName.Substring($root.Length + 1).Replace('\', '/')
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($za, $_.FullName, $rel, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    } finally {
+        $za.Dispose()
+        $fs.Dispose()
+    }
+}
+New-Zip $prog $upd ""
 
 # はじめて入れる人向け：プログラムと素材
 Copy-Item -Recurse "$prog\*" $stage
@@ -47,11 +62,11 @@ $files = Join-Path $stage "BMjoyfiles"
 New-Item -ItemType Directory -Force $files | Out-Null
 $personal = @("Database", "Player", "Replay", "Log", "Mods", "Update")
 Get-ChildItem $Assets -Directory | Where-Object { $personal -notcontains $_.Name } | ForEach-Object { Copy-Item -Recurse $_.FullName (Join-Path $files $_.Name) }
-foreach ($f in "Config\config.txt", "Config\keyconfig.txt", "Config\client_id.txt") { Remove-Item -Force (Join-Path $files $f) -ErrorAction SilentlyContinue }
+# 設定の置き場に残っている個人のもの：BMjoy の設定とその控え、LR2 の設定（曲フォルダの場所などが入っている）
+Get-ChildItem (Join-Path $files "Config") -File | Where-Object { $_.Name -like "config.txt*" -or $_.Name -in @("keyconfig.txt", "client_id.txt", "config.xml", "config.xmh", "openlr2-config.xml") } | Remove-Item -Force
 $full = Join-Path $OutDir "$Name.zip"
 if (Test-Path $full) { Remove-Item -Force $full }
-tar.exe -a -cf $full -C $work $Name
-if ($LASTEXITCODE -ne 0) { throw "zip を作れない" }
+New-Zip $stage $full "$Name/"
 Remove-Item -Recurse -Force $work
 foreach ($z in $upd, $full) {
     $mb = [math]::Round((Get-Item $z).Length / 1MB, 1)

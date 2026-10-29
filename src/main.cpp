@@ -56,6 +56,7 @@
 #include "render/text_cache.h"
 #include "render/skin_play.h"
 #include "skin/lr2_skin.h"
+#include "skin/skin_compose.h"
 #include "skin/skin_parts.h"
 #include "util/data_dir.h"
 #include "util/log.h"
@@ -97,6 +98,7 @@ struct Options {
     std::string list_missing;
     bool list_all = false;  // --list-charts：持っている譜面も出す
     std::vector<std::string> levels;
+    std::string compose_check;  // 開発用：このフォルダの下のプレースキンから、部品を持ってこられるかを数える
     std::string skin_parts;  // 開発用：プレースキン（--skin で替えられる）を部品ごとに切り出して、このフォルダに書いて終わる
     bool list_owned = false;  // 持っている譜面の md5 とフォルダを 1 行ずつ出して終わる
     bool serve = false;       // 譜面を貸す（設定の serve が 0 になるまで動き続ける）
@@ -148,6 +150,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--list-missing") o.list_missing = next();
         else if (a == "--list-charts") o.list_missing = next(), o.list_all = true;
         else if (a == "--skin-parts") o.skin_parts = next();
+        else if (a == "--compose-check") o.compose_check = next();
         else if (a == "--list-owned") o.list_owned = true;
         else if (a == "--chart-attr") o.chart_attr_list = next();  // 開発用：ファイルの 1 行ずつの譜面を分析して出す
         else if (a == "--fill-chart-attrs") o.fill_chart_attrs = true;
@@ -512,6 +515,49 @@ int export_parts(const char* argv0, const Options& opt) {
     return 0;
 }
 
+// 開発用：フォルダの下のプレースキンを全部読み、それぞれから部品（kPlayPartSlots）を LR2 の既定のプレースキンへ持ってこられるかを数える。
+// 1 行に「スキン<TAB>種類<TAB>レーンの場所が分かるか<TAB>部品ごとに持ってきた数…」（画像は読まない）
+int compose_check(const char* argv0, const Options& opt) {
+    AppConfig cfg;
+    load_config(cfg);
+    const std::string root = find_lr2_root(opt.lr2_root.empty() ? cfg.lr2_root : opt.lr2_root, argv0);
+    const std::string ref_path = resolve_lr2_path(root, "LR2files/Theme/LR2/Play/play_7.lr2skin", false);
+    auto load = [&](const std::string& path, Lr2Skin& sk, SkinHeader& h) {
+        std::string err;
+        return read_skin_header(root, path, h) && load_lr2_skin(root, path, h, PlayContext{}.load_options(), sk, err, nullptr, false);
+    };
+    Lr2Skin ref;
+    SkinHeader rh;
+    if (ref_path.empty() || !load(ref_path, ref, rh)) return std::fprintf(stderr, "既定のプレースキンを読めない\n"), 1;
+    std::printf("skin\ttype\tlanes");
+    for (const PlayPartSlot& slot : kPlayPartSlots) std::printf("\t%s", slot.key);
+    std::printf("\n");
+    std::error_code ec;
+    for (auto it = std::filesystem::recursive_directory_iterator(std::filesystem::u8path(opt.compose_check), ec);
+         !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+        std::string ext = it->path().extension().string();
+        for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext != ".lr2skin") continue;
+        SkinHeader h;
+        Lr2Skin from;
+        const std::string path = it->path().string();
+        if (!read_skin_header(root, path, h) || h.type < 0 || h.type > 4) continue;  // プレー画面（5・7・10・14・9 鍵）だけ
+        if (!load(path, from, h)) {
+            std::printf("%s\t%d\t読めない\n", path.c_str(), h.type);
+            continue;
+        }
+        int lanes = 0;
+        for (int l = 0; l < 8; ++l) lanes += from.note_dst[l].empty() ? 0 : 1;
+        std::printf("%s\t%d\t%d", path.c_str(), h.type, lanes);
+        for (const PlayPartSlot& slot : kPlayPartSlots) {
+            Lr2Skin to = ref;
+            std::printf("\t%d", compose_play_part(to, from, slot.key, PartScale::Lane));
+        }
+        std::printf("\n");
+    }
+    return 0;
+}
+
 int list_missing(const std::string& which, const std::vector<std::string>& levels, const std::string& tables_file, bool all = false) {
     AppConfig cfg;
     migrate_old_data();
@@ -754,6 +800,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (!opt.skin_parts.empty()) return export_parts(argv[0], opt);
+    if (!opt.compose_check.empty()) return compose_check(argv[0], opt);
     if (!opt.export_chart_attrs.empty()) {
         AppConfig cfg;
         load_config(cfg);
