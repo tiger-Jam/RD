@@ -79,8 +79,9 @@ target_include_directories(rd_core PUBLIC src)
 # 開発用の口（RD_ で始まる環境変数で画面を撮る・操作や入力を流す）。配る版は -DRD_DEV=OFF でビルドする
 option(RD_DEV "開発用の環境変数を読む" ON)
 # 版（配る版は 年.月.日.番号 を入れる。開発中は dev で、自動の更新をしない）
-set(RD_VERSION "dev" CACHE STRING "RD の版")
-target_compile_definitions(rd_core PUBLIC RD_VERSION="${RD_VERSION}")
+# RD_VERSION は project(RD) が作る変数と重なるので、RD_BUILD_VERSION にする
+set(RD_BUILD_VERSION "dev" CACHE STRING "RD の版")
+target_compile_definitions(rd_core PUBLIC RD_BUILD_VERSION="${RD_BUILD_VERSION}")
 if(RD_DEV)
     target_compile_definitions(rd_core PUBLIC RD_DEV)
 endif()

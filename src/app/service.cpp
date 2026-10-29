@@ -138,7 +138,9 @@ int compare_versions(const std::string& a, const std::string& b) {
 
 UpdateInfo check_update(const AppConfig& cfg) {
     UpdateInfo u;
+    // 開発中の版と、版の番号が読めない版（ビルドの間違い）は確かめない（確かめると、入れ替えても同じ判断になり、入れ替え続ける）
     if (std::string(kRdVersion) == "dev") return u.error = "開発中の版", u;
+    if (compare_versions(kRdVersion, "0.0.0.1") <= 0) return u.error = std::string("版の番号が読めない（") + kRdVersion + "）", u;
     if (service_url(cfg).empty()) return u.error = "受け口が決まっていない", u;
     std::string body;
     const std::string base = service_url(cfg);

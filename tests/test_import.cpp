@@ -255,7 +255,9 @@ TEST(version_compare) {
     CHECK(compare_versions("2026.11.1.1", "2026.10.30.9") > 0);
     CHECK(compare_versions("2026.10.30", "2026.10.30.0") == 0);
     CHECK(compare_versions("2026.10.30.1", "2026.10.30.10") < 0);
-    CHECK(compare_versions("2026.10.30.1", "dev") > 0);  // 比べられない版は 0 とみなす（"dev" は更新を確かめない）
+    CHECK(compare_versions("2026.10.30.1", "dev") > 0);
+    CHECK(compare_versions("", "0.0.0.1") < 0);   // 空の版は確かめない（check_update）
+    CHECK(compare_versions("dev", "0.0.0.1") < 0);  // 比べられない版は 0 とみなす（"dev" は更新を確かめない）
 }
 
 // 設定に書くパスは、実行ファイルのフォルダの下なら相対にする（フォルダごと別の PC へ持っていける）

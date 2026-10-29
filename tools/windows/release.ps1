@@ -13,6 +13,10 @@ try {
     cmd /c "tools\windows\release_build.cmd $Ver"
     if ($LASTEXITCODE -ne 0) { throw "ビルドできない" }
     $bin = Join-Path $build "RelWithDebInfo"
+    # 実行ファイルに版の番号が入っているか（入っていないと、配った版が更新を繰り返す）
+    foreach ($exe in "RD.exe", "RDbody.exe") {
+        if (-not (Select-String -Path (Join-Path $bin $exe) -Pattern $Ver -SimpleMatch -Quiet)) { throw "$exe に版の番号 $Ver が入っていない" }
+    }
     # 動画の BGA のための FFmpeg（vcpkg のもの）を実行ファイルの横に置く
     $ff = Join-Path $env:USERPROFILE "vcpkg\installed\x64-windows\bin"
     Get-ChildItem $ff -Filter "av*.dll" | Copy-Item -Destination $bin
