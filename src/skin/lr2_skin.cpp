@@ -251,7 +251,7 @@ bool is_movie(const std::string& p) {
     return ends("mpg") || ends("avi") || ends("wma") || ends("ogv");
 }
 
-// LR2: ReadSRC
+// 絵の SRC：番号, 画像, x, y, 幅, 高さ, 横の分割, 縦の分割, 周期, タイマー, op...。位置は 0 より小さくしない、分割は 1 以上
 SkinSrc read_src(const Csv& c, const Lr2Skin& sk) {
     SkinSrc s;
     s.valid = true;
@@ -287,15 +287,23 @@ SkinTextSrc read_text_src(const Csv& c) {
     return t;
 }
 
-// LR2: ReadDST。番号・ループ・タイマー・オプションは最初の行だけから読む
-void read_dst(SkinDst& d, const Csv& c, int order) {
-    if (d.keys.empty()) {
-        d.n = c.val(1);
-        d.loop = c.val(16);
-        d.timer = c.val(17);
-        for (int i = 0; i < 5; ++i) d.op[i] = c.val(18 + i);
-    }
-    SkinDstKey k;
+// #DST_* の 1 行（キーフレーム 1 つ）。DST の番号・ループ・タイマー・オプションも毎行に書いてあるが、効くのは DST の最初の行のもの
+struct DstLine {
+    int n = 0, loop = 0, timer = 0;
+    int op[5] = {};
+    SkinDstKey key;
+};
+
+// 合成の番号として使えるもの（0〜5・9〜11）。それ以外はアルファ合成（1）にする
+bool valid_blend(int b) {
+    constexpr unsigned kValid = 0b1110'0011'1111u;
+    return b >= 0 && b <= 11 && ((kValid >> b) & 1u) != 0;
+}
+
+DstLine parse_dst_line(const Csv& c, int order) {
+    DstLine l;
+    l.n = c.val(1);
+    SkinDstKey& k = l.key;
     k.time = c.val(2);
     k.x = static_cast<float>(c.val(3));
     k.y = static_cast<float>(c.val(4));
@@ -306,16 +314,28 @@ void read_dst(SkinDst& d, const Csv& c, int order) {
     k.r = c.val(9);
     k.g = c.val(10);
     k.b = c.val(11);
-    int blend = c.val(12);
-    switch (blend) {
-    case 0: case 1: case 2: case 3: case 4: case 5: case 9: case 10: case 11: k.blend = blend; break;
-    default: k.blend = 1; break;
-    }
+    const int blend = c.val(12);
+    k.blend = valid_blend(blend) ? blend : 1;
     k.filter = c.val(13);
     k.angle = static_cast<float>(c.val(14));
     k.center = c.val(15);
     k.sort = static_cast<float>(order);
-    d.keys.push_back(k);
+    l.loop = c.val(16);
+    l.timer = c.val(17);
+    for (int i = 0; i < 5; ++i) l.op[i] = c.val(18 + i);
+    return l;
+}
+
+// DST にキーフレームを足す。DST の設定（番号・ループ・タイマー・オプション）は、最初のキーフレームの行で決まる
+void read_dst(SkinDst& d, const Csv& c, int order) {
+    const DstLine l = parse_dst_line(c, order);
+    if (d.empty()) {
+        d.n = l.n;
+        d.loop = l.loop;
+        d.timer = l.timer;
+        std::copy(std::begin(l.op), std::end(l.op), d.op);
+    }
+    d.keys.push_back(l.key);
 }
 
 struct Loader {
@@ -334,6 +354,12 @@ struct Loader {
     std::vector<DecodeJob> jobs;
     const Lr2Skin* previous = nullptr;  // 前の画面のスキン（#IMAGE,CONTINUE で画像を引き継ぐ）
     bool images = true;                 // 偽なら画像を読まない
+    // 描く順の番号。読んだ行（#IF で飛ばした行は除く）ごとに 1 つ進み、#INCLUDE の中の行も続けて数える。
+    // DST はその行の番号を描く順にする（大きいほど手前）
+    int next_order = 0;
+    int line_order = 0;  // いま読んでいる行の番号
+    // いまの行のあとに番号を空ける（ノーツの DST は LN の始点・終点を手前に重ねる分、BGA は上の層の分）
+    void skip_orders(int n) { next_order += n; }
 
     // 画像を読む予約。need_size なら大きさはすぐ決める（SRC の -1 に使う #IMAGE）。読めなければ false。
     // 画像フォントの絵は大きさを使わないので、ファイルにも触らずに予約だけする（.dxa の中だと 1 枚ずつ取り出すのが遅い）
@@ -369,13 +395,14 @@ struct Loader {
         return path;
     }
 
-    int read(const std::string& path, int skin_num) {
+    // 読んだ行の数を返す（読めなければ 0）
+    int read(const std::string& path) {
         std::string bytes = read_text_file(path);
         if (bytes.empty()) {
             sk.warnings.push_back("スキンが読めない: " + path);
             return 0;
         }
-        int t_skin = skin_num;
+        int taken = 0;
         // #IF の入れ子。それぞれの段は「その枝を読んでいる／まだ成立した枝が無い／もう成立した枝があった」のどれか。
         // 入れ子は 99 段まで（それより深い #IF は無いものとして扱う）。外の段が偽でも、中の段だけで読むかを決める（LR2 と同じ）
         enum class Branch { Taking, Waiting, Done };
@@ -407,13 +434,59 @@ struct Loader {
 
             Csv c = split_csv(line);
             std::string cmd = to_upper_ascii(c.s(0));
-            command(cmd, c, t_skin, path);
-            t_skin++;
+            line_order = next_order++;
+            taken++;
+            command(cmd, c);
         }
-        return t_skin;
+        return taken;
     }
 
-    void command(const std::string& cmd, const Csv& c, int& t_skin, const std::string& path) {
+    // ノーツの絵の SRC（添字はレーン）
+    std::array<SkinSrc, 20>* note_src(const std::string& cmd) {
+        static const std::pair<const char*, std::array<SkinSrc, 20> Lr2Skin::*> kNoteSrc[] = {
+            {"#SRC_NOTE", &Lr2Skin::note},           {"#SRC_MINE", &Lr2Skin::mine},
+            {"#SRC_LN_START", &Lr2Skin::ln_start},   {"#SRC_LN_END", &Lr2Skin::ln_end},
+            {"#SRC_LN_BODY", &Lr2Skin::ln_body},     {"#SRC_AUTO_NOTE", &Lr2Skin::auto_note},
+            {"#SRC_AUTO_MINE", &Lr2Skin::auto_mine}, {"#SRC_AUTO_LN_START", &Lr2Skin::auto_ln_start},
+            {"#SRC_AUTO_LN_END", &Lr2Skin::auto_ln_end}, {"#SRC_AUTO_LN_BODY", &Lr2Skin::auto_ln_body}};
+        for (const auto& [name, member] : kNoteSrc)
+            if (cmd == name) return &(sk.*member);
+        return nullptr;
+    }
+
+    // 判定の文字とコンボ（#SRC_NOWJUDGE_1P など）。読んだら true
+    bool judge_command(const std::string& cmd, const Csv& c) {
+        struct NowCmd {
+            const char* name;
+            bool combo, dst;
+            int side;
+        };
+        static constexpr NowCmd kNow[] = {
+            {"#SRC_NOWJUDGE_1P", false, false, 0}, {"#SRC_NOWJUDGE_2P", false, false, 1},
+            {"#DST_NOWJUDGE_1P", false, true, 0},  {"#DST_NOWJUDGE_2P", false, true, 1},
+            {"#SRC_NOWCOMBO_1P", true, false, 0},  {"#SRC_NOWCOMBO_2P", true, false, 1},
+            {"#DST_NOWCOMBO_1P", true, true, 0},   {"#DST_NOWCOMBO_2P", true, true, 1}};
+        const NowCmd* k = nullptr;
+        for (const NowCmd& e : kNow)
+            if (cmd == e.name) k = &e;
+        if (!k) return false;
+        const int i = c.val(1);
+        if (i < 0 || i > 5) return true;
+        SkinObject& o = (k->combo ? sk.nowcombo : sk.nowjudge)[k->side][i];
+        // 判定を出したときのタイマー（1P 46・2P 47）で動かす。判定の文字は DST の時刻もこのタイマーで数える
+        const int timer = 46 + k->side;
+        if (!k->dst) {
+            o.src = read_src(c, sk);
+            o.src.timer = timer;
+        } else {
+            read_dst(o.dst, c, line_order);
+            if (!k->combo) o.dst.timer = timer;
+        }
+        return true;
+    }
+
+    void command(const std::string& cmd, const Csv& c) {
+        const int order = line_order;
         auto src_into = [&](SkinSrc& s) { s = read_src(c, sk); };
         auto lane_idx = [&](int max) {
             int i = c.val(1);
@@ -463,9 +536,8 @@ struct Loader {
             if (c.s(1) != "CONTINUE" && images) load_image_font(apply_custom_file(c.s(1)), sk.image_fonts.back());
         } else if (cmd == "#INCLUDE") {
             std::string p = resolve_lr2_path(root, apply_custom_file(c.s(1)));
-            if (t_skin == 0) t_skin = 1;
             if (p.empty()) sk.warnings.push_back("#INCLUDE が見つからない: " + c.s(1));
-            else t_skin += read(p, t_skin);
+            else read(p);
         } else if (cmd == "#CUSTOMOPTION") {
             custom_index++;
         } else if (cmd == "#CUSTOMFILE") {
@@ -518,84 +590,52 @@ struct Loader {
             sk.image_objs.emplace_back();
             src_into(sk.image_objs.back().src);
         } else if (cmd == "#DST_IMAGE") {
-            if (!sk.image_objs.empty()) read_dst(sk.image_objs.back().dst, c, t_skin);
+            if (!sk.image_objs.empty()) read_dst(sk.image_objs.back().dst, c, order);
         } else if (cmd == "#SRC_NUMBER") {
             sk.numbers.emplace_back();
             src_into(sk.numbers.back().src);
         } else if (cmd == "#DST_NUMBER") {
-            if (!sk.numbers.empty()) read_dst(sk.numbers.back().dst, c, t_skin);
+            if (!sk.numbers.empty()) read_dst(sk.numbers.back().dst, c, order);
         } else if (cmd == "#SRC_BARGRAPH") {
             sk.bargraphs.emplace_back();
             src_into(sk.bargraphs.back().src);
         } else if (cmd == "#DST_BARGRAPH") {
-            if (!sk.bargraphs.empty()) read_dst(sk.bargraphs.back().dst, c, t_skin);
-            t_skin++;
+            if (!sk.bargraphs.empty()) read_dst(sk.bargraphs.back().dst, c, order);
+            skip_orders(1);
         } else if (cmd == "#SRC_SLIDER") {
             sk.sliders.emplace_back();
             src_into(sk.sliders.back().src);
         } else if (cmd == "#DST_SLIDER") {
-            if (!sk.sliders.empty()) read_dst(sk.sliders.back().dst, c, t_skin);
+            if (!sk.sliders.empty()) read_dst(sk.sliders.back().dst, c, order);
         } else if (cmd == "#SRC_BUTTON") {
             sk.buttons.emplace_back();
             src_into(sk.buttons.back().src);
         } else if (cmd == "#DST_BUTTON") {
-            if (!sk.buttons.empty()) read_dst(sk.buttons.back().dst, c, t_skin);
+            if (!sk.buttons.empty()) read_dst(sk.buttons.back().dst, c, order);
         } else if (cmd == "#SRC_BGA") {
             sk.bgas.emplace_back();
             src_into(sk.bgas.back().src);
         } else if (cmd == "#DST_BGA") {
-            if (!sk.bgas.empty()) read_dst(sk.bgas.back().dst, c, t_skin);
-            t_skin++;
+            if (!sk.bgas.empty()) read_dst(sk.bgas.back().dst, c, order);
+            skip_orders(1);
         } else if (cmd == "#SRC_TEXT") {
             SkinText t;
             t.src = read_text_src(c);
             sk.texts.push_back(t);
         } else if (cmd == "#DST_TEXT") {
-            if (!sk.texts.empty()) read_dst(sk.texts.back().dst, c, t_skin);
-        } else if (cmd == "#SRC_NOTE" || cmd == "#SRC_MINE" || cmd == "#SRC_LN_START" || cmd == "#SRC_LN_END" ||
-                   cmd == "#SRC_LN_BODY" || cmd == "#SRC_AUTO_NOTE" || cmd == "#SRC_AUTO_MINE" ||
-                   cmd == "#SRC_AUTO_LN_START" || cmd == "#SRC_AUTO_LN_END" || cmd == "#SRC_AUTO_LN_BODY") {
+            if (!sk.texts.empty()) read_dst(sk.texts.back().dst, c, order);
+        } else if (std::array<SkinSrc, 20>* arr = note_src(cmd)) {
             int i = lane_idx(19);
             if (i < 0) return;
-            std::array<SkinSrc, 20>* arr = cmd == "#SRC_NOTE"           ? &sk.note
-                                           : cmd == "#SRC_MINE"         ? &sk.mine
-                                           : cmd == "#SRC_LN_START"     ? &sk.ln_start
-                                           : cmd == "#SRC_LN_END"       ? &sk.ln_end
-                                           : cmd == "#SRC_LN_BODY"      ? &sk.ln_body
-                                           : cmd == "#SRC_AUTO_NOTE"    ? &sk.auto_note
-                                           : cmd == "#SRC_AUTO_MINE"    ? &sk.auto_mine
-                                           : cmd == "#SRC_AUTO_LN_START" ? &sk.auto_ln_start
-                                           : cmd == "#SRC_AUTO_LN_END"  ? &sk.auto_ln_end
-                                                                        : &sk.auto_ln_body;
             src_into((*arr)[i]);
         } else if (cmd == "#DST_NOTE") {
             int i = lane_idx(19);
             if (i < 0) return;
-            read_dst(sk.note_dst[i], c, t_skin);
-            t_skin += 2;
-        } else if (cmd == "#SRC_NOWJUDGE_1P" || cmd == "#SRC_NOWJUDGE_2P") {
-            int p = cmd.back() == 'P' && cmd[cmd.size() - 2] == '2' ? 1 : 0;
-            int i = lane_idx(5);
-            if (i < 0) return;
-            src_into(sk.nowjudge[p][i].src);
-            sk.nowjudge[p][i].src.timer = 46 + p;
-        } else if (cmd == "#DST_NOWJUDGE_1P" || cmd == "#DST_NOWJUDGE_2P") {
-            int p = cmd[cmd.size() - 2] == '2' ? 1 : 0;
-            int i = lane_idx(5);
-            if (i < 0) return;
-            read_dst(sk.nowjudge[p][i].dst, c, t_skin);
-            sk.nowjudge[p][i].dst.timer = 46 + p;
-        } else if (cmd == "#SRC_NOWCOMBO_1P" || cmd == "#SRC_NOWCOMBO_2P") {
-            int p = cmd[cmd.size() - 2] == '2' ? 1 : 0;
-            int i = lane_idx(5);
-            if (i < 0) return;
-            src_into(sk.nowcombo[p][i].src);
-            sk.nowcombo[p][i].src.timer = 46 + p;
-        } else if (cmd == "#DST_NOWCOMBO_1P" || cmd == "#DST_NOWCOMBO_2P") {
-            int p = cmd[cmd.size() - 2] == '2' ? 1 : 0;
-            int i = lane_idx(5);
-            if (i < 0) return;
-            read_dst(sk.nowcombo[p][i].dst, c, t_skin);
+            read_dst(sk.note_dst[i], c, order);
+            skip_orders(2);
+        } else if (judge_command(cmd, c)) {
+            // 判定の文字とコンボ
+            // 判定の文字とコンボ
         } else if (cmd == "#SRC_GAUGECHART_1P" || cmd == "#SRC_GAUGECHART_2P" || cmd == "#SRC_SCORECHART") {
             bool g = cmd != "#SRC_SCORECHART";
             int i = lane_idx(g ? 1 : 2);
@@ -605,7 +645,7 @@ struct Loader {
             bool g = cmd != "#DST_SCORECHART";
             int i = lane_idx(g ? 1 : 2);
             auto& gc = cmd == "#DST_GAUGECHART_2P" ? sk.gaugechart_2p : sk.gaugechart;
-            if (i >= 0) read_dst(g ? gc[i].dst : sk.scorechart[i].dst, c, t_skin);
+            if (i >= 0) read_dst(g ? gc[i].dst : sk.scorechart[i].dst, c, order);
         } else if (cmd == "#SRC_GROOVEGAUGE" || cmd == "#SRC_LINE" || cmd == "#SRC_JUDGELINE") {
             int i = lane_idx(1);
             if (i < 0) return;
@@ -615,15 +655,14 @@ struct Loader {
             int i = lane_idx(1);
             if (i < 0) return;
             auto& arr = cmd == "#DST_GROOVEGAUGE" ? sk.gauge : cmd == "#DST_LINE" ? sk.line : sk.judgeline;
-            read_dst(arr[i].dst, c, t_skin);
+            read_dst(arr[i].dst, c, order);
         } else {
-            select_command(cmd, c, t_skin);
+            select_command(cmd, c, order);
         }
-        (void)path;
     }
 
     // 選曲画面だけで使う命令
-    void select_command(const std::string& cmd, const Csv& c, int t_skin) {
+    void select_command(const std::string& cmd, const Csv& c, int order) {
         auto idx = [&](int max) {
             int i = c.val(1);
             return (i >= 0 && i <= max) ? i : -1;
@@ -641,14 +680,14 @@ struct Loader {
                 return;
             }
             if (cmd == std::string("#DST_") + p.name) {
-                if (int i = idx(p.max); i >= 0) read_dst(p.arr[i].dst, c, t_skin);
+                if (int i = idx(p.max); i >= 0) read_dst(p.arr[i].dst, c, order);
                 return;
             }
         }
         if (cmd == "#SRC_BAR_BODY") {
             if (int i = idx(29); i >= 0) b.body[i] = read_src(c, sk);
         } else if (cmd == "#DST_BAR_BODY_ON" || cmd == "#DST_BAR_BODY_OFF") {
-            if (int i = idx(29); i >= 0) read_dst(cmd == "#DST_BAR_BODY_ON" ? b.body_on[i] : b.body_off[i], c, t_skin);
+            if (int i = idx(29); i >= 0) read_dst(cmd == "#DST_BAR_BODY_ON" ? b.body_on[i] : b.body_off[i], c, order);
         } else if (cmd == "#BAR_CENTER") {
             if (idx(29) >= 0) b.center = c.val(1);
         } else if (cmd == "#BAR_AVAILABLE") {
@@ -657,26 +696,26 @@ struct Loader {
         } else if (cmd == "#SRC_BAR_TITLE") {
             if (int i = idx(4); i >= 0) b.title[i].src = read_text_src(c);
         } else if (cmd == "#DST_BAR_TITLE") {
-            if (int i = idx(4); i >= 0) read_dst(b.title[i].dst, c, t_skin);
+            if (int i = idx(4); i >= 0) read_dst(b.title[i].dst, c, order);
         } else if (cmd == "#SRC_BAR_FLASH") {
             b.flash.src = read_src(c, sk);
         } else if (cmd == "#DST_BAR_FLASH") {
-            read_dst(b.flash.dst, c, t_skin);
+            read_dst(b.flash.dst, c, order);
         } else if (cmd == "#DST_BAR_STAGEFILE") {
-            read_dst(b.stagefile, c, t_skin);
+            read_dst(b.stagefile, c, order);
         } else if (cmd == "#SRC_ONMOUSE") {
             sk.onmouse.emplace_back();
             sk.onmouse.back().src = read_src(c, sk);
         } else if (cmd == "#DST_ONMOUSE") {
-            if (!sk.onmouse.empty()) read_dst(sk.onmouse.back().dst, c, t_skin);
+            if (!sk.onmouse.empty()) read_dst(sk.onmouse.back().dst, c, order);
         } else if (cmd == "#SRC_MOUSECURSOR") {
             sk.mousecursor.src = read_src(c, sk);
         } else if (cmd == "#DST_MOUSECURSOR") {
-            read_dst(sk.mousecursor.dst, c, t_skin);
+            read_dst(sk.mousecursor.dst, c, order);
         } else if (cmd == "#SRC_README") {
             if (int i = idx(1); i >= 0) sk.readme[i].src = read_text_src(c);
         } else if (cmd == "#DST_README") {
-            if (int i = idx(1); i >= 0) read_dst(sk.readme[i].dst, c, t_skin);
+            if (int i = idx(1); i >= 0) read_dst(sk.readme[i].dst, c, order);
         } else if (cmd == "#HELPFILE") {
             if (sk.helpfiles.size() < 10) sk.helpfiles.push_back(c.s(1));
         } else if (cmd == "#RELOADBANNER") {
@@ -954,7 +993,7 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
     ld.previous = previous;
     ld.images = images;
     auto tp0 = std::chrono::steady_clock::now();
-    if (ld.read(skin_path, 0) == 0) {
+    if (ld.read(skin_path) == 0) {
         error = "スキンを読めない: " + skin_path;
         return false;
     }

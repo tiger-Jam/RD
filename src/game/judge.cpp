@@ -7,16 +7,18 @@
 namespace bmj {
 
 JudgeWindows JudgeWindows::for_rank(int rank) {
+    // #RANK ごとの PGREAT・GREAT・GOOD の幅（VERY HARD・HARD・NORMAL・EASY）。範囲の外は NORMAL
+    struct Row {
+        int pg, gr, gd;
+    };
+    static constexpr Row kRows[4] = {{8, 24, 40}, {15, 30, 60}, {18, 40, 100}, {21, 60, 120}};
+    const Row& r = kRows[rank >= 0 && rank < 4 ? rank : 2];
     JudgeWindows w;
-    switch (rank) {
-    case 0: w.pgreat = 8, w.great = 24, w.good = 40; break;
-    case 1: w.pgreat = 15, w.great = 30, w.good = 60; break;
-    case 3: w.pgreat = 21, w.great = 60, w.good = 120; break;
-    default: w.pgreat = 18, w.great = 40, w.good = 100; break;  // 2とそれ以外
-    }
-    w.bad = 200;
+    w.pgreat = w.pgreat_late = r.pg;
+    w.great = w.great_late = r.gr;
+    w.good = w.good_late = r.gd;
+    w.bad = w.bad_late = 200;
     w.empty_poor = 1000;
-    w.pgreat_late = w.pgreat, w.great_late = w.great, w.good_late = w.good, w.bad_late = w.bad;
     return w;
 }
 
@@ -56,8 +58,8 @@ JudgeEngine::JudgeEngine(const Chart& chart, const JudgeConfig& cfg)
         sc(win_.pgreat_late), sc(win_.great_late), sc(win_.good_late), sc(win_.bad_late);
     }
     done_.assign(chart.notes.size(), false);
-    active_.assign(chart.notes.size(), 0);
-    head_fast_.assign(chart.notes.size(), false);
+    phase_.assign(chart.notes.size(), LnPhase::Waiting);
+    head_.assign(chart.notes.size(), 0);
     for (size_t i = 0; i < chart.notes.size(); ++i) {
         const Note& n = chart.notes[i];
         if (n.kind == NoteKind::Invisible) {
@@ -191,29 +193,7 @@ void JudgeEngine::apply_mine(int damage, int lane, int64_t t_us) {
     gas_step();
 }
 
-// LR2: JudgeToScore + ApplyJudgeNote
-void JudgeEngine::judge_to_score(int judge, int lane, int64_t t_us, int offset_ms, bool has_offset) {
-    if (judge >= kPoor) stats_.note_current++;
-    if (judge == kEmptyPoor) {
-        stats_.judge_count[kPoor]++;
-        stats_.empty_poor++;
-    } else {
-        stats_.judge_count[judge]++;
-    }
-    apply_judge(judge);
-    switch (judge) {
-    case kPoor:
-    case kBad: stats_.combo = 0, stats_.course_combo = 0; break;
-    case kGood:
-    case kGreat:
-    case kPGreat:
-        stats_.combo++;
-        if (stats_.combo > stats_.max_combo) stats_.max_combo = stats_.combo;
-        stats_.course_combo++;
-        if (stats_.course_combo > stats_.course_max_combo) stats_.course_max_combo = stats_.course_combo;
-        break;
-    default: break;
-    }
+JudgeEvent JudgeEngine::make_event(int lane, int64_t t_us, int judge, int offset_ms, bool has_offset) const {
     JudgeEvent e;
     e.time_us = t_us;
     e.lane = static_cast<uint8_t>(lane);
@@ -221,7 +201,27 @@ void JudgeEngine::judge_to_score(int judge, int lane, int64_t t_us, int offset_m
     e.offset_ms = offset_ms;
     e.fast = offset_ms < 0;
     e.has_offset = has_offset;
-    if (has_offset && judge != kPGreat && judge >= kBad) (e.fast ? stats_.fast : stats_.slow)++;
+    return e;
+}
+
+// 判定を記録に入れる：判定の数（空POOR は POOR にも数える）・ゲージ・コンボ・FAST/SLOW と、画面に出す出来事
+void JudgeEngine::judge_to_score(int judge, int lane, int64_t t_us, int offset_ms, bool has_offset) {
+    const bool empty = judge == kEmptyPoor;
+    if (!empty) stats_.note_current++;
+    stats_.judge_count[empty ? kPoor : judge]++;
+    if (empty) stats_.empty_poor++;
+    apply_judge(judge);
+    // BAD・POOR はコンボを切り、GOOD 以上はつなぐ（空POOR はどちらでもない）
+    auto extend = [](int& now, int& best) { best = std::max(best, ++now); };
+    if (judge == kPoor || judge == kBad) {
+        stats_.combo = stats_.course_combo = 0;
+    } else if (judge >= kGood) {
+        extend(stats_.combo, stats_.max_combo);
+        extend(stats_.course_combo, stats_.course_max_combo);
+    }
+    const JudgeEvent e = make_event(lane, t_us, judge, offset_ms, has_offset);
+    const bool timed = judge == kBad || judge == kGood || judge == kGreat;  // PGREAT と POOR は FAST/SLOW に数えない
+    if (has_offset && timed) (e.fast ? stats_.fast : stats_.slow)++;
     events_.push_back(e);
 }
 
@@ -256,38 +256,43 @@ void JudgeEngine::advance(int64_t t_us) {
         const Note& n = chart_.notes[invisible_[invisible_next_++]];
         lanes_[n.lane].note_val = n.sound;
     }
-    int timing = to_ms(t_us);
+    const int timing = to_ms(t_us);
     for (int lane = 0; lane < kLaneCount; ++lane) {
         Lane& l = lanes_[lane];
-        // 1回の処理でノーツが進んだら、次のノーツも同じ時刻で見直す
-        for (;;) {
-            if (l.cur >= l.notes.size()) break;
-            size_t before = l.cur;
-            int before_count = stats_.note_current;
+        // ノーツが進むか判定の数が変わる間は、同じ時刻で次の先頭も見る
+        while (l.cur < l.notes.size()) {
             if (cfg_.autoplay) {
-                const Note& n = chart_.notes[l.notes[l.cur]];
-                size_t idx = l.notes[l.cur];
-                if (is_charge(n) && active_[idx] <= 0) {
-                    // CN・HCN：始点と終点をそれぞれ PGREAT
-                    if (n.time_us > t_us) break;
-                    judge_to_score(kPGreat, lane, n.time_us, 0, true);
-                    events_.back().ln_start = true;
-                    active_[idx] = 1;
-                    if (ln_type(n) == 3) hcn_[lane] = Hcn{true, idx, n.time_us, 0, false};
-                    continue;
-                }
-                int64_t due = n.kind == NoteKind::Long ? n.end_us : n.time_us;
-                if (due > t_us) break;
-                if (n.kind != NoteKind::Mine) judge_to_score(kPGreat, lane, due, 0, true);
-                done_[l.notes[l.cur]] = true;
-                l.note_val = n.sound;
-                l.cur++;
+                if (!auto_step(lane, t_us)) break;
                 continue;
             }
-            proc(lane, held_[lane] ? 2 : 0, timing, t_us);
-            if (l.cur == before && stats_.note_current == before_count) break;
+            const size_t cur = l.cur;
+            const int counted = stats_.note_current;
+            sweep(lane, held_[lane], timing, t_us);
+            if (l.cur == cur && stats_.note_current == counted) break;
         }
     }
+}
+
+// オートプレイ：時刻が来たノーツを PGREAT で取る。何もしなければ false
+bool JudgeEngine::auto_step(int lane, int64_t t_us) {
+    Lane& l = lanes_[lane];
+    const size_t idx = l.notes[l.cur];
+    const Note& n = chart_.notes[idx];
+    if (is_charge(n) && phase_[idx] != LnPhase::Held) {
+        // CN・HCN：始点と終点をそれぞれ PGREAT
+        if (n.time_us > t_us) return false;
+        judge_to_score(kPGreat, lane, n.time_us, 0, true);
+        events_.back().ln_start = true;
+        phase_[idx] = LnPhase::Held;
+        if (ln_type(n) == 3) start_hcn(lane, idx, n.time_us);
+        return true;
+    }
+    const int64_t due = n.kind == NoteKind::Long ? n.end_us : n.time_us;
+    if (due > t_us) return false;
+    if (n.kind != NoteKind::Mine) judge_to_score(kPGreat, lane, due, 0, true);
+    l.note_val = n.sound;
+    step_past(lane);
+    return true;
 }
 
 void JudgeEngine::press(int lane, int64_t t_us) {
@@ -295,12 +300,13 @@ void JudgeEngine::press(int lane, int64_t t_us) {
     advance(t_us);
     held_[lane] = true;
     if (cfg_.autoplay) return;  // オートプレイでは押しても何もしない（LR2: Play.cpp:1138）
-    Lane& l = lanes_[lane];
-    if (l.cur >= l.notes.size()) {
-        if (l.note_val > 0) play_.push_back(l.note_val);
+    if (lanes_[lane].cur >= lanes_[lane].notes.size()) {
+        play_key(lane);
         return;
     }
-    proc(lane, 1, to_ms(t_us), t_us);
+    const int timing = to_ms(t_us);
+    while (hit(lane, timing, t_us)) {
+    }
 }
 
 void JudgeEngine::release(int lane, int64_t t_us) {
@@ -308,151 +314,222 @@ void JudgeEngine::release(int lane, int64_t t_us) {
     advance(t_us);
     held_[lane] = false;
     if (cfg_.autoplay) return;
-    Lane& l = lanes_[lane];
-    if (l.cur >= l.notes.size()) return;
-    proc(lane, 3, to_ms(t_us), t_us);
+    if (lanes_[lane].cur >= lanes_[lane].notes.size()) return;
+    lift(lane, to_ms(t_us), t_us);
 }
 
-// keypress: 0=押していない, 1=押した, 2=押し続けている, 3=離した（LR2と同じ）
-void JudgeEngine::proc(int lane, int keypress, int timing, int64_t t_us) {
-    const Note& n = chart_.notes[lanes_[lane].notes[lanes_[lane].cur]];
-    if (is_charge(n)) proc_charge(lane, keypress, timing, t_us);
-    else if (n.kind == NoteKind::Long) proc_long(lane, keypress, timing, t_us);
-    else proc_single(lane, keypress, timing, t_us);
+namespace {
+// ノーツの時刻（ms）。判定のずれは切り捨てた整数で、見逃しは小数のまま比べる
+double exact_ms(int64_t us) { return us / 1000.0; }
+int whole_ms(int64_t us) { return static_cast<int>(us / 1000.0); }
+}  // namespace
+
+JudgeEngine::Front JudgeEngine::front_of(const Note& n) const {
+    if (is_charge(n)) return Front::Charge;
+    if (n.kind == NoteKind::Long) return Front::Ln;
+    return n.kind == NoteKind::Mine ? Front::Mine : Front::Tap;
 }
 
-void JudgeEngine::proc_single(int lane, int keypress, int timing, int64_t t_us) {
+void JudgeEngine::step_past(int lane) {
     Lane& l = lanes_[lane];
-    size_t idx = l.notes[l.cur];
-    const Note& note = chart_.notes[idx];
-    double real = note.time_us / 1000.0;
-    int note_ms = static_cast<int>(real);
+    done_[l.notes[l.cur]] = true;
+    l.cur++;
+}
 
-    if (note.kind == NoteKind::Mine) {
-        // 押した瞬間がGREATの早い側より後なら爆発。通り過ぎた時点で押していても爆発
-        if (keypress == 1 && real - timing < win_.great) {
-            apply_mine(note.damage, lane, t_us);
-            play_.push_back(!chart_.wav.empty() && !chart_.wav[0].empty() ? 0 : kMineSystemSound);
-        } else if (timing <= real) {
-            return;
-        } else if (keypress == 1 || keypress == 2) {
-            apply_mine(note.damage, lane, t_us);
-            play_.push_back(!chart_.wav.empty() && !chart_.wav[0].empty() ? 0 : kMineSystemSound);
-        }
-        done_[idx] = true;
-        l.cur++;
-        return;
-    }
+void JudgeEngine::sound_on(int lane, uint16_t sound) {
+    lanes_[lane].note_val = sound;
+    play_key(lane);
+}
 
-    bool remaining = stats_.note_current < stats_.total_notes;
-    // 見逃し
-    if (timing - real > win_.bad_late && remaining) {
-        judge_to_score(kPoor, lane, t_us, 0, false);
-        l.note_val = note.sound;
-        done_[idx] = true;
-        l.cur++;
-        return;
-    }
-    if (keypress != 1) return;
+void JudgeEngine::play_key(int lane) {
+    if (lanes_[lane].note_val > 0) play_.push_back(lanes_[lane].note_val);
+}
 
-    int offset = timing - note_ms;
-    int judge = win_.classify(offset);
-    judge = demote(judge);
-    if (judge >= 0 && remaining) {
-        judge_to_score(judge, lane, t_us, offset, true);
-        l.note_val = note.sound;
-        if (l.note_val > 0) play_.push_back(l.note_val);
-        done_[idx] = true;
-        l.cur++;
-        // BADのあと、同じレーンの次のノーツもBAD幅に入っていれば、同じ入力で判定する（LR2: Play.cpp:902）
-        if (judge == kBad && l.cur < l.notes.size()) {
-            const Note& next = chart_.notes[l.notes[l.cur]];
-            if (win_.classify(timing - static_cast<int>(next.time_us / 1000.0)) >= 0) proc(lane, 1, timing, t_us);
-        }
-        return;
-    }
-    if (note_ms - timing < win_.empty_poor && remaining) {
+// 見逃し：POOR にして、レーンの音をそのノーツの音に替える
+void JudgeEngine::miss(int lane, int64_t t_us) {
+    Lane& l = lanes_[lane];
+    judge_to_score(kPoor, lane, t_us, 0, false);
+    l.note_val = chart_.notes[l.notes[l.cur]].sound;
+    step_past(lane);
+}
+
+// CN・HCN の始点の見逃し：始点と終点の両方を POOR（HCN は押し直せばゲージが戻る）
+void JudgeEngine::miss_charge(int lane, int64_t t_us) {
+    Lane& l = lanes_[lane];
+    const size_t idx = l.notes[l.cur];
+    const Note& n = chart_.notes[idx];
+    judge_to_score(kPoor, lane, t_us, 0, false);
+    judge_to_score(kPoor, lane, t_us, 0, false);
+    l.note_val = n.sound;
+    if (ln_type(n) == 3) start_hcn(lane, idx, std::max(t_us, n.time_us));
+    close_long(lane, LnPhase::Closed);
+}
+
+void JudgeEngine::close_long(int lane, LnPhase to) {
+    const Lane& l = lanes_[lane];
+    phase_[l.notes[l.cur]] = to;
+    step_past(lane);
+}
+
+void JudgeEngine::explode(int lane, const Note& mine, int64_t t_us) {
+    apply_mine(mine.damage, lane, t_us);
+    const bool own_sound = !chart_.wav.empty() && !chart_.wav[0].empty();  // #WAV00
+    play_.push_back(own_sound ? 0 : kMineSystemSound);
+}
+
+void JudgeEngine::start_hcn(int lane, size_t index, int64_t from_us) { hcn_[lane] = Hcn{true, index, from_us, 0, false}; }
+
+void JudgeEngine::stray_press(int lane, const Note& n, int timing, int64_t t_us, bool may_count) {
+    // 空POOR の幅の中なら空POOR にして、レーンの音をそのノーツの音に替える。鳴らすのはどちらでもレーンの音
+    if (may_count && whole_ms(n.time_us) - timing < win_.empty_poor) {
         judge_to_score(kEmptyPoor, lane, t_us, 0, false);
-        l.note_val = note.sound;
-        if (l.note_val > 0) play_.push_back(l.note_val);
-        return;
+        lanes_[lane].note_val = n.sound;
     }
-    if (l.note_val > 0) play_.push_back(l.note_val);
+    play_key(lane);
 }
 
-void JudgeEngine::proc_long(int lane, int keypress, int timing, int64_t t_us) {
+// 押していない・押し続けている間：見逃しと、地雷の通過と、LN の終わり
+void JudgeEngine::sweep(int lane, bool held, int timing, int64_t t_us) {
+    const size_t idx = lanes_[lane].notes[lanes_[lane].cur];
+    const Note& n = chart_.notes[idx];
+    const bool waiting = phase_[idx] != LnPhase::Held;
+    switch (front_of(n)) {
+    case Front::Mine:
+        // 通り過ぎたら消す。そのとき押していれば爆発
+        if (timing > exact_ms(n.time_us)) {
+            if (held) explode(lane, n, t_us);
+            step_past(lane);
+        }
+        break;
+    case Front::Tap:
+        if (counting() && timing - exact_ms(n.time_us) > win_.bad_late) miss(lane, t_us);
+        break;
+    case Front::Ln:
+        // 始点は GOOD の幅を過ぎたら見逃し。押し続けて終点を過ぎたら、始点の判定で確定
+        if (waiting) {
+            if (timing - exact_ms(n.time_us) > win_.good_late) miss(lane, t_us);
+        } else if (held && timing > whole_ms(n.end_us)) {
+            judge_to_score(head_[idx], lane, t_us, 0, false);
+            close_long(lane, LnPhase::Closed);
+        }
+        break;
+    case Front::Charge:
+        // 押し続けて、終点の時刻から BAD 幅を過ぎたら終点は POOR（押しっぱなしでは取れない）
+        if (waiting) {
+            if (counting() && timing - exact_ms(n.time_us) > win_.bad_late) miss_charge(lane, t_us);
+        } else if (timing - whole_ms(n.end_us) > win_.bad_late) {
+            judge_to_score(kPoor, lane, t_us, 0, false);
+            close_long(lane, LnPhase::Closed);
+        }
+        break;
+    }
+}
+
+bool JudgeEngine::hit(int lane, int timing, int64_t t_us) {
     Lane& l = lanes_[lane];
-    size_t idx = l.notes[l.cur];
-    const Note& note = chart_.notes[idx];
-    double real = note.time_us / 1000.0;
-    int note_ms = static_cast<int>(real);
-    int end_ms = static_cast<int>(note.end_us / 1000.0);
+    const size_t idx = l.notes[l.cur];
+    const Note& n = chart_.notes[idx];
+    const int offset = timing - whole_ms(n.time_us);
+    switch (front_of(n)) {
+    case Front::Mine:
+        // GREAT の早い側の幅に入ってから押すか、通り過ぎてから押したら爆発
+        if (exact_ms(n.time_us) - timing < win_.great || timing > exact_ms(n.time_us)) {
+            explode(lane, n, t_us);
+            step_past(lane);
+        }
+        return false;
+    case Front::Tap: {
+        if (counting() && timing - exact_ms(n.time_us) > win_.bad_late) {
+            miss(lane, t_us);
+            return false;
+        }
+        const int j = demote(win_.classify(offset));
+        if (j < 0 || !counting()) {
+            stray_press(lane, n, timing, t_us, counting());
+            return false;
+        }
+        judge_to_score(j, lane, t_us, offset, true);
+        sound_on(lane, n.sound);
+        step_past(lane);
+        // BAD のあと、同じレーンの次のノーツも BAD の幅に入っていれば、同じ押下で判定する（LR2: Play.cpp:902）
+        if (j != kBad || l.cur >= l.notes.size()) return false;
+        return win_.classify(timing - whole_ms(chart_.notes[l.notes[l.cur]].time_us)) >= 0;
+    }
+    case Front::Ln: {
+        if (phase_[idx] != LnPhase::Held && timing - exact_ms(n.time_us) > win_.good_late) {
+            miss(lane, t_us);
+            return false;
+        }
+        const int j = demote(win_.classify(offset));
+        if (j < 0) {
+            stray_press(lane, n, timing, t_us, true);
+            return false;
+        }
+        // 始点ではまだ数えない（終点で、始点の判定として数える）。画面には始点の判定を judge + 100 で知らせる
+        sound_on(lane, n.sound);
+        phase_[idx] = LnPhase::Held;
+        head_[idx] = j;
+        const JudgeEvent e = make_event(lane, t_us, j + 100, offset, true);
+        events_.push_back(e);
+        if (j != kPGreat) (e.fast ? stats_.fast : stats_.slow)++;
+        return false;
+    }
+    case Front::Charge: {
+        if (phase_[idx] == LnPhase::Held) {
+            sweep(lane, true, timing, t_us);
+            return false;
+        }
+        if (counting() && timing - exact_ms(n.time_us) > win_.bad_late) {
+            miss_charge(lane, t_us);
+            return false;
+        }
+        const int j = demote(win_.classify(offset));
+        if (j < 0 || !counting()) {
+            stray_press(lane, n, timing, t_us, counting());
+            return false;
+        }
+        judge_to_score(j, lane, t_us, offset, true);
+        events_.back().ln_start = true;
+        sound_on(lane, n.sound);
+        phase_[idx] = LnPhase::Held;
+        if (ln_type(n) == 3) start_hcn(lane, idx, std::max(t_us, n.time_us));
+        return false;
+    }
+    }
+    return false;
+}
 
-    // 始点の見逃し（LNはGOOD幅を過ぎたら）
-    if (timing - real > win_.good_late && active_[idx] <= 0) {
-        judge_to_score(kPoor, lane, t_us, 0, false);
-        l.note_val = note.sound;
-        done_[idx] = true;
-        l.cur++;
+void JudgeEngine::lift(int lane, int timing, int64_t t_us) {
+    Lane& l = lanes_[lane];
+    const size_t idx = l.notes[l.cur];
+    const Note& n = chart_.notes[idx];
+    const Front f = front_of(n);
+    // 始点を押さえていない LN・CN と、ほかのノーツは、時刻が進んだときと同じ（離しても爆発はしない）
+    if ((f != Front::Ln && f != Front::Charge) || phase_[idx] != LnPhase::Held) {
+        sweep(lane, false, timing, t_us);
         return;
     }
-
-    if (keypress == 1) {
-        int offset = timing - note_ms;
-        int judge = win_.classify(offset);
-        judge = demote(judge);
-        if (judge >= 0) {
-            // 始点ではまだ数えない。終点で始点の判定として数える
-            l.note_val = note.sound;
-            if (l.note_val > 0) play_.push_back(l.note_val);
-            active_[idx] = judge;
-            head_fast_[idx] = offset < 0;
-            JudgeEvent e;
-            e.time_us = t_us;
-            e.lane = static_cast<uint8_t>(lane);
-            e.judge = judge;
-            e.offset_ms = offset;
-            e.fast = offset < 0;
-            e.has_offset = true;
-            // 始点の表示用（スコアには入らない）。judge に +100 して区別する
-            e.judge += 100;
-            events_.push_back(e);
-            if (judge != kPGreat && judge != kBad) (e.fast ? stats_.fast : stats_.slow)++;
-            if (judge == kBad) (e.fast ? stats_.fast : stats_.slow)++;
-            return;
-        }
-        if (note_ms - timing < win_.empty_poor) {
-            judge_to_score(kEmptyPoor, lane, t_us, 0, false);
-            l.note_val = note.sound;
-            if (l.note_val > 0) play_.push_back(l.note_val);
-            return;
-        }
-        if (l.note_val > 0) play_.push_back(l.note_val);
-        return;
-    }
-    if (keypress == 2) {
-        // 押し続けて終点を過ぎたら、始点の判定で確定
-        if (end_ms < timing && active_[idx] > 0) {
-            judge_to_score(active_[idx], lane, t_us, 0, false);
-            active_[idx] = -1;
-            done_[idx] = true;
-            l.cur++;
-        }
-        return;
-    }
-    if (keypress == 3 && active_[idx] > 0) {
-        // 終点よりGOOD幅以上早く離したらBAD（音も止める）
-        if (win_.good + timing < end_ms) {
+    if (f == Front::Ln) {
+        // 終点より GOOD の幅より早く離したら BAD（音も止める）。それ以外は始点の判定で確定
+        if (whole_ms(n.end_us) - timing > win_.good) {
             if (l.note_val > 0) stop_.push_back(l.note_val);
             judge_to_score(kBad, lane, t_us, 0, false);
         } else {
-            judge_to_score(active_[idx], lane, t_us, 0, false);
+            judge_to_score(head_[idx], lane, t_us, 0, false);
             events_.back().ln_release = true;
         }
-        active_[idx] = -1;
-        done_[idx] = true;
-        l.cur++;
+        close_long(lane, LnPhase::Closed);
+        return;
     }
+    // CN・HCN：離した時刻を終点の幅で判定。早く離して BAD・POOR なら音を止める
+    const int early = whole_ms(n.end_us) - timing;
+    int j = tail_judge(lane, early);
+    if (j < 0) j = kPoor;
+    if (early > 0 && j <= kBad && l.note_val > 0) stop_.push_back(l.note_val);
+    judge_to_score(j, lane, t_us, -early, true);
+    events_.back().ln_end = true;
+    if (ln_type(n) == 3 && j >= kGood) hcn_[lane].tail_good = true;
+    close_long(lane, LnPhase::Closed);
 }
 
 int JudgeEngine::tail_judge(int lane, int dm) const {
@@ -463,71 +540,6 @@ int JudgeEngine::tail_judge(int lane, int dm) const {
     else if (a <= w.gd) j = kGood;
     else if (dm > 0 ? dm <= w.bd_early : -dm <= w.bd_late) j = kBad;
     return demote(j);
-}
-
-// CN・HCN（beatoraja と同じ）。始点はその場で 1 つの判定として数え、終点は離した時刻で別に判定する
-void JudgeEngine::proc_charge(int lane, int keypress, int timing, int64_t t_us) {
-    Lane& l = lanes_[lane];
-    size_t idx = l.notes[l.cur];
-    const Note& note = chart_.notes[idx];
-    double real = note.time_us / 1000.0;
-    int note_ms = static_cast<int>(real);
-    int end_ms = static_cast<int>(note.end_us / 1000.0);
-    const bool hcn = ln_type(note) == 3;
-    bool remaining = stats_.note_current < stats_.total_notes;
-    auto finish = [&] {
-        active_[idx] = -1;
-        done_[idx] = true;
-        l.cur++;
-    };
-
-    if (active_[idx] <= 0) {
-        // 始点の見逃し：BAD 幅を過ぎたら、始点と終点の両方を POOR（HCN は押し直せばゲージが戻る）
-        if (timing - real > win_.bad_late && remaining) {
-            judge_to_score(kPoor, lane, t_us, 0, false);
-            judge_to_score(kPoor, lane, t_us, 0, false);
-            l.note_val = note.sound;
-            if (hcn) hcn_[lane] = Hcn{true, idx, std::max(t_us, note.time_us), 0, false};
-            finish();
-            return;
-        }
-        if (keypress != 1) return;
-        int offset = timing - note_ms;
-        int judge = win_.classify(offset);
-        judge = demote(judge);
-        if (judge >= 0 && remaining) {
-            judge_to_score(judge, lane, t_us, offset, true);
-            events_.back().ln_start = true;
-            l.note_val = note.sound;
-            if (l.note_val > 0) play_.push_back(l.note_val);
-            active_[idx] = 1;
-            if (hcn) hcn_[lane] = Hcn{true, idx, std::max(t_us, note.time_us), 0, false};
-            return;
-        }
-        if (note_ms - timing < win_.empty_poor && remaining) {
-            judge_to_score(kEmptyPoor, lane, t_us, 0, false);
-            l.note_val = note.sound;
-        }
-        if (l.note_val > 0) play_.push_back(l.note_val);
-        return;
-    }
-    if (keypress == 3) {
-        // 離した：終点の幅で判定。早く離して BAD・POOR なら音を止める
-        int dm = end_ms - timing;
-        int judge = tail_judge(lane, dm);
-        if (judge < 0) judge = kPoor;
-        if (dm > 0 && judge <= kBad && l.note_val > 0) stop_.push_back(l.note_val);
-        judge_to_score(judge, lane, t_us, -dm, true);
-        events_.back().ln_end = true;
-        if (hcn && judge >= kGood) hcn_[lane].tail_good = true;
-        finish();
-        return;
-    }
-    // 押し続けて、終点の時刻から BAD 幅を過ぎたら終点は POOR（押しっぱなしでは取れない）
-    if (timing - end_ms > win_.bad_late) {
-        judge_to_score(kPoor, lane, t_us, 0, false);
-        finish();
-    }
 }
 
 }  // namespace bmj

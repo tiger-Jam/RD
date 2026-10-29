@@ -232,6 +232,67 @@ std::pair<std::string, BmsParseResult> read_chart(const std::string& path, uint3
     return {sha256, parse_chart_file(path, popt)};
 }
 
+// 判定タイミングの自動調整：PG〜BD のずれを 10 回分ためて、遅ければ +1ms、早ければ −1ms 動かす
+struct TimingNudger {
+    int count = 0, sum = 0;
+    // 動かす向き（+1・−1。まだ 10 回たまっていないか、ずれの合計が 0 なら 0）
+    int add(int offset_ms) {
+        sum += offset_ms;
+        if (++count < 10) return 0;
+        const int dir = (sum > 0) - (sum < 0);
+        count = sum = 0;
+        return dir;
+    }
+};
+
+// ゲージのタイマー：42 は増えたとき、44 は MAX の間。ゲージは 2% 刻みで見る。
+// 初期値が 100% のゲージ（HARD 系）は、曲が始まった時点で MAX（LR2: タイマー41 と同時に 44）。一度 0 になったらもう動かさない
+struct GaugeTimers {
+    int shown = -1;  // 前に見たゲージ（まだ見ていなければ負）
+    void update(int hp, SkinTimers& timers, double now_ms) {
+        hp = hp / 2 * 2;
+        if (shown < 0) {
+            if (hp == 100) timers.set(44, now_ms);
+            shown = hp;
+            return;
+        }
+        if (hp == shown) return;
+        if (shown == 0) {
+            timers.reset(44);
+            return;
+        }
+        const bool full = hp == 100;
+        if (!full) timers.reset(44);
+        if (hp > shown) {
+            if (full) timers.reset(42);
+            timers.set(full ? 44 : 42, now_ms);
+        }
+        shown = hp;
+    }
+};
+
+// リザルトで決定を押したとき（LR2: ProcI_Result）。押すたびに グラフ → ランク → 更新 → フェードアウト と進む。
+// どこまで進んだかはタイマーで持つ：151 はグラフを描き終えた（描き終えれば押さなくても立つ）、152 は更新を出した、2 は抜ける。
+// show_update が偽なら更新の表示を飛ばす。graph_end_ms はグラフを描き終える時刻（押したらその時刻にする）
+void press_result(const Lr2Skin& sk, SkinTimers& tm, double t, bool show_update, int& graph_end_ms) {
+    if (t <= sk.startinput) return;
+    if (!tm.on(151)) {
+        tm.set(151, t);
+        graph_end_ms = static_cast<int>(t);
+        return;
+    }
+    auto leave = [&] {
+        if (!tm.on(2)) tm.set(2, t);
+    };
+    // ランクを出している間と、更新を出したあとは、更新の表示の時間が過ぎていれば抜ける
+    if (tm.on(152) || tm.lapse(151, t) <= sk.startinput_rank) {
+        if (tm.lapse(152, t) > sk.startinput_update) leave();
+        return;
+    }
+    if (show_update) tm.set(152, t);
+    else leave();
+}
+
 }  // namespace
 
 PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
@@ -708,10 +769,10 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         // レーンカバーを出しているか（LR2: lanecoverDisplay。START か SELECT の2度押しで切り替える）
         bool cover_display = true;
         double cover_dbl_ms = 0;
-        int old_hp = -1;
-        // 判定タイミングの自動調整（LR2: Play.cpp:1319）。PG〜BD で押すたびにずれを足し、10 回たまったら
-        // 遅ければ +1ms、早ければ −1ms 動かす。オートプレイでは動かさない
-        int adjust_count = 0, adjust_sum = 0;
+        // 判定タイミングの自動調整（LR2: Play.cpp:1319）。オートプレイでは動かさない
+        TimingNudger nudger;
+        // ゲージのタイマー 42・44
+        GaugeTimers gauge_timers;
         bool last_note_set = false, fc_set = false, done = false;
         // BGAの層（LR2: bmsload:597, 810）。#BMP00 があれば、それが最初のPOORの画像になる
         int bga_base = -1, bga_layer = -1, bga_poor = -1;
@@ -872,18 +933,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 done = true;
                 return;
             }
-            if (t <= rskin->startinput) return;
-            if (!rtimers.on(151)) {
-                rtimers.set(151, t);
-                chart_op4 = static_cast<int>(t);  // グラフを最後まで描く
-            } else if (rtimers.lapse(151, t) <= rskin->startinput_rank || rtimers.on(152)) {
-                if (rtimers.lapse(152, t) > rskin->startinput_update && !rtimers.on(2)) rtimers.set(2, t);
-            } else if (!opt.save_score || opt.autoplay || lamp_only || slowed) {
-                // 記録しないプレイ（オートなど）とランプだけを残すプレイは、更新の表示を飛ばしてフェードアウトへ（LR2 と同じ）
-                if (!rtimers.on(2)) rtimers.set(2, t);
-            } else {
-                rtimers.set(152, t);
-            }
+            // 記録しないプレイ（オートなど）とランプだけを残すプレイは、更新の表示を飛ばしてフェードアウトへ（LR2 と同じ）
+            const bool show_update = opt.save_score && !opt.autoplay && !lamp_only && !slowed;
+            press_result(*rskin, rtimers, t, show_update, chart_op4);
         };
         ctx.timers.set(0, 0);
 
@@ -1402,12 +1454,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         continue;
                     }
                     if (cfg.auto_adjust > 0 && !opt.autoplay && !opt.replay && je.has_offset && !je.ln_end && je.judge >= kBad && je.judge <= kPGreat) {
-                        adjust_sum += je.offset_ms;
-                        if (++adjust_count > 9) {
-                            if (adjust_sum > 0) cfg.judge_timing = std::min(199, cfg.judge_timing + 1);
-                            else if (adjust_sum < 0) cfg.judge_timing = std::max(-199, cfg.judge_timing - 1);
-                            adjust_count = adjust_sum = 0;
-                        }
+                        if (const int step = nudger.add(je.offset_ms); step != 0)
+                            cfg.judge_timing = step > 0 ? std::min(199, cfg.judge_timing + 1) : std::max(-199, cfg.judge_timing - 1);
                     }
                     double at = scene_ms_of(je.time_us);
                     int j = je.judge >= 100 ? je.judge - 100 : je.judge;
@@ -1482,18 +1530,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 if (!last_note_set && ps.note_current >= ps.total_notes) ctx.timers.set(143, now_ms), last_note_set = true;
                 if (!fc_set && ps.total_notes > 0 && ps.combo == ps.total_notes) ctx.timers.set(48, now_ms), fc_set = true;
                 // ゲージのタイマー（LR2: ApplyJudgeNote の 42/44）
-                int hp = static_cast<int>(judge.play_hp()) / 2 * 2;
-                // 初期値が 100% のゲージ（HARD 系）は、曲が始まった時点で MAX（LR2: タイマー41 と同時に 44）
-                if (old_hp < 0 && hp == 100) ctx.timers.set(44, now_ms);
-                if (old_hp >= 0 && hp != old_hp) {
-                    if (old_hp <= 0) hp = 0, ctx.timers.reset(44);
-                    else if (hp != 100) ctx.timers.reset(44);
-                    if (old_hp < hp) {
-                        if (hp == 100) ctx.timers.reset(42), ctx.timers.set(44, now_ms);
-                        else ctx.timers.set(42, now_ms);
-                    }
-                }
-                old_hp = hp;
+                gauge_timers.update(static_cast<int>(judge.play_hp()), ctx.timers, now_ms);
 
                 // コースでは GROOVE/EASY も 2% を割ると閉店する
                 bool survival = course || !(judge.display_gauge_type() == kGroove || judge.display_gauge_type() == kEasy);
@@ -1864,18 +1901,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
     int chart_op3 = rskin->gaugechart[0].src.op[2], chart_op4 = rskin->gaugechart[0].src.op[3];
     // 決定で グラフ → ランク → 更新 → フェードアウト と進む（リザルトと同じ）
     auto result_input = [&] {
-        double t = (SDL_GetTicksNS() - start_ns) / 1e6;
-        if (t <= rskin->startinput) return;
-        if (!rtimers.on(151)) {
-            rtimers.set(151, t);
-            chart_op4 = static_cast<int>(t);
-        } else if (rtimers.lapse(151, t) <= rskin->startinput_rank || rtimers.on(152)) {
-            if (rtimers.lapse(152, t) > rskin->startinput_update && !rtimers.on(2)) rtimers.set(2, t);
-        } else if (!opt.save_score || opt.autoplay) {
-            if (!rtimers.on(2)) rtimers.set(2, t);
-        } else {
-            rtimers.set(152, t);
-        }
+        press_result(*rskin, rtimers, (SDL_GetTicksNS() - start_ns) / 1e6, opt.save_score && !opt.autoplay, chart_op4);
     };
     PlayExit exit = PlayExit::Back;
     for (bool done = false; !done;) {

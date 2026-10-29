@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -172,11 +173,20 @@ private:
     void add(const SkinSrc& src, SkinDraw d, double src_time);
     void add_object(const SkinObject& o, const PlaySkinState& st, float dx, float dy);
     void add_numbers(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, int number, float x, float y);
-    // size_x / size_y はノーツの大きさの調整（幅と高さに足し、中心は動かさない）
-    void add_play_area(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, float sx, float sy, int alpha,
-                       float size_x = 0, float size_y = 0);
-    void add_ln(const SkinSrc& s, const SkinSrc& e, const SkinSrc& b, const SkinDst& dst, const PlaySkinState& st,
-                float shift_y, float long_y, int active, float shift_x = 0, float size_x = 0, float size_y = 0);
+    // レーンに置く物のずらす量と、大きさの調整（幅と高さに足し、中心は動かさない）。alpha があれば不透明度をそれにする
+    struct LanePlacement {
+        float dx = 0, dy = 0;
+        float grow_w = 0, grow_h = 0;
+        std::optional<int> alpha;
+    };
+    void put_on_lane(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, const LanePlacement& at);
+    // LN の見た目：止めた絵・押さえている間の動く絵・判定が終わったもの（半透明。絵は動かす）
+    enum class LnLook { Still, Moving, Done };
+    struct LnParts {
+        const SkinSrc *head, *tail, *body;
+    };
+    void add_ln(const LnParts& parts, const SkinDst& dst, const PlaySkinState& st, float head_y, float tail_y, LnLook look,
+                float dx, float grow_w, float grow_h);
     void add_notes(const Lr2Skin& skin, const PlaySkinState& st);
     void add_gauge(const SkinObject& o, const PlaySkinState& st);
     void add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st);
