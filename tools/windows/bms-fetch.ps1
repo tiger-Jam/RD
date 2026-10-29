@@ -19,7 +19,7 @@ $ErrorActionPreference = "Stop"
 # PowerShell 5 は JSON の配列を 1 個のまとまりで返すことがあるので、入れ子をほどいて 1 件ずつにする
 function Items($x) { foreach ($a in $x) { if ($a -is [array]) { Items $a } else { $a } } }
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-$rd = "C:\Users\mmzkq\BMjoy-beta20261022\build\RelWithDebInfo\RDbody.exe"
+$rd = "C:\Users\mmzkq\RD\RDbody.exe"
 # 改造版の bms-get（repo の tools/windows/bms-get-src を Tools\bms-get-new でビルドしてここへ写す）
 $bmsget = "C:\Users\mmzkq\Tools\bms-get-bin\bms-get.exe"
 $work = Join-Path $env:TEMP "bms-fetch"
