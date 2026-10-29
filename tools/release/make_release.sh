@@ -5,6 +5,8 @@
 #   tools/release/make_release.sh <版> [--publish] [--notes "変わったこと"]
 #
 #   版は 年.月.日.番号（例 2026.10.30.1）
+#   --move-to <住所> を付けると、配った RD に受け取り口の新しい住所を知らせる（例 https://<別の PC>.tailbfd111.ts.net:8443/rd。
+#     新しい住所にも同じ版を置いておく。古い住所は、全員が一度起動するまで残しておく）
 #   --publish を付けると、受け取り口（~/rd-service/update）に置き、配った RD が次の起動で入れ替えるようにする
 #
 # 出来たもの：~/rd-service/releases/<版>/（RD-<版>.zip・RD-<版>-update.zip・.pdb）
@@ -14,10 +16,12 @@ VER=${1:?版を指定してください（例 2026.10.30.1）}
 shift
 PUBLISH=0
 NOTES=""
+MOVE_TO=""
 while [ $# -gt 0 ]; do
     case "$1" in
     --publish) PUBLISH=1 ;;
     --notes) NOTES=$2; shift ;;
+    --move-to) MOVE_TO=$2; shift ;;
     *) echo "知らない引数: $1"; exit 2 ;;
     esac
     shift
@@ -65,11 +69,14 @@ ls -lh "$OUT"
 if [ "$PUBLISH" = 1 ]; then
     mkdir -p "$SERVICE/update"
     cp "$OUT/RD-$VER-update.zip" "$OUT/RD-$VER.zip" "$SERVICE/update/"
-    python3 -I - "$SERVICE/update/latest.json" "$VER" "RD-$VER-update.zip" "$SHA" "$NOTES" <<'EOF'
+    python3 -I - "$SERVICE/update/latest.json" "$VER" "RD-$VER-update.zip" "$SHA" "$NOTES" "$MOVE_TO" <<'EOF'
 import json, sys
-path, ver, url, sha, notes = sys.argv[1:6]
+path, ver, url, sha, notes, move_to = sys.argv[1:7]
+info = {"version": ver, "url": url, "sha256": sha, "notes": notes, "full": f"RD-{ver}.zip"}
+if move_to:
+    info["service_url"] = move_to
 with open(path + ".tmp", "w", encoding="utf-8") as f:
-    json.dump({"version": ver, "url": url, "sha256": sha, "notes": notes, "full": f"RD-{ver}.zip"}, f, ensure_ascii=False)
+    json.dump(info, f, ensure_ascii=False)
 import os
 os.replace(path + ".tmp", path)
 EOF

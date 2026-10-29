@@ -1313,6 +1313,7 @@ int main(int, char**) {
         std::thread th;
         std::mutex mu;
         std::string status;
+        std::string moved_to;  // 受け取り口の新しい住所
         bool running = false, done = false, ok = false;
         ~UpdateJob() {
             if (th.joinable()) th.join();
@@ -1336,6 +1337,7 @@ int main(int, char**) {
             }
             std::lock_guard<std::mutex> lock(update.mu);
             update.ok = ok;
+            update.moved_to = u.moved_to;
             update.status = ok ? "新しい版 " + u.version + " に入れ替えました。起動し直します" : u.available ? "更新できません：" + err : "";
             update.done = true;
         });
@@ -1908,6 +1910,11 @@ int main(int, char**) {
             if (update.done) {
                 update.th.join();
                 update.running = false;
+                if (!update.moved_to.empty()) {
+                    std::printf("受け取り口が %s へ移った\n", update.moved_to.c_str());
+                    cfg.service_url = update.moved_to;
+                    save_config(cfg);
+                }
                 if (update.ok) {
                     // 新しい版の設定アプリを起動し直し、譜面の配信も新しい版で動かし直す
                     g.unfocus();

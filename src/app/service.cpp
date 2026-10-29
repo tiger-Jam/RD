@@ -83,6 +83,7 @@ void upload_logs_async(const AppConfig& cfg) {
         for (const auto& e : fs::directory_iterator(dir, ec)) {
             if (!e.is_regular_file(ec)) continue;
             const std::string name = e.path().filename().string();
+            if (e.path().extension() != ".txt" && e.path().extension() != ".dmp") continue;  // ログとダンプだけ
             // 書き途中のログ（動いているプロセスのもの）は送らない。ダンプは、同じ名前のログのプロセスで見る
             const std::string base = fs::u8path(name).stem().string() + ".txt";
             if (log_owner_alive(base)) continue;
@@ -146,6 +147,8 @@ UpdateInfo check_update(const AppConfig& cfg) {
     u.url = str("url");
     u.sha256 = str("sha256");
     u.notes = str("notes");
+    // 受け取り口を別の PC へ移したときは、新しい住所が書いてある。覚えて、次からそこへ行く
+    if (const std::string to = str("service_url"); !to.empty() && to != base) u.moved_to = to;
     yyjson_doc_free(doc);
     if (u.version.empty() || u.url.empty() || u.sha256.size() != 64) return u.error = "更新の情報が読めない", u;
     if (u.url.find("://") == std::string::npos) u.url = base + "/update/" + u.url;  // 置き場からの相対

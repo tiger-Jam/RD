@@ -3,6 +3,8 @@
 #   GET  /update/latest.json     新しい版の情報（tools/service/publish.sh が置く）
 #   GET  /update/<ファイル>       新しい版の zip
 #   POST /log?client=&name=&version=   ログ（本文がファイルの中身）。logs/<client>/<name> に置く
+# 届いたログのうち、RD のログ（1 行目が「[時刻] RD 版（…）を起動」）と Windows のダンプ（MDMP で始まる）でないものは捨てる。
+# 古いもの（KEEP_DAYS 日より前）と、1 台・全体の上限を超えた分は、古いほうから自動で消す
 # funnel の置き方によって頭に /rd が付いてくるので、付いていても付いていなくても受ける。
 # 127.0.0.1 だけで待ち受ける（外からは funnel を通してだけ届く）
 import os
@@ -17,25 +19,78 @@ LOGS = os.path.join(ROOT, "logs")
 PORT = int(os.environ.get("RD_SERVICE_PORT", "4570"))
 KEY = "rd-7f3c1a9e"  # RD の app/service.cpp と同じ（配る版に入っているので、知らない送り主を断る程度のもの）
 MAX_UPLOAD = 32 << 20  # 1 個の大きさの上限
-MAX_TOTAL = 4 << 30  # ログ全体の上限（超えたら受けない）
+MAX_TOTAL = 4 << 30  # ログ全体の上限（超えたら古いほうから消す）
+MAX_CLIENT = 256 << 20  # 1 台分の上限（超えたら、その台の古いほうから消す）
+KEEP_DAYS = 60  # これより古いログは消す
+MAX_PER_HOUR = 120  # 1 台が 1 時間に送れる数
+LOG_HEAD = re.compile(rb"^\[\d\d:\d\d:\d\d\.\d\d\d\] RD [0-9A-Za-z.]+")
 
 CLIENT = re.compile(r"^[0-9a-f]{16}$")
 NAME = re.compile(r"^[0-9A-Za-z_.-]{1,96}$")
 
 
-def logs_size():
-    total = 0
-    for d, _, fs in os.walk(LOGS):
+import threading
+import time
+
+_lock = threading.Lock()
+_recent = {}  # 台 → 送ってきた時刻
+
+
+def looks_like_log(name, data):
+    """RD のログかダンプか（中身の頭で見る）"""
+    if name.endswith(".txt"):
+        return LOG_HEAD.match(data[:64]) is not None
+    if name.endswith(".dmp"):
+        return data[:4] == b"MDMP"
+    return False
+
+
+def files_of(d):
+    out = []
+    for root, _, fs in os.walk(d):
         for f in fs:
+            if f == "versions.txt":
+                continue
+            p = os.path.join(root, f)
             try:
-                total += os.path.getsize(os.path.join(d, f))
+                st = os.stat(p)
+                out.append((st.st_mtime, st.st_size, p))
             except OSError:
                 pass
-    return total
+    return sorted(out)
+
+
+def trim():
+    """古いものと、上限を超えた分を古いほうから消す"""
+    limit = time.time() - KEEP_DAYS * 86400
+    for d in os.listdir(LOGS):
+        cd = os.path.join(LOGS, d)
+        if not os.path.isdir(cd):
+            continue
+        fs = files_of(cd)
+        size = sum(s for _, s, _ in fs)
+        for m, s, p in fs:
+            if m < limit or size > MAX_CLIENT:
+                try:
+                    os.remove(p)
+                    size -= s
+                except OSError:
+                    pass
+    fs = files_of(LOGS)
+    size = sum(s for _, s, _ in fs)
+    for _, s, p in fs:
+        if size <= MAX_TOTAL:
+            break
+        try:
+            os.remove(p)
+            size -= s
+        except OSError:
+            pass
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "rd-service"
+    timeout = 30  # 何も送ってこないつなぎっぱなしは切る
 
     def path_parts(self):
         u = urlparse(self.path)
@@ -96,9 +151,16 @@ class Handler(BaseHTTPRequestHandler):
             n = -1
         if n < 0 or n > MAX_UPLOAD:
             return self.reply(413, b"too large")
-        if logs_size() + n > MAX_TOTAL:
-            return self.reply(507, b"full")
+        now = time.time()
+        with _lock:
+            t = [x for x in _recent.get(client, []) if now - x < 3600]
+            if len(t) >= MAX_PER_HOUR:
+                return self.reply(429, b"too many")
+            t.append(now)
+            _recent[client] = t
         data = self.rfile.read(n)
+        if len(data) != n or not looks_like_log(name, data):
+            return self.reply(400, b"not a log")  # 中身が RD のログでなければ置かない
         d = os.path.join(LOGS, client)
         os.makedirs(d, exist_ok=True)
         out = os.path.join(d, name)
@@ -111,6 +173,8 @@ class Handler(BaseHTTPRequestHandler):
             fh.write(data)
         with open(os.path.join(d, "versions.txt"), "a", encoding="utf-8") as fh:
             fh.write(f"{os.path.basename(out)}\t{version}\n")
+        with _lock:
+            trim()
         self.reply(200, b"ok")
 
     def log_message(self, fmt, *args):
@@ -120,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     os.makedirs(UPDATE, exist_ok=True)
     os.makedirs(LOGS, exist_ok=True)
+    trim()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     srv.daemon_threads = True
     print(f"rd-service: 127.0.0.1:{PORT} root={ROOT}", flush=True)

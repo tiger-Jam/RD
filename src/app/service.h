@@ -23,6 +23,7 @@ struct UpdateInfo {
     std::string url;         // 入れ替える zip
     std::string sha256;      // zip の SHA-256
     std::string notes;       // 何が変わったか
+    std::string moved_to;    // 受け取り口の新しい住所（引っ越したとき。設定の service_url に覚える）
     std::string error;       // 確かめられなかったときの理由
 };
 
