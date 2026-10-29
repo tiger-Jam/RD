@@ -73,5 +73,5 @@ with open(path + ".tmp", "w", encoding="utf-8") as f:
 import os
 os.replace(path + ".tmp", path)
 EOF
-    echo "公開した：$SERVICE/update/latest.json（$VER）"
+    echo "公開した：${SERVICE}/update/latest.json（${VER}）"
 fi
