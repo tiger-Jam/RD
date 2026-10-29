@@ -36,6 +36,7 @@ std::string g_name;
 FILE* g_file = nullptr;  // ログのファイル
 int g_console = -1;      // もとの標準出力（コンソールやパイプ。無ければ -1）
 int g_pipe_read = -1;
+int g_out_fd = 1, g_err_fd = 2;  // 標準出力と標準エラーの番号
 std::thread g_reader;
 
 #if defined(_WIN32)
@@ -100,8 +101,8 @@ void finish_log() {
     // 標準出力と標準エラーをもとに戻すと、パイプの書く側が閉じて、読む側が終わる
 #if defined(_WIN32)
     const int null_fd = _open("NUL", _O_WRONLY);
-    if (g_console >= 0) _dup2(g_console, 1), _dup2(g_console, 2);
-    else if (null_fd >= 0) _dup2(null_fd, 1), _dup2(null_fd, 2);
+    if (g_console >= 0) _dup2(g_console, g_out_fd), _dup2(g_console, g_err_fd);
+    else if (null_fd >= 0) _dup2(null_fd, g_out_fd), _dup2(null_fd, g_err_fd);
     if (null_fd >= 0) _close(null_fd);
 #else
     const int null_fd = open("/dev/null", O_WRONLY);
@@ -216,13 +217,15 @@ void start_log(const char* who) {
     FILE* dummy = nullptr;
     if (_fileno(stdout) < 0) freopen_s(&dummy, "NUL", "w", stdout);
     if (_fileno(stderr) < 0) freopen_s(&dummy, "NUL", "w", stderr);
+    // 窓のアプリでは、開き直した stdout・stderr の番号が 1・2 になるとは限らない（空いている小さい番号になる）
+    g_out_fd = _fileno(stdout), g_err_fd = _fileno(stderr);
     // 子のプロセスには渡さない
     if (_pipe(fds, 1 << 16, _O_BINARY | _O_NOINHERIT) != 0) return;
-    _dup2(fds[1], 1);
-    _dup2(fds[1], 2);
+    _dup2(fds[1], g_out_fd);
+    _dup2(fds[1], g_err_fd);
     _close(fds[1]);
-    SetStdHandle(STD_OUTPUT_HANDLE, reinterpret_cast<HANDLE>(_get_osfhandle(1)));
-    SetStdHandle(STD_ERROR_HANDLE, reinterpret_cast<HANDLE>(_get_osfhandle(2)));
+    SetStdHandle(STD_OUTPUT_HANDLE, reinterpret_cast<HANDLE>(_get_osfhandle(g_out_fd)));
+    SetStdHandle(STD_ERROR_HANDLE, reinterpret_cast<HANDLE>(_get_osfhandle(g_err_fd)));
     SetUnhandledExceptionFilter(on_crash);
 #else
     g_console = dup(1);
