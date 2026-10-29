@@ -423,6 +423,8 @@ AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, con
                 fs::last_write_time(out, e2) >= it->last_write_time(e2))
                 continue;
             if (fs::copy_file(it->path(), out, fs::copy_options::overwrite_existing, e2)) {
+                // 読み取り専用の印は写さない（LR2 のファイルに付いていると、RD のフォルダを消すときに権限を求められる）
+                fs::permissions(out, fs::perms::owner_write, fs::perm_options::add, e2);
                 res.files++;
                 res.bytes += static_cast<int64_t>(it->file_size(e2));
                 if (status && res.files % 200 == 0) status("素材を写しています（" + std::to_string(res.files) + " ファイル）");
