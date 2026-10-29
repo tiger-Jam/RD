@@ -8,6 +8,7 @@
 #include "app/lr2_import.h"
 #include "app/service.h"
 #include "game/replay.h"
+#include "sqlite3.h"
 #include "chart/bmson_parser.h"
 #include "chart/osu_parser.h"
 #include "audio/system_sound.h"
@@ -383,4 +384,41 @@ TEST(replay_old_name) {
     CHECK(load_replay(p.string(), back));
     CHECK(back.sha256 == "ab");
     fs::remove(p);
+}
+
+// LR2 の複数のプレイヤー（Score/<ID>.db）を、RD の同じ ID のプレイヤーとして引き継ぐ。遊んでいないプレイヤー（Score に無い）も作る
+TEST(lr2_players_import) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "rd_test_lr2players";
+    fs::remove_all(dir);
+    fs::create_directories(dir / "Score");
+    const std::vector<std::string> ids = {"rd_test_lr2_a", "rd_test_lr2_b", "rd_test_lr2_new"};
+    for (const std::string& id : ids) fs::remove_all(fs::u8path(data_dir() + "Player/" + id));
+    for (const char* id : {"rd_test_lr2_a", "rd_test_lr2_b"}) {
+        sqlite3* db = nullptr;
+        sqlite3_open((dir / "Score" / (std::string(id) + ".db")).string().c_str(), &db);
+        sqlite3_exec(db, "CREATE TABLE score(hash TEXT primary key,clear INTEGER,perfect INTEGER,great INTEGER,good INTEGER,"
+                         "bad INTEGER,poor INTEGER,totalnotes INTEGER,maxcombo INTEGER,minbp INTEGER,playcount INTEGER,"
+                         "clearcount INTEGER,failcount INTEGER,rank INTEGER,rate INTEGER,clear_db INTEGER,op_history INTEGER,"
+                         "scorehash TEXT,ghost TEXT,clear_sd INTEGER,clear_ex INTEGER,op_best INTEGER, rseed INTEGER, complete INTEGER);"
+                         "INSERT INTO score(hash, clear, playcount, clearcount) VALUES('ffffffffffffffffffffffffffffffff', 4, 3, 2)",
+                     nullptr, nullptr, nullptr);
+        sqlite3_close(db);
+    }
+    Lr2ImportResult res;
+    res.player = "rd_test_lr2_new";  // LR2 で使っていたが、まだ 1 曲も遊んでいない
+    import_lr2_players(dir / "Score", (dir / "songs.db").string(), res);
+    CHECK_EQ(res.players.size(), size_t(3));
+    CHECK_EQ(res.new_players.size(), size_t(3));
+    CHECK_EQ(res.scores, 2);
+    CHECK(res.player == "rd_test_lr2_new");
+    for (const std::string& id : ids) CHECK(fs::exists(fs::u8path(data_dir() + "Player/" + id)));
+    CHECK(fs::exists(fs::u8path(data_dir() + "Player/rd_test_lr2_a/score.db")));
+    // 2 回目は作らない（同じ ID のプレイヤーがいる）
+    Lr2ImportResult again;
+    import_lr2_players(dir / "Score", (dir / "songs.db").string(), again);
+    CHECK(again.new_players.empty());
+    CHECK_EQ(again.players.size(), size_t(2));
+    for (const std::string& id : ids) fs::remove_all(fs::u8path(data_dir() + "Player/" + id));
+    fs::remove_all(dir);
 }

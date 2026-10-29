@@ -82,6 +82,7 @@ float TextCache::draw(float x, float y, int size, SDL_Color c, const std::string
     else if (align == 2) x -= dw;
     float tw = 0, th = 0;
     SDL_GetTextureSize(t.tex, &tw, &th);
+    tw /= scale_, th /= scale_;  // 字は拡大率の分だけ大きく作ってある
     SDL_SetTextureColorMod(t.tex, c.r, c.g, c.b);
     SDL_SetTextureAlphaMod(t.tex, c.a);
     SDL_SetTextureBlendMode(t.tex, SDL_BLENDMODE_BLEND);
@@ -193,9 +194,16 @@ TextCache::Tex TextCache::get(int size, int thick, const std::string& s) {
     // 使い捨ての文字列（数字など）でキャッシュが膨らみすぎたら、長く使っていないものから捨てる
     if (cache_.size() > 2000) evict();
     used_[key] = ++tick_;
+    // 拡大率の分だけ大きな字を作り、幅と高さは論理の単位で返す
+    const int logical = size;
+    size = std::max(1, static_cast<int>(std::lround(logical * scale_)));
+    auto to_logical = [&](Tex t) {
+        if (scale_ != 1.0f) t.w = static_cast<int>(std::ceil(t.w / scale_)), t.h = static_cast<int>(std::ceil(t.h / scale_));
+        return t;
+    };
 #ifdef _WIN32
     if (!system_font_.empty()) {
-        Tex t = get_system(size, s);
+        Tex t = to_logical(get_system(size, s));
         cache_[key] = t;
         return t;
     }
@@ -249,6 +257,7 @@ TextCache::Tex TextCache::get(int size, int thick, const std::string& s) {
             out.h = h;
         }
     }
+    out = to_logical(out);
     cache_[key] = out;
     return out;
 }

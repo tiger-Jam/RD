@@ -1,6 +1,7 @@
 // LR2 からの引き継ぎ。LR2 のフォルダ（LR2files があるところ）を指定して、曲フォルダの登録・曲の情報・ランプとスコアを取り込む
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <string>
 
@@ -13,10 +14,12 @@ namespace rd {
 struct Lr2ImportResult {
     bool ok = false;
     std::string error;
-    std::string player;      // LR2 のプレイヤー ID
+    std::string player;      // LR2 で使っていたプレイヤーの ID（RD もこのプレイヤーに切り替える）
+    std::vector<std::string> players;      // 引き継いだ LR2 のプレイヤー（Score/<ID>.db ごと。RD に同じ ID のプレイヤーを作る）
+    std::vector<std::string> new_players;  // そのうち、RD に新しく作ったプレイヤー（引き継いだ設定とキーを入れる）
     int song_dirs = 0;       // 登録した曲フォルダの数
     int charts = 0;          // 取り込んだ 7 鍵の譜面の数（仮の記録）
-    int scores = 0;          // 取り込んだスコアの数
+    int scores = 0;          // 取り込んだスコアの数（全部のプレイヤーの合計）
     int tables = 0;          // 新しく登録した難易度表の数
     int skins = 0;           // カスタマイズを引き継いだスキンの数
     int courses = 0;         // 引き継いだ段位・コースの数
@@ -41,6 +44,11 @@ bool import_lr2_keyconfig(const std::string& path, KeyConfig& out);
 // （LR2files/SkinCustomize）は、その選択を cfg.skin_custom に写す。LR2 のファイルは読むだけで書き換えない
 // LR2 の曲データベースに登録された段位（grade）とコース（expert）を lr2_courses_path() に写す。写した数（読めなければ -1）
 int import_lr2_courses(const std::string& lr2_song_db);
+
+// LR2 のプレイヤー（score_dir の <ID>.db ごと）を、RD の同じ ID のプレイヤーとして作り、記録を songs_db（とその人の score.db）に取り込む。
+// res.player（LR2 で使っていた ID）が Score に無くても作る。res.players・new_players・scores を埋める
+void import_lr2_players(const std::filesystem::path& score_dir, const std::string& songs_db, Lr2ImportResult& res,
+                        const std::function<void(const std::string&)>& status = {});
 
 Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, SongDb& db,
                                 const std::function<void(const std::string&)>& status = {},

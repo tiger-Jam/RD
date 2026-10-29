@@ -105,7 +105,8 @@ class SongDb {
 public:
     ~SongDb();
     // open は、今のプレイヤー（util/data_dir.h の player_id）の記録 score.db を付けて開く。空なら songs.db に記録を置く
-    bool open(const std::string& path);
+    // player を指定すると、今のプレイヤーではなくその人の記録（Player/<player>/score.db）を付けて開く（LR2 の複数のプレイヤーを引き継ぐとき）
+    bool open(const std::string& path, const std::string& player = {});
     void close();
 
     // 曲フォルダを読み直す。変わったファイルだけを並列にパースし、1トランザクションで書く（仕様書8章「リロード処理」）。

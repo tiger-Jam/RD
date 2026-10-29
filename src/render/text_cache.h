@@ -32,6 +32,11 @@ public:
     // Windows だけ：OS の文字描画（GDI）でこの書体を使う（例 "MS UI Gothic"）。小さい文字はドット絵の字形になり、
     // Windows のダイアログや DxLib と同じ見た目になる。ぼかさない（set_antialias(false) と同じ）
     void set_system_font(const std::string& face) { system_font_ = face; }
+    // 描く先の拡大率（論理の 1 ピクセルが実際の何ピクセルか）。字はその大きさで作り、論理の大きさで描く（拡大してもぼやけない）。
+    // 大きさと幅は論理の単位のまま。変えたら作った字は捨てる
+    void set_scale(float s) {
+        if (s > 0 && s != scale_) scale_ = s, clear();
+    }
 
 private:
     const std::vector<uint8_t>* font_data(int thick);
@@ -45,6 +50,7 @@ private:
     int font_face_ = 0;  // .ttc の中の何番目の書体か（font_path_ を指定したときだけ）
     bool antialias_ = true;
     std::string system_font_;
+    float scale_ = 1.0f;
     Tex get_system(int size, const std::string& s);
 };
 

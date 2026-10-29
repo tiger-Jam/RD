@@ -8,6 +8,7 @@
 #include <map>
 #include <regex>
 
+#include "app/config.h"
 #include "app/skin_catalog.h"
 #include "db/difficulty_table.h"
 #include "db/lr2_export.h"
@@ -270,6 +271,45 @@ bool import_lr2_keyconfig(const std::string& path, KeyConfig& out) {
     return true;
 }
 
+// LR2 の Score/<ID>.db ごとに、RD に同じ ID のプレイヤーを作り、その人の記録として取り込む（複数のアカウントも全部）
+void import_lr2_players(const std::filesystem::path& score_dir, const std::string& songs_db, Lr2ImportResult& res,
+                        const std::function<void(const std::string&)>& status) {
+    std::string err;
+    {
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(score_dir, ec)) {
+            if (!e.is_regular_file(ec) || e.path().extension() != ".db") continue;
+            const std::string id = to_utf8_auto(e.path().stem().string());
+            if (!valid_player_id(id)) {
+                std::printf("LR2 のプレイヤー %s は ID が RD で使えないので引き継がない\n", id.c_str());
+                continue;
+            }
+            if (!fs::exists(fs::u8path(data_dir() + "Player/" + id), ec)) {
+                if (!create_player(id, player_id(), &err)) {
+                    std::printf("プレイヤー %s を作れない：%s\n", id.c_str(), err.c_str());
+                    continue;
+                }
+                res.new_players.push_back(id);
+            }
+            if (status) status("LR2 のプレイヤー " + id + " の記録を取り込んでいます");
+            SongDb pdb;
+            int s = pdb.open(songs_db, id) ? pdb.import_lr2_scores(e.path().string(), &err) : -1;
+            std::printf("LR2 のプレイヤー %s：記録 %d\n", id.c_str(), s);
+            if (s >= 0) res.scores += s;
+            res.players.push_back(id);
+        }
+        std::sort(res.players.begin(), res.players.end());
+        // LR2 で使っていたプレイヤーが Score に無ければ（一度も遊んでいない）、その ID でも作る
+        if (!res.player.empty() && valid_player_id(res.player) &&
+            std::find(res.players.begin(), res.players.end(), res.player) == res.players.end()) {
+            if (!fs::exists(fs::u8path(data_dir() + "Player/" + res.player), ec) && create_player(res.player, player_id(), &err))
+                res.new_players.push_back(res.player);
+            res.players.push_back(res.player);
+        }
+        if (res.player.empty() && !res.players.empty()) res.player = res.players.front();
+    }
+}
+
 Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, SongDb& db,
                                 const std::function<void(const std::string&)>& status, const std::string& skin_root) {
     Lr2ImportResult res;
@@ -327,14 +367,9 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     res.courses = std::max(0, import_lr2_courses((root / "Database" / "song.db").string()));
     if (status) status("LR2 のお気に入りを引き継いでいます");
     res.favorites = std::max(0, db.import_lr2_favorites((root / "Database" / "song.db").string()));
-    if (!res.player.empty()) {
-        if (status) status("LR2 のスコアを取り込んでいます");
-        fs::path score = root / "Database" / "Score" / (res.player + ".db");
-        if (fs::exists(score)) {
-            int s = db.import_lr2_scores(score.string(), &err);
-            if (s >= 0) res.scores = s;
-        }
-    }
+    import_lr2_players(root / "Database" / "Score", song_db_path(), res, status);
+    std::printf("LR2 から引き継いだ：曲フォルダ %d、譜面 %d、記録 %d、プレイヤー %zu（使っていたのは %s）\n", res.song_dirs, res.charts,
+                res.scores, res.players.size(), res.player.c_str());
     res.ok = true;
     return res;
 }

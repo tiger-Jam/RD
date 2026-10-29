@@ -1218,7 +1218,19 @@ int main(int, char**) {
     auto serve_state = [](const AppConfig& c) { return std::make_tuple(c.serve, c.serve_port, c.serve_key, c.serve_public); };
     auto serve_applied = serve_state(cfg);
 
-    SDL_Window* window = SDL_CreateWindow("RD SETUP", kW, kH, SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    // 窓は大きさを変えられる（中身は縦横の比を保って拡大する）。画面の拡大率（Windows の表示スケール）の分だけ大きく開く
+    SDL_Window* window = SDL_CreateWindow("RD SETUP", kW, kH, SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
+    if (window) {
+        // 窓の座標が実際のピクセルの OS（Windows）では、表示スケールの分だけ大きくする（macOS は OS が拡大する）
+        float content = SDL_GetWindowDisplayScale(window) / std::max(0.01f, SDL_GetWindowPixelDensity(window));
+        if (const char* z = dev_env("RD_LAUNCHER_ZOOM")) content = static_cast<float>(std::atof(z));  // 開発用：この倍率で開く
+        if (content > 1.01f) {
+            SDL_SetWindowSize(window, static_cast<int>(kW * content), static_cast<int>(kH * content));
+            SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        }
+        SDL_SetWindowMinimumSize(window, kW / 2, kH / 2);
+        SDL_ShowWindow(window);
+    }
     SDL_Renderer* r = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
     if (!r) {
         std::fprintf(stderr, "ウィンドウを作れない: %s\n", SDL_GetError());
@@ -1389,11 +1401,18 @@ int main(int, char**) {
             job.done = true;
         });
     };
+    if (const char* d = dev_env("RD_LAUNCHER_IMPORT")) start_lr2_import(d);  // 開発用：この LR2 のフォルダから引き継ぐ
     // 初めての起動の案内（-1 なら出さない。0 = 始め方を選ぶ 1 = 曲フォルダ 2 = 難易度表）
     int guide = first_run ? 0 : -1;
     if (const char* gs = dev_env("RD_LAUNCHER_GUIDE")) guide = std::atoi(gs);  // 開発用：案内の画面を出す
 
     while (!quit) {
+        // 字は実際に映る大きさで作る（拡大してもつぶれない・ぼやけない）
+        {
+            int ow = 0, oh = 0;
+            SDL_GetCurrentRenderOutputSize(r, &ow, &oh);
+            if (ow > 0 && oh > 0) text.set_scale(std::min(static_cast<float>(ow) / kW, static_cast<float>(oh) / kH));
+        }
         g.pressed = false, g.wheel = 0, g.typed.clear();
         g.key_enter = g.key_back = g.key_esc = false;
         SDL_Event e;
@@ -1689,31 +1708,31 @@ int main(int, char**) {
             g.check(X + 22, Y + 328, "高精度なタイマーを使用する(基本的に外して下さい)", d_true, false);
         } else if (tab == 6) {
             // RD だけの設定（LR2 SETUP には無い）
-            if (g.button(X + 268, Y + 10, 146, 22, "LR2 から引き継ぐ", !job.running)) {
+            if (g.button(X + 20, Y + 10, 180, 22, "LR2 から引き継ぐ", !job.running)) {
                 pick_folder(window, start_lr2_import);
             }
-            if (g.button(X + 420, Y + 10, 146, 22, "曲データベースの再作成")) {
+            if (g.button(X + 206, Y + 10, 180, 22, "曲の一覧を作り直す")) {
                 SongDb db;
-                message = db.open(song_db_path()) && db.clear_charts() ? "次回の起動時に曲データベースを再作成します"
-                                                                      : "曲データベースを開けません";
+                message = db.open(song_db_path()) && db.clear_charts() ? "次に起動したときに曲の一覧を作り直します"
+                                                                      : "曲の一覧を開けません";
             }
-            g.check(X + 20, Y + 12, "曲フォルダを監視する", cfg.watch_folders);
-            g.label(X + 20, Y + 44, "素材のフォルダ");
-            g.edit_str(cfg.lr2_root, X + 124, Y + 38, 360, 20);
-            if (g.button(X + 492, Y + 37, 74, 22, "参照"))
+            g.check(X + 20, Y + 42, "曲フォルダに入れた曲を自動で読み込む", cfg.watch_folders);
+            g.label(X + 20, Y + 72, "スキンと音のフォルダ");
+            g.edit_str(cfg.lr2_root, X + 164, Y + 66, 320, 20);
+            if (g.button(X + 492, Y + 65, 74, 22, "参照"))
                 pick_folder(window, [&](const std::string& p) { cfg.lr2_root = p; }, cfg.lr2_root.empty() ? base_dir() : cfg.lr2_root);
-            g.label(X + 20, Y + 74, "解像度");
+            g.label(X + 20, Y + 100, "スキンの解像度");
             static const std::vector<std::string> res_names = {"スキンに合わせる", "SD（640×480）", "HD（1280×720）", "FHD（1920×1080）"};
             static const char* res_vals[] = {"", "sd", "hd", "fhd"};
             int ri = 0;
             while (ri < 4 && cfg.skin_res != res_vals[ri]) ++ri;
-            g.combo(&cfg.skin_res, X + 124, Y + 68, 180, 20, res_names, ri == 4 ? 0 : ri, [&](int i) { cfg.skin_res = res_vals[i]; });
-            g.label(X + 316, Y + 74, "fps の上限");
+            g.combo(&cfg.skin_res, X + 164, Y + 94, 140, 20, res_names, ri == 4 ? 0 : ri, [&](int i) { cfg.skin_res = res_vals[i]; });
+            g.label(X + 316, Y + 100, "描画の上限（fps）");
             static const int fps_vals[] = {0, -1, 60, 120, 144, 240, 360, 480, 1000};
             static const std::vector<std::string> fps_names = {"モニタに合わせる", "上限なし", "60", "120", "144", "240", "360", "480", "1000"};
             int fi = 0;
             while (fi < 9 && fps_vals[fi] != cfg.fps) ++fi;
-            g.combo(&cfg.fps, X + 392, Y + 68, 174, 20, fps_names, fi == 9 ? 0 : fi, [&](int i) { cfg.fps = fps_vals[i]; });
+            g.combo(&cfg.fps, X + 426, Y + 94, 140, 20, fps_names, fi == 9 ? 0 : fi, [&](int i) { cfg.fps = fps_vals[i]; });
             // スキンはゲームの中のスキンセレクトで選ぶ（LR2 と同じ）。スキンセレクトの画面のスキンだけはここで選ぶ
             //（LR2 標準のスキンセレクトには、スキンセレクトのスキンを替えるボタンが無いので）
             {
@@ -1730,13 +1749,13 @@ int main(int, char**) {
                     if (!cfg.skinselect_skin.empty() &&
                         fs::u8path(paths[i]).lexically_normal() == fs::u8path(cfg.skinselect_skin).lexically_normal())
                         cur = static_cast<int>(i);
-                g.label(X + 20, Y + 104, "スキンセレクト");
-                g.combo(&cfg.skinselect_skin, X + 124, Y + 98, 300, 20, names, cur, [&cfg, paths](int i) { cfg.skinselect_skin = paths[i]; });
+                g.label(X + 20, Y + 128, "スキン選択画面のスキン");
+                g.combo(&cfg.skinselect_skin, X + 164, Y + 122, 300, 20, names, cur, [&cfg, paths](int i) { cfg.skinselect_skin = paths[i]; });
             }
-            float y = Y + 128;
-            g.label(X + 20, y + 10, "難易度表（URL）");
-            g.listview(X + 20, y + 26, 546, 136, "url", cfg.tables, table_sel, table_scroll);
-            float by = y + 170;
+            float y = Y + 148;
+            g.label(X + 20, y + 10, "難易度表の URL");
+            g.listview(X + 20, y + 26, 546, 76, "url", cfg.tables, table_sel, table_scroll);
+            float by = y + 108;
             g.edit_str(table_input, X + 20, by, 380, 20);
             if (g.button(X + 410, by - 1, 74, 22, "追加", !table_input.empty())) {
                 if (std::find(cfg.tables.begin(), cfg.tables.end(), table_input) == cfg.tables.end()) cfg.tables.push_back(table_input);
@@ -1744,14 +1763,14 @@ int main(int, char**) {
             }
             bool has = table_sel >= 0 && table_sel < static_cast<int>(cfg.tables.size());
             if (g.button(X + 492, by - 1, 74, 22, "登録解除", has)) cfg.tables.erase(cfg.tables.begin() + table_sel), table_sel = -1;
-            g.check(X + 20, by + 26, "選曲中に曲のプレビューを鳴らす", cfg.preview);
-            g.check(X + 20, by + 48, "キー音を 16 ビットで読み込む", cfg.sound_16bit);
-            g.check(X + 280, by + 48, "メモリを節約する", cfg.low_memory);
-            g.check(X + 20, by + 70, "LR2 の形でも曲とスコアを書き出す（外部ツール用）", cfg.lr2_export);
-            g.check(X + 20, by + 92, "ログを作者へ送る", cfg.log_upload);
-            g.check(X + 280, by + 92, "起動するときに新しい版を入れる", cfg.auto_update);
+            g.check(X + 20, by + 28, "選曲中に曲のプレビューを鳴らす", cfg.preview);
+            g.check(X + 20, by + 50, "キー音を軽く読み込む（16 ビット）", cfg.sound_16bit);
+            g.check(X + 300, by + 50, "メモリを節約する", cfg.low_memory);
+            g.check(X + 20, by + 72, "ログを作者へ送る", cfg.log_upload);
+            g.check(X + 300, by + 72, "自動で新しい版に更新する", cfg.auto_update);
+            g.check(X + 20, by + 94, "LR2 の形でも曲とスコアを書き出す（外部ツール用）", cfg.lr2_export);
 #ifdef _WIN32
-            g.check(X + 280, by + 26, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
+            g.check(X + 300, by + 28, "古いコントローラーも探す（DirectInput）", cfg.joystick_directinput);
 #endif
         } else if (tab == 9) {
             // 譜面の貸し借り（仕様書10章「借りて返す」）。持っていない譜面を、遊ぶときだけ自分のほかの PC から借りる
@@ -1892,7 +1911,28 @@ int main(int, char**) {
                         n.keyconfig_skin = cfg.keyconfig_skin, n.skinselect_skin = cfg.skinselect_skin, n.sound_set = cfg.sound_set, n.skin_adjust = cfg.skin_adjust;
                     }
                     cfg = n;
-                    message = "LR2 から引き継ぎました（曲フォルダ " + std::to_string(job.res.song_dirs) + "、譜面 " +
+                    // 引き継いだ設定とキーを、新しく作ったプレイヤーにも入れる（作ったときは引き継ぐ前の設定を写していた）
+                    save_config(cfg);
+                    for (const std::string& id : job.res.new_players)
+                        for (const char* f : {"config.txt", "keyconfig.txt"}) {
+                            std::error_code ec;
+                            fs::copy_file(fs::u8path(player_dir() + f), fs::u8path(data_dir() + "Player/" + id + "/" + f),
+                                          fs::copy_options::overwrite_existing, ec);
+                        }
+                    // LR2 で使っていたプレイヤーに切り替える。最初の起動で自動でできたプレイヤー（player）は、記録が無ければ消す
+                    const std::string before = player_id();
+                    if (!job.res.player.empty() && job.res.player != before) {
+                        switch_player(job.res.player);
+                        const bool from_lr2 = std::find(job.res.players.begin(), job.res.players.end(), before) != job.res.players.end();
+                        SongDb old;
+                        if (before == "player" && !from_lr2 && old.open(song_db_path(), before) && old.own_player_stats().playcount == 0) {
+                            old.close();
+                            std::string err;
+                            if (delete_player(before, &err)) std::printf("記録の無いプレイヤー %s を消した\n", before.c_str());
+                        }
+                    }
+                    message = "LR2 から引き継ぎました（プレイヤー " + std::to_string(job.res.players.size()) + "、曲フォルダ " +
+                              std::to_string(job.res.song_dirs) + "、譜面 " +
                               std::to_string(job.res.charts) + "、スコア " + std::to_string(job.res.scores) + "、難易度表 " +
                               std::to_string(job.res.tables) + "、スキン " + std::to_string(job.res.skins) + "、設定 " +
                               std::to_string(job.res.settings) + "、お気に入り " + std::to_string(job.res.favorites) +

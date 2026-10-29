@@ -287,7 +287,7 @@ void SongDb::set_chart_text(const std::string& path, const std::string& title, c
     st.text(1, title).text(2, subtitle).text(3, genre).text(4, artist).text(5, subartist).text(6, path).run();
 }
 
-bool SongDb::open(const std::string& path) {
+bool SongDb::open(const std::string& path, const std::string& player) {
     close();
     if (sqlite3_open(path.c_str(), &db_) != SQLITE_OK) return false;
     // 選曲画面の裏の読み直しと、プレイ後のスコアの記録が重なっても待つ
@@ -300,13 +300,15 @@ bool SongDb::open(const std::string& path) {
     }
     // 記録はプレイヤーごとの score.db（p として付ける。表の名前はどちらにあっても同じに書ける）。プレイヤーを分けていなければ songs.db に置く
     std::string score_schema = kScoreSchema;
-    const bool per_player = !player_id().empty();
+    const std::string who = player.empty() ? player_id() : player;
+    const bool per_player = !who.empty();
     for (size_t at; (at = score_schema.find("{P}")) != std::string::npos;) score_schema.replace(at, 3, per_player ? "p." : "");
     if (per_player) {
+        const std::string dir = player.empty() ? player_dir() : data_dir() + "Player/" + player + "/";
         std::error_code ec;
-        fs::create_directories(fs::u8path(player_dir()), ec);
+        fs::create_directories(fs::u8path(dir), ec);
         Stmt attach(db_, "ATTACH DATABASE ? AS p");
-        attach.text(1, player_dir() + "score.db");
+        attach.text(1, dir + "score.db");
         if (sqlite3_step(attach.s) != SQLITE_DONE) {
             std::fprintf(stderr, "プレイヤーの記録を開けない: %s\n", sqlite3_errmsg(db_));
             return false;
