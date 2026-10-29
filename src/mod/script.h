@@ -8,7 +8,7 @@
 //   folder_bars(folder)   フォルダを開いたとき（「操作」を宣言した MOD だけ。フォルダの名前の下に出すバーを返す）
 //   pick_chart(req)       folder_bars のバーを決定したとき（遊ぶ譜面の sha256 を返す）
 // 使えるのは Lua の base（ファイルを読む関数を除く）・table・string・math・utf8・coroutine と bmj の表だけ。
-// ファイルに書けるのは LR2files/Player/<ID>/ModData/<MOD の id>/ の下だけ
+// ファイルに書けるのは BMjoyfiles/Player/<ID>/ModData/<MOD の id>/ の下だけ
 #pragma once
 
 #include <array>
@@ -88,7 +88,7 @@ public:
     ModScripts();
     ~ModScripts();
     // スクリプトを持つ MOD を読む。読めなかったものは errors に入り、使わない。
-    // data_root は MOD が書いてよい場所の親（LR2files/Player/<ID>/ModData。MOD ごとに <id>/ を切る）
+    // data_root は MOD が書いてよい場所の親（BMjoyfiles/Player/<ID>/ModData。MOD ごとに <id>/ を切る）
     void load(const std::vector<const ModManifest*>& mods, const std::string& data_root);
     bool empty() const { return scripts_.empty(); }
     void play_start(const ModPlayInfo& info);

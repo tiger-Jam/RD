@@ -228,7 +228,7 @@ bool AppConfig::save(const std::string& path) const {
 
 void AppConfig::write(std::ostream& f) const {
     f << "# BMjoy の設定\n";
-    f << "# 今のプレイヤー（LR2files/Player/<ID>）\n";
+    f << "# 今のプレイヤー（BMjoyfiles/Player/<ID>）\n";
     f << "player = " << player << "\n";
     f << "lr2_root = " << to_portable(lr2_root) << "\n";
     f << "lr2_export = " << (lr2_export ? 1 : 0) << "  # 外部ツールのために LR2 の形の曲データベースとスコアを Database に書き出す\n";
@@ -491,7 +491,8 @@ std::string mod_data_dir(const std::string& id) {
 std::string mod_settings_path(const std::string& id) { return mod_data_dir(id) + "/settings.json"; }
 
 std::string lr2_courses_path() { return data_dir() + "Database/lr2_courses.txt"; }
-std::string lr2_database_dir() { return data_dir() + "Database"; }
+// BMjoy の置き場（BMjoyfiles）とは分け、実行ファイルの横の LR2files に LR2 と同じ形で置く（外部ツールが LR2 のフォルダとして読む）
+std::string lr2_database_dir() { return base_dir() + "LR2files/Database"; }
 
 
 std::string table_cache_dir() { return data_dir() + "Database/Table"; }

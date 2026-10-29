@@ -166,6 +166,7 @@ struct Lr2Skin {
 
 // LR2のフォルダ（LR2files の親）を基準にしたパスを、実在するファイルに解決する。
 // 区切りは '\\' でも '/' でもよく、大文字小文字は区別しない。ファイル名の '*' はランダムに1つ選ぶ。
+// 先頭の LR2files は、BMjoyfiles（BMjoy の素材の置き場）があればそれに読み替える
 std::string resolve_lr2_path(const std::string& lr2_root, const std::string& path, bool allow_wildcard = true);
 
 // .lr2skin のヘッダ（#INFORMATION と カスタマイズ項目）だけを読む

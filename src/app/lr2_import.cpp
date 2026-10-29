@@ -397,7 +397,9 @@ AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, con
         }
         ec.clear();
     };
-    for (const char* d : kDirs) copy_tree(src / "LR2files" / d, dst / "LR2files" / d);
+    // 写す先は BMjoy の置き場（BMjoyfiles）。スキンの中の「LR2files/…」は、読むときにここへ読み替える
+    const fs::path files = dst / data_dir_name();
+    for (const char* d : kDirs) copy_tree(src / "LR2files" / d, files / d);
 
     // カスタムフォルダの置き場：LR2 の LR2files の下にあるものは、同じ相対の場所に写して付け替える
     for (std::string& d : cfg.custom_folder_dirs) {
@@ -405,8 +407,8 @@ AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, con
         for (fs::path cur = p; !cur.empty() && cur != cur.parent_path(); cur = cur.parent_path()) {
             if (path_key(cur.filename()) != "lr2files") continue;
             if (!under(p, cur, rel)) break;
-            copy_tree(p, dst / "LR2files" / rel);
-            d = (dst / "LR2files" / rel).string();
+            copy_tree(p, files / rel);
+            d = (files / rel).string();
             break;
         }
     }
@@ -414,7 +416,9 @@ AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, con
     // 設定の中の素材の場所を、写した先に直す
     auto relocate = [&](std::string& path) {
         fs::path rel;
-        if (!path.empty() && path != "none" && under(path, src, rel)) path = (dst / rel).string();
+        if (path.empty() || path == "none") return;
+        if (under(path, src / "LR2files", rel)) path = (files / rel).string();
+        else if (under(path, src, rel)) path = (dst / rel).string();
     };
     for (std::string* p : {&cfg.play_skin, &cfg.result_skin, &cfg.courseresult_skin, &cfg.select_skin, &cfg.decide_skin,
                            &cfg.keyconfig_skin, &cfg.skinselect_skin, &cfg.sound_set})

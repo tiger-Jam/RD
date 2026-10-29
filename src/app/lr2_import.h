@@ -57,8 +57,8 @@ struct AssetCopyResult {
     int64_t bytes = 0;
 };
 
-// LR2 の素材（スキン・サウンドセット・BGM・壁紙・カスタムフォルダなど）を、BMjoy のフォルダ（dst_root。実行ファイルの横）の
-// LR2files に写し、設定の中の素材の場所（cfg.lr2_root・各スキン・サウンドセット・スキンのカスタマイズと位置の調整の鍵・
+// LR2 の素材（スキン・サウンドセット・BGM・壁紙・カスタムフォルダなど）を、BMjoy の置き場（実行ファイルの横の
+// BMjoyfiles）に写し、設定の中の素材の場所（cfg.lr2_root・各スキン・サウンドセット・スキンのカスタマイズと位置の調整の鍵・
 // カスタムフォルダの置き場）を写した先に直す。LR2 の曲・記録・IR のデータ（Database・Ir・Replay など）は写さない。
 // 写す元は cfg.lr2_root と、LR2 の LR2files の下にあるカスタムフォルダの置き場。元のファイルは読むだけ
 AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root,

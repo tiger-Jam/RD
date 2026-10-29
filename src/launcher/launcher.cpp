@@ -1102,7 +1102,7 @@ int main(int, char**) {
         return 1;
     }
     AppConfig cfg;
-    migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の LR2files へ
+    migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の BMjoyfiles へ
     const std::string cfg_path = config_path();
     std::error_code first_ec;
     // 初めての起動（設定ファイルがまだ無い）なら、案内の画面から始める

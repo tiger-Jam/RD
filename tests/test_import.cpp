@@ -230,15 +230,15 @@ TEST(import_copy_lr2_assets) {
     AssetCopyResult r = copy_lr2_assets(cfg, dst.string());
     CHECK(r.ok);
     CHECK_EQ(r.files, 4);
-    CHECK(fs::exists(dst / "LR2files/Theme/WMIX/select/select.lr2skin"));
-    CHECK(fs::exists(dst / "LR2files/Bgm/a/select.wav"));
-    CHECK(fs::exists(dst / "LR2files/CustomFolder/clear.lr2folder"));
-    CHECK(!fs::exists(dst / "LR2files/Database"));  // 曲・記録のデータは写さない
+    CHECK(fs::exists(dst / "BMjoyfiles/Theme/WMIX/select/select.lr2skin"));
+    CHECK(fs::exists(dst / "BMjoyfiles/Bgm/a/select.wav"));
+    CHECK(fs::exists(dst / "BMjoyfiles/CustomFolder/clear.lr2folder"));
+    CHECK(!fs::exists(dst / "BMjoyfiles/Database"));  // 曲・記録のデータは写さない
     CHECK(fs::path(cfg.lr2_root) == dst);
-    CHECK(fs::path(cfg.select_skin) == dst / "LR2files/Theme/WMIX/select/select.lr2skin");
-    CHECK(fs::path(cfg.sound_set) == dst / "LR2files/Sound/lr2.lr2ss");
+    CHECK(fs::path(cfg.select_skin) == dst / "BMjoyfiles/Theme/WMIX/select/select.lr2skin");
+    CHECK(fs::path(cfg.sound_set) == dst / "BMjoyfiles/Sound/lr2.lr2ss");
     CHECK(cfg.skin_custom.count(cfg.select_skin) == 1 && cfg.skin_custom.size() == 1);
-    CHECK(fs::path(cfg.custom_folder_dirs[0]) == dst / "LR2files/CustomFolder");
+    CHECK(fs::path(cfg.custom_folder_dirs[0]) == dst / "BMjoyfiles/CustomFolder");
     CHECK(fs::exists(lr2 / "LR2files/Database/song.db"));  // 元はそのまま
     // 2 回目は写すものが無い
     AppConfig again;
@@ -252,10 +252,12 @@ TEST(portable_paths) {
     namespace fs = std::filesystem;
     const std::string base = base_dir();
     CHECK(!base.empty());
-    const std::string skin = (fs::u8path(base) / "LR2files" / "Theme" / "x" / "play.lr2skin").string();
+    const std::string skin = (fs::u8path(base) / "BMjoyfiles" / "Theme" / "x" / "play.lr2skin").string();
     const std::string rel = to_portable(skin);
-    CHECK(rel == (fs::path("LR2files") / "Theme" / "x" / "play.lr2skin").string());
+    CHECK(rel == (fs::path("BMjoyfiles") / "Theme" / "x" / "play.lr2skin").string());
     CHECK(from_portable(rel) == fs::path(skin).lexically_normal().string());
+    // 前の名前（LR2files）で書いたパスは、今の置き場に読み替える
+    CHECK(from_portable((fs::path("LR2files") / "Theme" / "x" / "play.lr2skin").string()) == fs::path(skin).lexically_normal().string());
     CHECK(to_portable(base) == ".");
     CHECK(fs::path(from_portable(".")).lexically_normal() == fs::path(base).lexically_normal());
     // 実行ファイルのフォルダの外は絶対パスのまま

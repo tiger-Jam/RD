@@ -20,7 +20,7 @@ struct SkinCustomChoice {
 };
 
 struct AppConfig {
-    std::string player;            // 今のプレイヤーの ID（LR2files/Player/<ID>。共通の設定に書く）
+    std::string player;            // 今のプレイヤーの ID（BMjoyfiles/Player/<ID>。共通の設定に書く）
     std::string lr2_root;          // LR2のフォルダ（LR2files があるところ）
     // 外部ツールのために、LR2 の形の曲データベースとスコアを LR2files/Database に書き出すか
     bool lr2_export = false;
@@ -148,7 +148,7 @@ struct AppConfig {
     void write(std::ostream& f) const;
 };
 
-// 全員で共通の設定ファイル（LR2files/Config/config.txt）
+// 全員で共通の設定ファイル（BMjoyfiles/Config/config.txt）
 std::string config_path();
 // 設定を読む：共通の設定（config.txt）から今のプレイヤーを決め（util/data_dir.h の set_player_id）、プレイヤーの設定を重ねる。
 // プレイヤーがまだいなければ最初のプレイヤーを作り、前の置き場のキーコンフィグ・リプレイ・MOD のファイルを移す。共通の設定があれば true
@@ -159,7 +159,7 @@ bool save_config(const AppConfig& cfg);
 // プレイヤーを作る（copy_from のプレイヤーの設定とキーコンフィグを写す。空なら写さない）・消す
 bool create_player(const std::string& id, const std::string& copy_from, std::string* error = nullptr);
 bool delete_player(const std::string& id, std::string* error = nullptr);
-// プレイヤーごとの設定と記録（LR2files/Player/<ID>/config.txt・score.db）
+// プレイヤーごとの設定と記録（BMjoyfiles/Player/<ID>/config.txt・score.db）
 std::string player_config_path();
 std::string player_score_db_path();
 
@@ -167,25 +167,25 @@ std::string player_score_db_path();
 std::vector<SkinCustomChoice> parse_skin_custom(const std::string& val);
 std::string format_skin_custom(const std::vector<SkinCustomChoice>& sel);
 
-// 置き場は LR2 と同じく、実行ファイルの横の LR2files の中（util/data_dir.h）。
-// 設定（LR2files/Config/config.txt）は config_path()
-// 曲データベースと記録（LR2files/Database/songs.db）
+// 置き場は実行ファイルの横の BMjoyfiles の中（util/data_dir.h）。
+// 設定（BMjoyfiles/Config/config.txt）は config_path()
+// 曲データベースと記録（BMjoyfiles/Database/songs.db）
 std::string song_db_path();
-// 難易度表を手元に保存しておくフォルダ（LR2files/Database/Table）
+// 難易度表を手元に保存しておくフォルダ（BMjoyfiles/Database/Table）
 std::string table_cache_dir();
-// LR2 から引き継いだ段位・コース（LR2files/Database/lr2_courses.txt。LR2 の曲データベースの grade・expert の表を写したもの）
+// LR2 から引き継いだ段位・コース（BMjoyfiles/Database/lr2_courses.txt。LR2 の曲データベースの grade・expert の表を写したもの）
 std::string lr2_courses_path();
-// LR2 の形で書き出す曲データベースとスコアの置き場（LR2files/Database。外部ツールのため）
+// LR2 の形で書き出す曲データベースとスコアの置き場（実行ファイルの横の LR2files/Database。外部ツールのため）
 std::string lr2_database_dir();
-// 譜面のリプレイのファイル（LR2files/Replay/<sha256>.bjr）
+// 譜面のリプレイのファイル（BMjoyfiles/Replay/<sha256>.bjr）
 std::string replay_path(const std::string& sha256);
-// 全プレーの入力の記録（LR2files/Replay/InputLog/<sha256>/<日時>.bjr）
+// 全プレーの入力の記録（BMjoyfiles/Replay/InputLog/<sha256>/<日時>.bjr）
 std::string input_log_path(const std::string& sha256, int64_t played_at);
 // MOD の置き場所：公式（実行ファイルの横の mods/）。自分で入れる MOD は今は読まない。
-// MOD が書いてよいのは LR2files/Player/<ID>/ModData/<MOD の id>/ だけ
+// MOD が書いてよいのは BMjoyfiles/Player/<ID>/ModData/<MOD の id>/ だけ
 std::string official_mods_dir();
 std::string mod_data_dir(const std::string& id);
-// MOD の詳細の設定（LR2files/Player/<ID>/ModData/<MOD の id>/settings.json）
+// MOD の詳細の設定（BMjoyfiles/Player/<ID>/ModData/<MOD の id>/settings.json）
 std::string mod_settings_path(const std::string& id);
 // ゲージで「GAS」を選んだときの custom_gauge の値（カスタムゲージの鍵は「MOD/ゲージ」なので重ならない）
 inline constexpr const char* kGasKey = "gas";

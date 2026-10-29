@@ -822,7 +822,7 @@ int main(int argc, char** argv) {
     int rc = 0;
     {
         App app;
-        migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の LR2files へ
+        migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の BMjoyfiles へ
         app.cfg_path = config_path();
         if (load_config(app.cfg)) std::printf("設定: %s（プレイヤー %s）\n", app.cfg_path.c_str(), app.cfg.player.c_str());
         // コマンドラインの指定は設定に上書きし、終了時に保存する

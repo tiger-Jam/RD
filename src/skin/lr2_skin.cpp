@@ -848,7 +848,10 @@ std::string resolve_lr2_path(const std::string& lr2_root, const std::string& pat
             std::uniform_int_distribution<size_t> pick(0, hits.size() - 1);
             return (cur / hits[pick(rng())]).string();
         }
-        std::string found = find_in_dir(cur, part);
+        // スキンが書く「LR2files/…」は、BMjoy の素材の置き場（BMjoyfiles）があればそこを読む
+        // （BMjoy のフォルダの LR2files は、外部ツールのための LR2 の形の書き出しの置き場）
+        std::string found = i == 0 && lower(part) == "lr2files" ? find_in_dir(cur, "BMjoyfiles") : std::string();
+        if (found.empty()) found = find_in_dir(cur, part);
         if (found.empty()) return {};
         cur /= found;
     }

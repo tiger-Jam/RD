@@ -1,8 +1,9 @@
-// BMjoy の置き場。LR2 と同じく、実行ファイルの横の LR2files にまとめる（フォルダごと別の PC へ持っていける）。
-//   LR2files/Config     全員で共通の設定（config.txt）
-//   LR2files/Database   曲データベース（songs.db）・LR2 から引き継いだ段位（lr2_courses.txt）・難易度表の手元の版（Table/）
-//   LR2files/Player/<ID>  プレイヤーごとのもの：設定（config.txt）・キーコンフィグ（keyconfig.txt）・記録（score.db）・
-//                         リプレイ（Replay/）・MOD が書くファイル（ModData/）
+// BMjoy の置き場。LR2 の LR2files と同じように、実行ファイルの横の BMjoyfiles にまとめる（フォルダごと別の PC へ持っていける）。
+// スキン・サウンドセットなどの素材も同じところ（BMjoyfiles/Theme など）に置く。スキンの中の「LR2files/…」はここに読み替える
+//   BMjoyfiles/Config     全員で共通の設定（config.txt）
+//   BMjoyfiles/Database 曲データベース（songs.db）・LR2 から引き継いだ段位（lr2_courses.txt）・難易度表の手元の版（Table/）
+//   BMjoyfiles/Player/<ID> プレイヤーごとのもの：設定（config.txt）・キーコンフィグ（keyconfig.txt）・記録（score.db）・
+//                          リプレイ（Replay/）・MOD が書くファイル（ModData/）
 // 実行ファイルのフォルダに書けないときだけ、OS の設定フォルダ（前の置き場）を使う
 #pragma once
 
@@ -13,8 +14,10 @@ namespace bmj {
 
 // 実行ファイルのフォルダ（末尾に区切りが付く）
 std::string base_dir();
-// データの置き場（末尾に区切りが付く）。ふつうは <実行ファイルのフォルダ>/LR2files/
+// データの置き場（末尾に区切りが付く）。ふつうは <実行ファイルのフォルダ>/BMjoyfiles/（前の名前の LR2files なら最初に名前を変える）
 std::string data_dir();
+// データの置き場のフォルダの名前（BMjoyfiles。名前を変えられなかったときは前の名前の LR2files）
+std::string data_dir_name();
 // 前の置き場（OS の設定フォルダ）にだけ設定があれば、新しい置き場へ写す（前の置き場は消さずに残す）。
 // 起動のはじめに 1 回呼ぶ。写したら true
 bool migrate_old_data();
@@ -29,7 +32,7 @@ std::vector<std::string> list_players();
 bool valid_player_id(const std::string& id);
 // 設定に書くパス：実行ファイルのフォルダの下なら、そこからの相対パスにする（別の PC へ持っていっても使える）
 std::string to_portable(const std::string& path);
-// 設定から読んだパス：相対パスなら、実行ファイルのフォルダからの絶対パスにする
+// 設定から読んだパス：相対パスなら、実行ファイルのフォルダからの絶対パスにする（前の名前の LR2files/… は今の置き場に読み替える）
 std::string from_portable(const std::string& path);
 
 }  // namespace bmj

@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -12,7 +13,14 @@ namespace fs = std::filesystem;
 
 namespace bmj {
 
+std::string base_dir() {
+    const char* b = SDL_GetBasePath();
+    return b ? b : "";
+}
+
 namespace {
+
+constexpr const char* kDataDirName = "BMjoyfiles";
 
 std::string pref_dir() {
     char* d = SDL_GetPrefPath(nullptr, "BMjoy");
@@ -37,24 +45,43 @@ bool writable(const fs::path& dir) {
     return true;
 }
 
-}  // namespace
-
-std::string base_dir() {
-    const char* b = SDL_GetBasePath();
-    return b ? b : "";
+// 前の名前（LR2files）の置き場が BMjoy のものなら、BMjoyfiles に名前を変える。
+// BMjoy のものかは、BMjoy だけが作るもの（songs.db・Player）で見る。LR2 の中に置かれた BMjoy（横に LR2body.exe がある）なら
+// LR2 のフォルダなので名前は変えず、そのまま使う。名前を変えられなければ（ほかのプロセスが開いているなど）前の名前のまま使う
+fs::path data_root(const fs::path& base) {
+    std::error_code ec;
+    const fs::path now = base / kDataDirName, old = base / "LR2files";
+    if (fs::exists(now, ec) || !fs::is_directory(old, ec)) return now;
+    const bool ours = fs::exists(old / "Database" / "songs.db", ec) || fs::is_directory(old / "Player", ec);
+    if (!ours) return now;
+    if (fs::exists(base / "LR2body.exe", ec)) return old;
+    fs::rename(old, now, ec);
+    if (!ec) return now;
+    std::printf("置き場の名前を変えられない（%s）。前の名前のまま使う\n", ec.message().c_str());
+    return old;
 }
+
+}  // namespace
 
 std::string data_dir() {
     static const std::string dir = [] {
         const std::string base = base_dir();
         std::string d = pref_dir();
-        if (!base.empty() && writable(fs::u8path(base) / "LR2files" / "Config"))
-            d = (fs::u8path(base) / "LR2files").string() + static_cast<char>(fs::path::preferred_separator);
+        if (!base.empty()) {
+            const fs::path root = data_root(fs::u8path(base));
+            if (writable(root / "Config")) d = root.string() + static_cast<char>(fs::path::preferred_separator);
+        }
         std::error_code ec;
         for (const char* sub : {"Config", "Database", "Replay"}) fs::create_directories(fs::u8path(d) / sub, ec);
         return d;
     }();
     return dir;
+}
+
+std::string data_dir_name() {
+    const fs::path d = fs::u8path(data_dir()).parent_path();
+    if (fs::u8path(base_dir()).lexically_normal() == d.parent_path().lexically_normal() / "") return d.filename().string();
+    return kDataDirName;
 }
 
 bool migrate_old_data() {
@@ -105,7 +132,18 @@ std::string from_portable(const std::string& path) {
     if (p.is_absolute() || p.has_root_name()) return path;
     const std::string base = base_dir();
     if (base.empty()) return path;
-    std::string abs = (fs::u8path(base) / p).lexically_normal().string();
+    fs::path rel = p;
+    // 前の名前（LR2files）で書いた BMjoy の置き場の中のパスは、今の置き場に読み替える
+    if (auto it = p.begin(); it != p.end()) {
+        std::string first = it->string();
+        for (char& c : first) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::error_code ec;
+        if (first == "lr2files" && !fs::is_directory(fs::u8path(base) / *it, ec)) {
+            rel = kDataDirName;
+            for (++it; it != p.end(); ++it) rel /= *it;
+        }
+    }
+    std::string abs = (fs::u8path(base) / rel).lexically_normal().string();
     // "." のときは末尾の区切りを落とさない（素材のフォルダは区切りまでで覚えている）
     return abs;
 }
