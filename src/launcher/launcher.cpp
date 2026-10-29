@@ -1048,8 +1048,7 @@ int main(int, char**) {
     int tab = 0;
     // MOD（仕様書14章）。公式のあとに利用者のもの
     std::vector<std::string> mod_errors;
-    std::vector<ModManifest> mods = scan_mods(official_mods_dir(), true, &mod_errors);
-    for (ModManifest& m : scan_mods(user_mods_dir(), false, &mod_errors)) mods.push_back(std::move(m));
+    std::vector<ModManifest> mods = scan_mods(official_mods_dir(), true, &mod_errors);  // 公式の MOD だけ
     // 詳細の設定（GAS の順番・カスタムゲージ）を重ねる
     for (ModManifest& m : mods) apply_mod_settings(m, mod_settings_path(m.id));
     resolve_gauge_lamps(mods);
@@ -1487,7 +1486,7 @@ int main(int, char**) {
                 if (i == mod_sel) g.fill({X + 12, ry, 554, row_h}, kLight);
                 auto it = std::find(cfg.enabled_mods.begin(), cfg.enabled_mods.end(), m.id);
                 bool on = it != cfg.enabled_mods.end();
-                std::string name = m.name + "  " + m.version + (m.official ? "  （公式）" : "") + (m.affects_play() ? "  ＊記録を分ける" : "");
+                std::string name = m.name + "  " + m.version + (m.affects_play() ? "  ＊記録を分ける" : "");
                 if (g.check(X + 18, ry + 4, name, on)) {
                     if (on) cfg.enabled_mods.push_back(m.id);
                     else cfg.enabled_mods.erase(it);
@@ -1498,7 +1497,7 @@ int main(int, char**) {
             }
             if (g.wheel != 0 && g.mx >= X + 10 && g.mx < X + 568 && g.my >= y && g.my < y + rows * row_h)
                 mod_scroll -= static_cast<int>(g.wheel);
-            if (mods.empty()) g.label(X + 20, y + 8, "MOD が見つかりません（" + user_mods_dir() + " に入れる）", false);
+            if (mods.empty()) g.label(X + 20, y + 8, "MOD が見つかりません", false);
             y += rows * row_h + 14;
             if (mod_sel >= 0 && mod_sel < static_cast<int>(mods.size())) {
                 const ModManifest& m = mods[mod_sel];

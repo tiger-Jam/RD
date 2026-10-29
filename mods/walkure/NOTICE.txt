@@ -1,0 +1,4 @@
+この MOD は walkure-offline（https://github.com/naktazdim/walkure-offline、commit 3836d501）の
+推定のモデル（model.tsv。assets/data の JSON を tools/mods/walkure_model.py で書き換えたもの）と、
+推定・リコメンドの計算（src/domain の irt-math.js・player-rating.js・recommendation.js を Lua に移したもの）を使っています。
+ライセンスは LICENSE（MIT License, Copyright (c) 2026 walkure.net）のとおりです。

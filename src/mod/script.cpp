@@ -372,15 +372,29 @@ std::unique_ptr<ModScript> open_script(const ModManifest& m, const std::string& 
     return s;
 }
 
-// フォルダの表 { title = "…", charts = { sha256, … }, folders = { … } } を読む（深さは 4 まで）
+// フォルダの表 { title = "…", charts = { sha256 か { sha256 = …, label = … }, … }, keep_order = 真偽, folders = { … } } を読む（深さは 4 まで）
 void read_folder(lua_State* L, int idx, ModFolder& out, int depth) {
     idx = lua_absindex(L, idx);
     if (lua_getfield(L, idx, "title") == LUA_TSTRING) out.title = lua_tostring(L, -1);
     lua_pop(L, 1);
+    lua_getfield(L, idx, "keep_order");
+    out.keep_order = lua_toboolean(L, -1);
+    lua_pop(L, 1);
     if (lua_getfield(L, idx, "charts") == LUA_TTABLE) {
         lua_Integer n = static_cast<lua_Integer>(lua_rawlen(L, -1));
         for (lua_Integer i = 1; i <= n; ++i) {
-            if (lua_rawgeti(L, -1, i) == LUA_TSTRING) out.charts.push_back(lua_tostring(L, -1));
+            const int t = lua_rawgeti(L, -1, i);
+            if (t == LUA_TSTRING) {
+                out.charts.push_back(lua_tostring(L, -1));
+                out.labels.emplace_back();
+            } else if (t == LUA_TTABLE) {
+                if (lua_getfield(L, -1, "sha256") == LUA_TSTRING) {
+                    out.charts.push_back(lua_tostring(L, -1));
+                    lua_pop(L, 1);
+                    out.labels.push_back(lua_getfield(L, -1, "label") == LUA_TSTRING ? lua_tostring(L, -1) : "");
+                }
+                lua_pop(L, 1);
+            }
             lua_pop(L, 1);
         }
     }

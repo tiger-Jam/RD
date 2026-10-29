@@ -161,10 +161,9 @@ std::string lr2_courses_path();
 std::string replay_path(const std::string& sha256);
 // 全プレーの入力の記録（LR2files/Replay/InputLog/<sha256>/<日時>.bjr）
 std::string input_log_path(const std::string& sha256, int64_t played_at);
-// MOD の置き場所：公式（実行ファイルの横の mods/）と利用者のもの（LR2files/Mods/）。
+// MOD の置き場所：公式（実行ファイルの横の mods/）。自分で入れる MOD は今は読まない。
 // MOD が書いてよいのは LR2files/Mods/ModData/<MOD の id>/ だけ
 std::string official_mods_dir();
-std::string user_mods_dir();
 std::string mod_data_dir(const std::string& id);
 // MOD の詳細の設定（LR2files/Mods/ModData/<MOD の id>/settings.json）
 std::string mod_settings_path(const std::string& id);

@@ -95,6 +95,7 @@ struct Entry {
     // ModBar は MOD が足したバー（ランダムセレクトなど。決定すると MOD が遊ぶ譜面を選ぶ）
     enum class Kind { Folder, Chart, Missing, Course, Header, ModBar } kind = Kind::Folder;
     std::string label, sub, badge;  // badge はレベルの表示（例：sl5）
+    std::string note;                // 譜面のとき、アーティストの左に出す文字（MOD の label）
     const ChartRecord* chart = nullptr;
     std::shared_ptr<const TableChart> missing_info;  // 持っていない譜面のとき（ほかの要素は持たない。要素を小さくするため）
     std::shared_ptr<Course> course;  // コースのとき
@@ -103,6 +104,7 @@ struct Entry {
     // 難易度表は 1（フォルダ）、カスタムフォルダ（.lr2folder・MOD・FAVORITE）は 2 にして、色で見分けられるようにする
     int bar_type = 1;
     bool fs_folder = false;          // 曲フォルダの階層（中の譜面に LR2 の難易度の絞り込みをかける）
+    bool keep_order = false;         // 中の譜面に並べ替えをかけない（MOD が keep_order を付けたフォルダ）
     // カスタムフォルダ。中身は開くとき（とフォルダのランプを出すとき）に集める（LR2 と同じ。全部を先に集めると、数が多いと遅い）。
     // #MAXTRACKS 1 のフォルダは、開くたびに 1 曲を選び直す
     const CustomFolderDef* custom = nullptr;
@@ -201,8 +203,26 @@ struct Library {
     std::unordered_map<std::string, std::vector<const ChartRecord*>> by_folder;
     // 譜面ごとに、同じ sha256 の最初の譜面の番号（フォルダの記録の合計で、同じ譜面を 2 度数えないため）
     std::vector<int> same_sha;
+    // md5 → 入っている難易度表のレベル（「★12 sl5」。表の順。初めて要ったら作る）
+    mutable std::unordered_map<std::string, std::string> table_levels_;
+    const std::string& table_levels(const std::string& md5) const {
+        static const std::string none;
+        if (table_levels_.empty()) {
+            table_levels_.emplace("", "");
+            for (const DifficultyTable& t : tables)
+                for (const TableChart& tc : t.charts) {
+                    if (tc.md5.empty()) continue;
+                    std::string& s = table_levels_[tc.md5];
+                    const std::string lv = t.symbol + tc.level;
+                    if ((" " + s + " ").find(" " + lv + " ") == std::string::npos) s += (s.empty() ? "" : " ") + lv;
+                }
+        }
+        auto it = table_levels_.find(md5);
+        return it != table_levels_.end() ? it->second : none;
+    }
     // 表で初めて作ると全部の譜面をなめて止まるので、裏で作れるときは先に作っておく
     void build_indexes() {
+        table_levels("");
         if (md5_index.empty())
             for (const ChartRecord& c : charts) md5_index.emplace(c.md5, &c);
         if (by_folder.empty())
@@ -595,20 +615,23 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
         }
         song_roots.push_back(std::move(g));
     }
-    // MOD のフォルダ（カスタムフォルダの後ろ）
+    // MOD のフォルダ（カスタムフォルダの後ろ）。MOD が label を付けた譜面は、アーティストの左に出す
     std::function<Entry(const ModFolder&)> mod_entry = [&](const ModFolder& mf) {
         Entry f;
         f.bar_type = 2;
         f.label = mf.title;
+        f.keep_order = mf.keep_order;
         for (const ModFolder& c : mf.children) {
             Entry sub = mod_entry(c);
             f.owned += sub.owned, f.total += sub.total;
             f.children.push_back(std::move(sub));
         }
-        for (const std::string& sha : mf.charts) {
-            auto it = by_sha256.find(sha);
+        for (size_t i = 0; i < mf.charts.size(); ++i) {
+            auto it = by_sha256.find(mf.charts[i]);
             if (it == by_sha256.end() || fav_of(it->second->md5) == 2) continue;
-            f.children.push_back(chart_entry(it->second, std::to_string(it->second->playlevel)));
+            Entry c = chart_entry(it->second, std::to_string(it->second->playlevel));
+            if (i < mf.labels.size()) c.note = mf.labels[i];
+            f.children.push_back(std::move(c));
             f.owned++, f.total++;
         }
         return f;
@@ -891,7 +914,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (e.kind == Entry::Kind::Chart) ++charts_e;
             else if (e.kind == Entry::Kind::Missing) ++missing;
             else ++folders;
-            str_bytes += sbytes(e.label) + sbytes(e.sub) + sbytes(e.badge) + sbytes(e.dir);
+            str_bytes += sbytes(e.label) + sbytes(e.sub) + sbytes(e.badge) + sbytes(e.note) + sbytes(e.dir);
             str_bytes += sbytes(e.missing().md5) + sbytes(e.missing().sha256) + sbytes(e.missing().level) + sbytes(e.missing().title) +
                          sbytes(e.missing().artist) + sbytes(e.missing().url) + sbytes(e.missing().url_diff);
             for (const Entry& c : e.children) walk(c);
@@ -1107,6 +1130,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         std::string dir;                 // 曲フォルダの一覧なら、そのフォルダのパス
         int bar_type = 1;                // このフォルダのバーの種類（フォルダの名前のバーに使う）
         int head = 0;                    // 一覧の頭に足したバー（フォルダの名前・MOD のバー）の数
+        bool keep_order = false;         // 並べ替えをかけない（MOD が並べた順のまま）
     };
     // MOD がフォルダに足すバー（フォルダの名前と譜面の数ごとに、1 回だけ聞く）
     std::map<std::pair<std::string, int>, std::vector<ModBar>> mod_bar_cache;
@@ -1120,8 +1144,9 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         return it->second;
     };
     auto make_level = [&](const std::vector<Entry>* full, int cursor, const std::string& name, bool lr2_filter = false,
-                          std::string dir = {}, int bar_type = 1) {
+                          std::string dir = {}, int bar_type = 1, bool keep_order = false) {
         Level lv{full, cursor, name, nullptr, full, lr2_filter, std::move(dir), bar_type};
+        lv.keep_order = keep_order;
         // 鍵盤数の絞り込みで譜面が 1 つも出なくなるなら、出る項目まで進める（LR2: songmanage:2590）
         auto keys_of = [](const Entry& e) { return e.kind == Entry::Kind::Chart && e.chart ? e.chart->keys : 7; };
         bool any_song = false;
@@ -1156,7 +1181,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             }
             for (auto& [f, r] : range) shown_diff[f] = r.first >= 0 ? r.first : r.second;
         }
-        if (use_diff || mode_filter != 0 || sort_mode != 0) {
+        const int sort = keep_order ? 0 : sort_mode;
+        if (use_diff || mode_filter != 0 || sort != 0) {
             auto v = std::make_shared<std::vector<Entry>>();
             for (const Entry& e : *full) {
                 if (e.kind != Entry::Kind::Folder && e.kind != Entry::Kind::Course) {
@@ -1167,7 +1193,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             }
             // 譜面だけを並べ替える（フォルダは元の順のまま前、持っていない譜面は後ろ）。
             // 記録で並べるもの（CLEAR / SCORE / MISSCOUNT）は、記録の無い譜面を後ろに回す。同じならタイトル順
-            if (sort_mode != 0) {
+            if (sort != 0) {
                 // 文字の並びは LR2 と同じく、Shift_JIS にして英字を大文字にしたもののバイト順
                 std::unordered_map<std::string, std::string> memo;
                 auto key = [&](const std::string& s) -> const std::string& {
@@ -1594,7 +1620,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             if (it == list.end()) break;
             if (it->custom && !it->custom_loaded) load_custom_entry(*lib, *it);
             stack.push_back(make_level(it->children.ptr(), cursors[i + 1], path[i], it->fs_folder, it->dir,
-                                       it->course_folder ? 6 : it->bar_type));
+                                       it->course_folder ? 6 : it->bar_type, it->keep_order));
             place(stack.back(), i + 1);
         }
         if (stack.size() == path.size() + 1) {
@@ -1889,7 +1915,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 folder_totals.erase(folder_lamp_key(mode_filter, level_path(), *e));
             }
             if (e->children.empty()) return;  // 空のフォルダには入らない（LR2 と同じ）
-            stack.push_back(make_level(e->children.ptr(), 0, e->label, e->fs_folder, e->dir, e->course_folder ? 6 : e->bar_type));
+            stack.push_back(make_level(e->children.ptr(), 0, e->label, e->fs_folder, e->dir, e->course_folder ? 6 : e->bar_type,
+                                       e->keep_order));
             snap();
             app.mixer.play_system(kSysFolderOpen);
         } else if (e->kind == Entry::Kind::Chart || (e->kind == Entry::Kind::Course && e->course->playable())) {
@@ -2048,7 +2075,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         }
         difficulty_filter = to;
         Level& lv = stack.back();
-        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir, lv.bar_type);
+        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir, lv.bar_type, lv.keep_order);
         // 移った先の譜面にカーソルを合わせる。見えていなければ、同じ曲フォルダの譜面に（カーソルは同じ曲に留まる）
         int same_folder = -1;
         for (size_t i = 0; i < lv.list->size(); ++i) {
@@ -2071,7 +2098,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         std::string label = e ? e->label : "";
         const ChartRecord* chart = e && e->kind == Entry::Kind::Chart ? e->chart : nullptr;
         Level& lv = stack.back();
-        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir, lv.bar_type);
+        lv = make_level(lv.full, 0, lv.name, lv.lr2_filter, lv.dir, lv.bar_type, lv.keep_order);
         for (size_t i = 0; i < lv.list->size(); ++i) {
             const Entry& x = (*lv.list)[i];
             if ((chart && x.kind == Entry::Kind::Chart && x.chart == chart) || (!chart && x.label == label)) {
@@ -2924,6 +2951,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             int n = static_cast<int>(list.size());
             const Entry* cur = current();
             sctx.type = 1, sctx.chart = nullptr, sctx.score = nullptr, sctx.course = nullptr;
+            sctx.artist_note.clear();
             // フォルダ（とフォルダの名前のバー）にカーソルがあれば、中の持っている譜面の記録を合計してスコアの欄に出す。
             // 同じ譜面が 2 つのフォルダにあっても 1 回だけ数える（難易度表の「全曲」とレベルのフォルダなど）
             sctx.folder_score = nullptr;
@@ -2992,7 +3020,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 if (cur->custom) sctx.bar_text[3] = cur->custom->category;  // .lr2folder の #CATEGORY はジャンルの欄
             } else if (cur && cur->kind == Entry::Kind::Missing) {
                 sctx.bar_text[0] = sctx.bar_text[2] = cur->missing().title;
-                sctx.bar_text[4] = cur->missing().artist;
+                const std::string& lv = lib->table_levels(cur->missing().md5);
+                sctx.bar_text[4] = lv.empty() ? cur->missing().artist : lv + " / " + cur->missing().artist;
             }
             // MOD のバーのルーレット：カーソルを置いている間、曲名の枠に一覧の曲名を毎フレーム（16ms ごと）次々に出す。
             // バーに来たときに一覧から 48 曲を選んでおき、その中から出す（毎フレーム違う曲名の文字を作ると重い。
@@ -3037,6 +3066,9 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             } else if (cur && cur->kind == Entry::Kind::Chart) {
                 sctx.type = 0;
                 sctx.chart = cur->chart;
+                // アーティストの左に、入っている難易度表のレベルと MOD の label（空白だけだとスキンの字では詰まって見えるので / で区切る）
+                sctx.artist_note = lib->table_levels(cur->chart->md5);
+                if (!cur->note.empty()) sctx.artist_note += (sctx.artist_note.empty() ? "" : " / ") + cur->note;
                 auto it = lib->scores.find(cur->chart->sha256);
                 if (it != lib->scores.end()) sctx.score = &it->second;
             } else if (cur && cur->kind == Entry::Kind::Missing) {
@@ -3655,7 +3687,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     std::function<bool(const std::vector<Entry>&)> dfs = [&](const std::vector<Entry>& l) {
                         for (const Entry& x : l) {
                             if ((x.kind == Entry::Kind::Course || x.kind == Entry::Kind::Chart || x.kind == Entry::Kind::Missing) &&
-                                x.label.find(want) != std::string::npos) {
+                                (x.label.find(want) != std::string::npos || x.note.find(want) != std::string::npos)) {
                                 chain.push_back(x.label);
                                 return true;
                             }

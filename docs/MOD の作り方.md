@@ -8,8 +8,9 @@ DLL などのプログラムは読みません。
 | 場所 | 中身 |
 |---|---|
 | 実行ファイルの横の `mods/` | 公式の MOD（BMjoy に付いてくる） |
-| `LR2files/Mods/` | 自分で入れる MOD |
 | `LR2files/Mods/ModData/<MOD の id>/` | MOD が書いてよい場所（ここ以外には書けない） |
+
+今は公式の MOD だけを読みます（自分で入れる MOD は読みません）。
 
 設定アプリの「MOD」タブで、使う MOD に印を付けます。組み合わせに問題があるときは、タブの下に警告が出ます。
 例：判定を変える MOD が 2 つある、など。
@@ -273,6 +274,9 @@ return {
   { title = "フォルダの名前", charts = { "sha256", ... }, folders = { { title = "下のフォルダ", charts = { ... } } } },
 }
 ```
+
+譜面は `{ sha256 = "…", label = "72.4%" }` とも書けます。`label` は一覧の曲名の前に出ます。
+フォルダに `keep_order = true` を付けると、選曲の並べ替えの設定にかかわらず、`charts` の順のまま並びます。
 
 ### folder・req（folder_bars・pick_chart）
 

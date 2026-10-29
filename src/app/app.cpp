@@ -166,8 +166,7 @@ void App::window_size(int skin_w, int skin_h, int& w, int& h) const {
 
 void App::load_mods() {
     std::vector<std::string> errors;
-    mods = scan_mods(official_mods_dir(), true, &errors);
-    for (ModManifest& m : scan_mods(user_mods_dir(), false, &errors)) mods.push_back(std::move(m));
+    mods = scan_mods(official_mods_dir(), true, &errors);  // 公式の MOD だけを読む（自分で入れる MOD は、今は読まない）
     // 起動の設定画面で変えた詳細の設定（GAS の順番、カスタムゲージ）を重ねる
     for (ModManifest& m : mods) apply_mod_settings(m, mod_settings_path(m.id));
     apply_lamp_colors(mods, cfg.enabled_mods);  // EX-HARD などのランプの色を、カスタムゲージ MOD で変えていれば

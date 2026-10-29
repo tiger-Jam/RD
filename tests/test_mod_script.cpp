@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <unordered_map>
 
 #include "mod/script.h"
 #include "test.h"
@@ -109,6 +110,61 @@ TEST(mod_script_folders) {
         CHECK_EQ(f[0].children.size(), size_t(1));
         if (!f[0].children.empty()) CHECK(f[0].children[0].charts == std::vector<std::string>{"b"});
     }
+}
+
+// 譜面に曲名の前の文字（label）を付けられる
+TEST(mod_script_folder_labels) {
+    TempMod t("labels", "\"control\"", R"LUA(
+        function build_folders(charts)
+          return { { title = "印", keep_order = true, charts = { "a", { sha256 = "b", label = "50.0%" }, { sha256 = "c" }, { label = "x" } } } }
+        end
+    )LUA");
+    auto f = build_mod_folders({&t.m}, {}, {}, t.data.string());
+    CHECK_EQ(f.size(), size_t(1));
+    if (f.size() != 1) return;
+    CHECK(f[0].charts == (std::vector<std::string>{"a", "b", "c"}));  // sha256 の無い表は飛ばす
+    CHECK(f[0].labels == (std::vector<std::string>{"", "50.0%", ""}));
+    CHECK(f[0].keep_order);
+}
+
+// 公式の MOD「リコメンド」：walkure-offline と同じ地力と確率になる（値は walkure-offline の JS で同じ記録から求めたもの）
+TEST(mod_script_official_walkure) {
+    ModManifest m;
+    CHECK(load_mod_manifest(std::string(BMJ_SOURCE_DIR) + "/mods/walkure", m));
+    // モデルの譜面を全部持っていることにし、7 つおきにランプを順に付け、600 番目から 7 つおきは FAILED にする
+    std::ifstream in(std::string(BMJ_SOURCE_DIR) + "/mods/walkure/model.tsv");
+    std::string line;
+    std::getline(in, line);
+    std::vector<ChartRecord> charts;
+    std::unordered_map<std::string, ScoreRecord> scores;
+    for (int i = 0; std::getline(in, line); ++i) {
+        ChartRecord c;
+        c.md5 = c.sha256 = line.substr(0, 32), c.title = "t" + std::to_string(i);
+        if (i % 7 == 0) scores[c.sha256].clear = i / 7 % 5 + 1;
+        if (i >= 600 && (i - 600) % 7 == 0) scores[c.sha256].clear = 1;
+        charts.push_back(c);
+    }
+    CHECK_EQ(charts.size(), size_t(1252));
+    fs::path data = fs::temp_directory_path() / "bmj_mod_test_walkure";
+    std::vector<std::string> errors;
+    auto f = build_mod_folders({&m}, charts, scores, data.string(), &errors);
+    CHECK(errors.empty());
+    CHECK_EQ(f.size(), size_t(1));
+    if (f.size() != 1) return;
+    CHECK(f[0].title == "リコメンド  ★11.88");
+    CHECK_EQ(f[0].children.size(), size_t(4));
+    if (f[0].children.size() != 4) return;
+    const ModFolder& hard = f[0].children[2];
+    CHECK(hard.title == "HARD");
+    CHECK_EQ(hard.charts.size(), size_t(494));  // walkure-offline の 496 から、入れていないコース（段位）の 2 つを除いたもの
+    CHECK(hard.charts.size() >= 3 && hard.charts[0] == "4b2ef6fdb08c645bf82e5ee1c78737ae" &&
+          hard.charts[1] == "1b4566b508cb58387480a0406d87cb1b" && hard.charts[2] == "6d5b9c4409daada59c8968f9129cb789");
+    CHECK(!hard.labels.empty() && hard.labels[0] == "98.5%");
+    CHECK_EQ(f[0].children[0].charts.size(), size_t(670));
+    CHECK_EQ(f[0].children[1].charts.size(), size_t(506));  // 513 からコースの 7 つを除いたもの
+    CHECK_EQ(f[0].children[3].charts.size(), size_t(2));
+    std::error_code ec;
+    fs::remove_all(data, ec);
 }
 
 // 公式のスクリプトの MOD が読めて動く（判定の記録を書き出す）

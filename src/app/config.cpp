@@ -340,8 +340,6 @@ std::string input_log_path(const std::string& sha256, int64_t played_at) {
 
 std::string official_mods_dir() { return base_dir() + "mods"; }
 
-std::string user_mods_dir() { return data_dir() + "Mods"; }
-
 std::string mod_data_dir(const std::string& id) { return data_dir() + "Mods/ModData/" + id; }
 std::string mod_settings_path(const std::string& id) { return mod_data_dir(id) + "/settings.json"; }
 

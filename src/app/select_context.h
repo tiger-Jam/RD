@@ -38,6 +38,7 @@ struct SelectContext {
     int folder_notes = 0, folder_played_notes = 0;
     const Course* course = nullptr;      // コース（種類 8）のとき
     std::string folder_name;            // いまいるフォルダの名前（文字列30）
+    std::string artist_note;            // 空でなければアーティスト（文字列 14）の左に出す（MOD のフォルダの譜面の確率など）
     std::string title_override;         // 空でなければ曲名の枠（文字列 10・12）に出す（MOD のバーのルーレット）
     // 曲でない要素（フォルダ・持っていない譜面など）の文字列 10〜15（タイトル、サブタイトル、フルタイトル、ジャンル、アーティスト、
     // サブアーティスト）。LR2 はフォルダにも同じ欄を持ち、カーソルの要素の欄をそのまま出す（フォルダの名前がタイトルの枠に出る）

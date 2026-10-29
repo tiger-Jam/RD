@@ -1,0 +1,9 @@
+{
+  "id": "walkure",
+  "name": "リコメンド",
+  "version": "1",
+  "author": "walkure.net（walkure-offline）・BMjoy",
+  "description": "発狂難易度表などのランプから地力を推定して、次に取れそうなランプの譜面を EASY・NORMAL・HARD・FULL COMBO のフォルダに並べる",
+  "touches": ["control"],
+  "script": "main.lua"
+}

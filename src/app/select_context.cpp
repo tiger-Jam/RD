@@ -279,7 +279,7 @@ std::string SelectContext::text(int id) const {
     case 11: return song ? chart->subtitle : "";
     case 12: return song ? chart->title + (chart->subtitle.empty() ? "" : " " + chart->subtitle) : "";
     case 13: return song ? chart->genre : "";
-    case 14: return song ? chart->artist : "";
+    case 14: return !song ? "" : artist_note.empty() ? chart->artist : artist_note + " / " + chart->artist;
     case 15: return song ? chart->subartist : "";
     case 17: return song ? std::to_string(chart->playlevel) : "";
     case 18: return song ? std::to_string(chart->difficulty) : "";
