@@ -1,5 +1,5 @@
-// 作者の Mac mini とのやりとり：ログを送る・新しい版を確かめて入れ替える。
-// 送り先と取りに行く先は service_url（設定で替えられる。既定は kServiceUrl）
+// 作者の受け口（Cloudflare の Workers。tools/service/cloudflare）とのやりとり：ログを送る・新しい版を確かめて入れ替える。
+// 送り先と取りに行く先は service_url（設定で替えられる。既定は kServiceUrl）。Mac mini は受け口からログを取ってくるだけ
 #pragma once
 
 #include <functional>
@@ -9,7 +9,8 @@ namespace rd {
 
 struct AppConfig;
 
-inline constexpr const char* kServiceUrl = "https://mac-mini.tailbfd111.ts.net:8443/rd";
+// 受け口を作ったら（tools/service/cloudflare/setup.sh が出す住所）ここに入れる。空の間は送らず、更新も確かめない
+inline constexpr const char* kServiceUrl = "";
 
 // この PC の印（RDfiles/Config/client_id.txt。無ければ作る）。ログの送り主を分けるため
 std::string client_id();

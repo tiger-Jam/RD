@@ -1,0 +1,12 @@
+{
+  "name": "rd-service",
+  "private": true,
+  "description": "RD の受け口（Cloudflare Workers と R2）。新しい版を配り、ログを受け取る",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.0"
+  }
+}

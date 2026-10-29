@@ -74,7 +74,7 @@ std::string client_id() {
 }
 
 void upload_logs_async(const AppConfig& cfg) {
-    if (!cfg.log_upload) return;
+    if (!cfg.log_upload || service_url(cfg).empty()) return;
     const std::string url = service_url(cfg) + "/log";
     std::thread([url] {
         const fs::path dir = fs::u8path(log_dir());
@@ -99,8 +99,13 @@ void upload_logs_async(const AppConfig& cfg) {
             const std::string name = f.filename().string();
             if (!http_post(url + "?client=" + id + "&name=" + url_escape(name) + "&version=" + url_escape(kRdVersion), data, reply, err,
                            {{"X-RD-Key", kServiceKey}, {"Content-Type", "application/octet-stream"}})) {
-                std::printf("ログを送れない: %s\n", err.c_str());
-                return;  // つながらないときは、次に起動したときにまとめて送る
+                // 受け口が中身を断った（400・413 など）ものは、送り直しても同じなので捨てて次へ。
+                // つながらない・混んでいる（429）・受け口の不具合（5xx）ときは、次に起動したときにまとめて送る
+                const bool refused = err.rfind("HTTP 4", 0) == 0 && err.rfind("HTTP 429", 0) != 0;
+                std::printf("ログを送れない%s: %s\n", refused ? "（捨てる）" : "", err.c_str());
+                if (!refused) return;
+                fs::remove(f, ec);
+                continue;
             }
             fs::rename(f, dir / "Sent" / f.filename(), ec);
             if (ec) fs::remove(f, ec);
@@ -134,6 +139,7 @@ int compare_versions(const std::string& a, const std::string& b) {
 UpdateInfo check_update(const AppConfig& cfg) {
     UpdateInfo u;
     if (std::string(kRdVersion) == "dev") return u.error = "開発中の版", u;
+    if (service_url(cfg).empty()) return u.error = "受け口が決まっていない", u;
     std::string body;
     const std::string base = service_url(cfg);
     if (!http_get(base + "/update/latest.json", body, u.error)) return u;

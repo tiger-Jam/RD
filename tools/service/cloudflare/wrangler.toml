@@ -1,0 +1,22 @@
+# RD の受け口（Cloudflare Workers）。tools/service/cloudflare/README.md
+name = "rd-service"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+
+# 新しい版とログの置き場（R2）
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "rd-service"
+
+# 送ってくる回数の上限（1 台ごとと、全体）
+[[ratelimits]]
+name = "PER_CLIENT"
+namespace_id = "7101"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "ALL"
+namespace_id = "7102"
+simple = { limit = 60, period = 60 }
+
+# ADMIN_SECRET（Mac mini がログを取ってくる合言葉）は wrangler secret put で入れる。ここには書かない

@@ -7,7 +7,7 @@
 #   版は 年.月.日.番号（例 2026.10.30.1）
 #   --move-to <住所> を付けると、配った RD に受け取り口の新しい住所を知らせる（例 https://<別の PC>.tailbfd111.ts.net:8443/rd。
 #     新しい住所にも同じ版を置いておく。古い住所は、全員が一度起動するまで残しておく）
-#   --publish を付けると、受け取り口（~/rd-service/update）に置き、配った RD が次の起動で入れ替えるようにする
+#   --publish を付けると、Cloudflare の受け口（R2 の update/）に更新用の zip を置き、配った RD が次の起動で入れ替えるようにする
 #
 # 出来たもの：~/rd-service/releases/<版>/（RD-<版>.zip・RD-<版>-update.zip・.pdb）
 # Windows では C:\Users\<ユーザー>\RD-release\<版> で作業する（開発のフォルダとは分ける）。INFINITAS が動いていたら止まる
@@ -67,18 +67,19 @@ echo "作った：$OUT"
 ls -lh "$OUT"
 
 if [ "$PUBLISH" = 1 ]; then
-    mkdir -p "$SERVICE/update"
-    cp "$OUT/RD-$VER-update.zip" "$OUT/RD-$VER.zip" "$SERVICE/update/"
-    python3 -I - "$SERVICE/update/latest.json" "$VER" "RD-$VER-update.zip" "$SHA" "$NOTES" "$MOVE_TO" <<'EOF'
+    # Cloudflare の受け口（R2 の update/）に、更新用の zip と latest.json を置く。全部入りの zip は置かない（直接渡す）
+    python3 -I - "$OUT/latest.json" "$VER" "RD-$VER-update.zip" "$SHA" "$NOTES" "$MOVE_TO" <<'EOF'
 import json, sys
 path, ver, url, sha, notes, move_to = sys.argv[1:7]
-info = {"version": ver, "url": url, "sha256": sha, "notes": notes, "full": f"RD-{ver}.zip"}
+info = {"version": ver, "url": url, "sha256": sha, "notes": notes}
 if move_to:
     info["service_url"] = move_to
-with open(path + ".tmp", "w", encoding="utf-8") as f:
+with open(path, "w", encoding="utf-8") as f:
     json.dump(info, f, ensure_ascii=False)
-import os
-os.replace(path + ".tmp", path)
 EOF
-    echo "公開した：${SERVICE}/update/latest.json（${VER}）"
+    W="env -u NODE_OPTIONS npx wrangler"
+    (cd tools/service/cloudflare && $W r2 object put "rd-service/update/RD-$VER-update.zip" --file "$OUT/RD-$VER-update.zip" --content-type application/zip --remote)
+    # 情報は zip を置き終わってから置く（先に置くと、まだ無い zip を取りに行ってしまう）
+    (cd tools/service/cloudflare && $W r2 object put rd-service/update/latest.json --file "$OUT/latest.json" --content-type application/json --remote)
+    echo "公開した：RD ${VER}（受け口の update/latest.json）"
 fi
