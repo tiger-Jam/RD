@@ -5,6 +5,7 @@
 
 #include "audio/sound_bank.h"
 #include "chart/bms_parser.h"
+#include "chart/chart_attr.h"
 #include "test.h"
 #include "util/lr2_random.h"
 #include "util/path.h"
@@ -396,4 +397,27 @@ TEST(decode_flac) {
     for (float v : s.pcm) peak = std::max(peak, std::abs(v));
     CHECK(peak > 0.1f);
     fs::remove(p);
+}
+
+// 譜面の傾向：16 分の単音が同じ鍵盤を続けずに並ぶ BPM 160 の譜面は、16 分乱打（中速乱打）
+TEST(chart_attr_randa) {
+    std::string bms = "#BPM 160\n";
+    static const char* channels[] = {"11", "13", "15", "19", "12", "14", "18"};  // 1 3 5 7 2 4 6 の鍵盤
+    int k = 0;
+    for (int bar = 1; bar <= 24; ++bar) {
+        std::string lanes[7];
+        for (std::string& l : lanes) l = std::string(32, '0');
+        for (int s = 0; s < 16; ++s, ++k) lanes[k % 7].replace(s * 2, 2, "01");
+        char head[16];
+        for (int c = 0; c < 7; ++c) std::snprintf(head, sizeof(head), "#%03d%s:", bar, channels[c]), bms += head + lanes[c] + "\n";
+    }
+    BmsParseOptions o;
+    const ChartAttr a = analyze_chart_attr(parse_bms_text(bms, o).chart);
+    CHECK(a.ok);
+    CHECK_EQ(a.attr, int(kAttrRanda));
+    CHECK_EQ(a.sub, int(kSubRandaMid));
+    CHECK(std::abs(a.grid_bpm - 160.0) < 2.0);
+    CHECK(a.micro_rate == 0.0 && a.avg_chord == 1.0);
+    // ノーツが 50 未満の譜面は分析しない
+    CHECK(!analyze_chart_attr(parse_bms_text("#BPM 120\n#00111:01010101\n", o).chart).ok);
 }

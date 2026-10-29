@@ -47,6 +47,7 @@ target_link_libraries(bmj_third_party PUBLIC Threads::Threads)
 add_library(bmj_core STATIC
     src/chart/chart.cpp
     src/chart/bms_parser.cpp
+    src/chart/chart_attr.cpp
     src/chart/osu_parser.cpp
     src/chart/bmson_parser.cpp
     src/chart/chart_loader.cpp
@@ -103,6 +104,7 @@ add_executable(BMjoybody WIN32
     src/app/lr2_import.cpp
     src/app/decide_scene.cpp
     src/app/skin_catalog.cpp
+    src/app/bgm_set.cpp
     src/app/skin_select_scene.cpp
     src/app/keyconfig_editor.cpp
     src/app/keyconfig_skin_scene.cpp
@@ -136,7 +138,8 @@ if(WIN32)
 endif()
 
 # 起動前の設定アプリ（LR2 の LR2.exe に相当）。「起動」で BMjoybody を黒い画面つきで立ち上げる
-add_executable(BMjoy WIN32 src/launcher/launcher.cpp src/app/config.cpp src/util/data_dir.cpp src/input/keyconfig.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp
+add_executable(BMjoy WIN32 src/launcher/launcher.cpp src/app/config.cpp src/util/data_dir.cpp src/input/keyconfig.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/bgm_set.cpp
+    src/audio/system_sound.cpp src/audio/sound_bank.cpp
     src/render/text_cache.cpp)
 target_link_libraries(BMjoy PRIVATE bmj_core SDL3::SDL3)
 if(WIN32)
@@ -145,7 +148,7 @@ endif()
 
 add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
     tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp tests/test_dsp.cpp tests/test_mod.cpp tests/test_mod_script.cpp tests/test_borrow.cpp src/input/input.cpp src/input/keyconfig.cpp src/input/midi.cpp
-    src/app/config.cpp src/util/data_dir.cpp src/app/course.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/keyconfig_editor.cpp src/audio/sound_bank.cpp)
+    src/app/config.cpp src/util/data_dir.cpp src/app/course.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/keyconfig_editor.cpp src/audio/sound_bank.cpp src/audio/system_sound.cpp)
 target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
 target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 if(WIN32)

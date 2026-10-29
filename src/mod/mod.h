@@ -84,7 +84,7 @@ struct CustomJudgeDef {
 // MOD の詳細の設定（起動の設定画面で変えられる項目）。値は MOD ごとの settings.json に残す
 struct ModSetting {
     std::string type;  // "gauge_order"：GAS のゲージの順番、"gauges"：カスタムゲージの一覧、"lamps"：カスタムランプの一覧、
-                       // "judges"：カスタム判定の一覧、"metronome"：メトロノームの音量
+                       // "judges"：カスタム判定の一覧、"metronome"：メトロノームの音量、"bgm"：選曲・決定の BGM
     std::string name;  // 画面に出す名前
 };
 
@@ -116,11 +116,21 @@ struct ModManifest {
     uint32_t touches = 0;         // ModTouch のビット
     bool official = false;        // 実行ファイルの横の mods/ にあったもの
     std::string script;           // スクリプト（mod.json からの相対。無ければ空）
+    bool chart_attr = false;      // build_folders で譜面の傾向（chart/chart_attr.h）を使う（無い譜面は裏で分析する）
     bool gas = false;             // GAS（ゲージの自動切り替え）を選べるようにする
     // メトロノーム：遊んでいる間、拍に合わせて音を鳴らす（小節の頭は accent、ほかの拍は beat。どちらも MOD のフォルダの中の音）
     bool metronome = false;
     std::string metronome_accent, metronome_beat;  // 音のファイル（絶対パス）
     int metronome_volume = 400;                    // 音量（%。kMaxMetronomeVolume まで）
+    // BGM のセット（bgm の設定を持つ MOD）：名前を付けたセットごとに、選曲・決定の BGM の候補をいくつでも持つ。
+    // 使うセット（bgm_use の名前。空なら使わず、サウンドセットのまま）の候補から、選曲画面に入るたびにランダムに 1 つずつ選ぶ。
+    // 候補は「サウンドセットのパス|#CUSTOMFILE の番号|選んだ名前」（app/bgm_set.h）
+    struct BgmSet {
+        std::string name;
+        std::vector<std::string> select, decide;
+    };
+    std::vector<BgmSet> bgm_sets;
+    std::string bgm_use;
     // GAS で落ちていくゲージの順番。本体のゲージは kGaugeKeys の名前、カスタムゲージは「MOD の id/ゲージの id」
     std::vector<std::string> gas_order;
     std::vector<CustomGaugeDef> gauges;

@@ -291,6 +291,7 @@ bool load_mod_manifest(const std::string& dir, ModManifest& out, std::string* er
     out.script = str(root, "script");
     out.touches = parse_touches(yyjson_obj_get(root, "touches"));
     out.gas = boolean(root, "gas", false);
+    out.chart_attr = boolean(root, "chart_attr", false);
     size_t i, n;
     yyjson_val* v;
     out.lamps = parse_lamps(yyjson_obj_get(root, "lamps"));
@@ -312,14 +313,14 @@ bool load_mod_manifest(const std::string& dir, ModManifest& out, std::string* er
         st.type = str(v, "type");
         st.name = str(v, "name", st.type);
         if (st.type == "gauge_order" || st.type == "gauges" || st.type == "lamps" || st.type == "judges" || st.type == "metronome" ||
-            st.type == "skin_colors")
+            st.type == "skin_colors" || st.type == "bgm")
             out.settings.push_back(st);
     }
     out.judges = parse_judges(yyjson_obj_get(root, "judges"));
     out.skin_colors = parse_skin_colors(yyjson_obj_get(root, "skin_colors"), false);
     yyjson_doc_free(doc);
     // 定義から分かる分類は宣言が無くても足す（カスタムゲージ・GAS は評価、カスタム判定は判定）
-    if (out.metronome) out.touches |= static_cast<uint32_t>(ModTouch::Sound);
+    if (out.metronome || out.has_setting("bgm")) out.touches |= static_cast<uint32_t>(ModTouch::Sound);
     if (!out.skin_colors.empty() || out.has_setting("skin_colors")) out.touches |= static_cast<uint32_t>(ModTouch::Visual);
     if (!out.gauges.empty() || !out.lamps.empty() || out.gas) out.touches |= static_cast<uint32_t>(ModTouch::Evaluation);
     if (!out.judges.empty() || out.has_setting("judges")) out.touches |= static_cast<uint32_t>(ModTouch::Judge);
@@ -397,6 +398,24 @@ void apply_mod_settings(ModManifest& m, const std::string& settings_path) {
             if (st.type == "skin_colors" && yyjson_is_arr(yyjson_obj_get(root, "skin_colors")))
                 m.skin_colors = parse_skin_colors(yyjson_obj_get(root, "skin_colors"), true);
             if (st.type == "metronome") m.metronome_volume = std::clamp(static_cast<int>(num(root, "metronome_volume", m.metronome_volume)), 0, kMaxMetronomeVolume);
+            if (st.type == "bgm") {
+                m.bgm_sets.clear();
+                m.bgm_use = str(root, "bgm_use");
+                size_t i, n;
+                yyjson_val* v;
+                yyjson_arr_foreach(yyjson_obj_get(root, "bgm_sets"), i, n, v) {
+                    if (!yyjson_is_obj(v)) continue;
+                    ModManifest::BgmSet s;
+                    s.name = str(v, "name");
+                    for (auto [key, list] : {std::pair<const char*, std::vector<std::string>*>{"select", &s.select}, {"decide", &s.decide}}) {
+                        size_t j, k;
+                        yyjson_val* e;
+                        yyjson_arr_foreach(yyjson_obj_get(v, key), j, k, e)
+                            if (yyjson_is_str(e)) list->push_back(yyjson_get_str(e));
+                    }
+                    m.bgm_sets.push_back(std::move(s));
+                }
+            }
             if (st.type == "judges" && yyjson_is_arr(yyjson_obj_get(root, "judges"))) {
                 m.judges = parse_judges(yyjson_obj_get(root, "judges"));
                 m.judge_use = str(root, "judge_use");
@@ -449,6 +468,19 @@ std::string mod_settings_json(const ModManifest& m) {
             out += first_lc ? "}" : "\n  }";
         } else if (st.type == "metronome") {
             out += "  \"metronome_volume\": " + std::to_string(m.metronome_volume);
+        } else if (st.type == "bgm") {
+            auto list = [](const std::vector<std::string>& v) {
+                std::string s = "[";
+                for (size_t i = 0; i < v.size(); ++i) s += (i ? ", " : "") + json_str(v[i]);
+                return s + "]";
+            };
+            out += "  \"bgm_use\": " + json_str(m.bgm_use) + ",\n  \"bgm_sets\": [";
+            for (size_t i = 0; i < m.bgm_sets.size(); ++i) {
+                const ModManifest::BgmSet& s = m.bgm_sets[i];
+                out += std::string(i ? ",\n" : "\n") + "    {\"name\": " + json_str(s.name) + ", \"select\": " + list(s.select) +
+                       ", \"decide\": " + list(s.decide) + "}";
+            }
+            out += m.bgm_sets.empty() ? "]" : "\n  ]";
         } else if (st.type == "judges") {
             auto pair = [](const int v[2]) { return "[" + std::to_string(v[0]) + ", " + std::to_string(v[1]) + "]"; };
             out += "  \"judge_use\": " + json_str(m.judge_use) + ",\n  \"judges\": [\n";

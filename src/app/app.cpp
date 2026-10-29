@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "app/bgm_set.h"
 #include "app/skin_catalog.h"
 #include "skin/skin_compose.h"
 #include "audio/system_sound.h"
@@ -93,8 +94,8 @@ bool App::init(const char* argv0) {
     }
     apply_volume();
     apply_sound_fx();
-    load_sound_set();
     load_mods();
+    load_sound_set();
     frame_hooks_install([this] { mixer.play_system(kSysScreenshot); });
     if (!db.open(song_db_path())) std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
     double estimate = mixer.output_latency_us() / 1000.0;
@@ -311,6 +312,29 @@ void App::apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array
         if (n) std::printf("  ほかのスキンから持ってきた部品: %d\n", n);
     }
     if (colored) std::printf("  部品の色を変えた: %d\n", colored);
+}
+
+void App::pick_bgm() {
+    // BGM のセット（MOD）で使うセットがあれば、選曲・決定の BGM をそれぞれの候補からランダムに 1 つずつ選んで替える
+    for (const ModManifest* m : active_mods()) {
+        if (!m->has_setting("bgm") || m->bgm_use.empty()) continue;
+        for (const ModManifest::BgmSet& set : m->bgm_sets) {
+            if (set.name != m->bgm_use) continue;
+            for (const auto& [list, id] : {std::pair<const std::vector<std::string>*, int>{&set.select, kSysSelect}, {&set.decide, kSysDecide}}) {
+                if (list->empty()) continue;
+                const std::string& key = (*list)[std::uniform_int_distribution<size_t>(0, list->size() - 1)(bgm_rng_)];
+                Sample smp;
+                if (load_bgm_choice(lr2_root, cfg, key, id, mixer.sample_rate(), smp)) {
+                    if (cfg.sound_16bit) smp.to_16bit();
+                    mixer.set_system_sound(id, std::move(smp));
+                    std::printf("BGM のセット %s：%s ← %s\n", set.name.c_str(), id == kSysSelect ? "選曲" : "決定", key.c_str());
+                } else {
+                    std::printf("BGM のセットの音を読めない: %s\n", key.c_str());
+                }
+            }
+            return;
+        }
+    }
 }
 
 std::vector<SkinColorFilter> App::skin_colors() const {

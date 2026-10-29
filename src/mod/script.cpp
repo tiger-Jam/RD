@@ -347,9 +347,11 @@ void set_bool(lua_State* L, const char* k, bool v) {
     lua_setfield(L, -2, k);
 }
 
-// 譜面 1 つの表：{ sha256, md5, title, …, clear, exscore, bp, playcount }（記録が無ければ clear = 0）
-void push_chart(lua_State* L, const ChartRecord& c, const std::unordered_map<std::string, ScoreRecord>& scores) {
-    lua_createtable(L, 0, 26);
+// 譜面 1 つの表：{ sha256, md5, title, …, clear, exscore, bp, playcount, last_played }（記録が無ければ clear = 0）。
+// extra があれば、傾向（attr = { code, code2, sub, mask, … }）と難易度表のレベル（tables = { { table, symbol, level, … }, … }）
+void push_chart(lua_State* L, const ChartRecord& c, const std::unordered_map<std::string, ScoreRecord>& scores,
+                const ModChartExtra& extra = {}) {
+    lua_createtable(L, 0, 30);
     set_str(L, "sha256", c.sha256), set_str(L, "md5", c.md5), set_str(L, "path", c.path), set_str(L, "folder", c.folder);
     set_str(L, "title", c.title), set_str(L, "subtitle", c.subtitle), set_str(L, "artist", c.artist);
     set_str(L, "genre", c.genre);
@@ -361,9 +363,34 @@ void push_chart(lua_State* L, const ChartRecord& c, const std::unordered_map<std
     if (it != scores.end()) {
         set_int(L, "clear", it->second.clear), set_int(L, "exscore", it->second.exscore);
         set_int(L, "bp", it->second.bp), set_int(L, "playcount", it->second.playcount);
+        set_int(L, "last_played", it->second.last_played);
     } else {
         set_int(L, "clear", 0);
     }
+    if (extra.attrs)
+        if (auto a = extra.attrs->find(c.sha256); a != extra.attrs->end()) {
+            const ChartAttr& v = a->second;
+            lua_createtable(L, 0, 20);
+            set_int(L, "code", v.attr), set_int(L, "code2", v.attr2), set_int(L, "sub", v.sub), set_int(L, "mask", v.mask);
+            set_int(L, "practice_low", v.practice_low), set_num(L, "conf", v.conf), set_num(L, "grid_bpm", v.grid_bpm);
+            set_num(L, "avg_chord", v.avg_chord), set_num(L, "micro_rate", v.micro_rate), set_num(L, "subgrid_rate", v.subgrid_rate);
+            set_num(L, "avg_density", v.avg_density), set_num(L, "d10", v.d10), set_num(L, "randa_33", v.randa_33);
+            set_num(L, "randa_42", v.randa_42), set_num(L, "randa_51", v.randa_51), set_num(L, "stair_rate", v.stair_rate);
+            set_num(L, "full_rate", v.full_rate), set_num(L, "chart_seconds", v.chart_seconds);
+            lua_setfield(L, -2, "attr");
+        }
+    if (extra.tables)
+        if (auto t = extra.tables->find(c.md5); t != extra.tables->end()) {
+            lua_createtable(L, static_cast<int>(t->second.size()), 0);
+            lua_Integer k = 0;
+            for (const ModTableLevel& tl : t->second) {
+                lua_createtable(L, 0, 5);
+                set_str(L, "table", tl.table), set_str(L, "symbol", tl.symbol), set_str(L, "level", tl.level);
+                set_int(L, "table_order", tl.table_order), set_int(L, "level_order", tl.level_order);
+                lua_rawseti(L, -2, ++k);
+            }
+            lua_setfield(L, -2, "tables");
+        }
 }
 
 std::unique_ptr<ModScript> open_script(const ModManifest& m, const std::string& data_root, std::string& err) {
@@ -372,7 +399,7 @@ std::unique_ptr<ModScript> open_script(const ModManifest& m, const std::string& 
     return s;
 }
 
-// フォルダの表 { title = "…", charts = { sha256 か { sha256 = …, label = … }, … }, keep_order = 真偽, folders = { … } } を読む（深さは 4 まで）
+// フォルダの表 { title = "…", charts = { sha256 か { sha256 = …, label = … }, … }, keep_order = 真偽, folders = { … } } を読む（深さは 6 まで）
 void read_folder(lua_State* L, int idx, ModFolder& out, int depth) {
     idx = lua_absindex(L, idx);
     if (lua_getfield(L, idx, "title") == LUA_TSTRING) out.title = lua_tostring(L, -1);
@@ -399,7 +426,7 @@ void read_folder(lua_State* L, int idx, ModFolder& out, int depth) {
         }
     }
     lua_pop(L, 1);
-    if (depth < 4 && lua_getfield(L, idx, "folders") == LUA_TTABLE) {
+    if (depth < 6 && lua_getfield(L, idx, "folders") == LUA_TTABLE) {
         lua_Integer n = static_cast<lua_Integer>(lua_rawlen(L, -1));
         for (lua_Integer i = 1; i <= n; ++i) {
             if (lua_rawgeti(L, -1, i) == LUA_TTABLE) {
@@ -521,7 +548,7 @@ std::vector<std::string> ModScripts::take_errors() {
 
 std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& mods, const std::vector<ChartRecord>& charts,
                                          const std::unordered_map<std::string, ScoreRecord>& scores,
-                                         const std::string& data_root, std::vector<std::string>* errors) {
+                                         const std::string& data_root, std::vector<std::string>* errors, const ModChartExtra& extra) {
     std::vector<ModFolder> out;
     for (const ModManifest* m : mods) {
         if (m->script.empty() || !(m->touches & static_cast<uint32_t>(ModTouch::Control))) continue;
@@ -536,7 +563,7 @@ std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& 
             lua_createtable(L, static_cast<int>(charts.size()), 0);
             lua_Integer i = 0;
             for (const ChartRecord& c : charts) {
-                push_chart(L, c, scores);
+                push_chart(L, c, scores, m->chart_attr ? extra : ModChartExtra{});
                 lua_rawseti(L, -2, ++i);
             }
         }, kStepsFolders, [&](lua_State* L) {

@@ -8,7 +8,7 @@
 //   folder_bars(folder)   フォルダを開いたとき（「操作」を宣言した MOD だけ。フォルダの名前の下に出すバーを返す）
 //   pick_chart(req)       folder_bars のバーを決定したとき（遊ぶ譜面の sha256 を返す）
 // 使えるのは Lua の base（ファイルを読む関数を除く）・table・string・math・utf8・coroutine と bmj の表だけ。
-// ファイルに書けるのは LR2files/Mods/ModData/<MOD の id>/ の下だけ
+// ファイルに書けるのは LR2files/Player/<ID>/ModData/<MOD の id>/ の下だけ
 #pragma once
 
 #include <array>
@@ -88,7 +88,7 @@ public:
     ModScripts();
     ~ModScripts();
     // スクリプトを持つ MOD を読む。読めなかったものは errors に入り、使わない。
-    // data_root は MOD が書いてよい場所の親（LR2files/Mods/ModData。MOD ごとに <id>/ を切る）
+    // data_root は MOD が書いてよい場所の親（LR2files/Player/<ID>/ModData。MOD ごとに <id>/ を切る）
     void load(const std::vector<const ModManifest*>& mods, const std::string& data_root);
     bool empty() const { return scripts_.empty(); }
     void play_start(const ModPlayInfo& info);
@@ -105,10 +105,22 @@ private:
     std::vector<std::string> errors_;
 };
 
+// 譜面が入っている難易度表のレベル（build_folders の譜面の tables）
+struct ModTableLevel {
+    std::string table, symbol, level;
+    int table_order = 0, level_order = 0;  // 表の並び・表の中のレベルの並び
+};
+// build_folders に渡す、譜面の情報のほかのもの（無ければ渡さない）
+struct ModChartExtra {
+    const std::unordered_map<std::string, ChartAttr>* attrs = nullptr;                   // sha256 → 傾向
+    const std::unordered_map<std::string, std::vector<ModTableLevel>>* tables = nullptr;  // md5 → 難易度表のレベル
+};
+
 // 選曲の一覧を作るときに、「操作」を宣言した MOD の build_folders を呼んでフォルダを作る
 std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& mods, const std::vector<ChartRecord>& charts,
                                          const std::unordered_map<std::string, ScoreRecord>& scores,
-                                         const std::string& data_root, std::vector<std::string>* errors = nullptr);
+                                         const std::string& data_root, std::vector<std::string>* errors = nullptr,
+                                         const ModChartExtra& extra = {});
 
 // フォルダの中の、フォルダの名前の下に出すバー（folder_bars の戻り値。ランダムセレクトなど）
 struct ModBar {

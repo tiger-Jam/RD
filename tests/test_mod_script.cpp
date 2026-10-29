@@ -227,3 +227,54 @@ TEST(mod_script_official_random_select) {
     std::error_code ec;
     fs::remove_all(data, ec);
 }
+
+// 公式の MOD「譜面の傾向」：難易度表 → レベル → 傾向・プレー状況などのフォルダ（中身の無いフォルダは出さない）
+TEST(mod_script_official_constellator) {
+    ModManifest m;
+    CHECK(load_mod_manifest(std::string(BMJ_SOURCE_DIR) + "/mods/constellator", m));
+    CHECK(m.chart_attr);
+    std::vector<ChartRecord> charts(3);
+    const char* ids[] = {"a", "b", "c"};
+    for (int i = 0; i < 3; ++i) charts[i].sha256 = ids[i], charts[i].md5 = std::string("m") + ids[i], charts[i].notes = 1000, charts[i].length_ms = 120000;
+    std::unordered_map<std::string, ScoreRecord> scores;
+    scores["a"].clear = 4, scores["a"].playcount = 3, scores["a"].exscore = 1700, scores["a"].bp = 40, scores["a"].last_played = 1;
+    std::unordered_map<std::string, ChartAttr> attrs;
+    attrs["a"].ok = true, attrs["a"].attr = kAttrRanda, attrs["a"].sub = kSubRandaMid, attrs["a"].mask = 1, attrs["a"].randa_33 = 0.2;
+    attrs["b"].ok = true, attrs["b"].attr = kAttrUde, attrs["b"].sub = kSubUdeNoFull, attrs["b"].mask = 2 | 4;
+    std::unordered_map<std::string, std::vector<ModTableLevel>> tables;
+    for (const char* id : ids) tables[std::string("m") + id] = {{"表", "★", "3", 0, 2}};
+    ModChartExtra extra{&attrs, &tables};
+    fs::path data = fs::temp_directory_path() / "bmj_mod_test_constellator";
+    std::vector<std::string> errors;
+    auto f = build_mod_folders({&m}, charts, scores, data.string(), &errors, extra);
+    CHECK(errors.empty());
+    CHECK_EQ(f.size(), size_t(1));
+    if (f.size() != 1) return;
+    auto find = [](const std::vector<ModFolder>& v, const std::string& t) -> const ModFolder* {
+        for (const ModFolder& x : v)
+            if (x.title == t) return &x;
+        return nullptr;
+    };
+    const ModFolder* table = find(f[0].children, "表");
+    const ModFolder* level = table ? find(table->children, "★3") : nullptr;
+    CHECK(level != nullptr);
+    if (!level) return;
+    CHECK(find(level->children, "すべて") && find(level->children, "すべて")->charts.size() == 3);
+    const ModFolder* trend = find(level->children, "傾向");
+    CHECK(trend && find(trend->children, "16分乱打") && find(trend->children, "腕ガチ") && !find(trend->children, "ディレイ"));
+    if (trend && find(trend->children, "16分乱打")) {
+        const ModFolder* randa = find(trend->children, "16分乱打");
+        CHECK(find(randa->children, "16分乱打 中速乱打") && find(randa->children, "16分乱打 3-3") && !find(randa->children, "16分乱打 高速乱打"));
+    }
+    const ModFolder* comp = find(level->children, "複合");
+    CHECK(comp && find(comp->children, "腕ガチ+指ガチ") && find(comp->children, "腕ガチ+指ガチ")->charts == std::vector<std::string>{"b"});
+    const ModFolder* play = find(level->children, "プレー状況");
+    CHECK(play && find(play->children, "未プレイ") && find(play->children, "未プレイ")->charts == (std::vector<std::string>{"b", "c"}));
+    CHECK(play && find(play->children, "最終プレイから30日以上"));  // 1970 年に遊んだことになっている
+    const ModFolder* clear = find(level->children, "クリア状況");
+    CHECK(clear && find(clear->children, "HARD以上") && find(clear->children, "BP30以上") && !find(clear->children, "BP50以上"));
+    const ModFolder* score = find(level->children, "スコア状況");
+    CHECK(score && find(score->children, "AAA未満") && !find(score->children, "AA未満"));  // 85%
+    std::error_code ec;
+    fs::remove_all(data, ec);
+}

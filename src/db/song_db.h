@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "chart/chart_attr.h"
+
 struct sqlite3;
 
 namespace bmj {
@@ -102,6 +104,7 @@ struct ScanStats {
 class SongDb {
 public:
     ~SongDb();
+    // open は、今のプレイヤー（util/data_dir.h の player_id）の記録 score.db を付けて開く。空なら songs.db に記録を置く
     bool open(const std::string& path);
     void close();
 
@@ -179,6 +182,16 @@ public:
                          const std::function<void(int, int)>& progress = {}, const std::vector<std::string>& roots = {});
     // 仮の記録の譜面を、最大 limit 件だけ実際に読んで置き換える。読んだ数を返す（0 なら残り無し）
     int fill_provisional(int limit, int threads);
+    // まだ傾向を分析していない譜面を、limit 個まで読んで分析する（chart/chart_attr.h）。分析した数を返す（0 なら全部済み）
+    int fill_chart_attrs(int limit, int threads);
+    // 分析できた譜面の傾向（sha256 → 傾向）
+    std::unordered_map<std::string, ChartAttr> chart_attrs() const;
+    // 分析した傾向をファイルに書き出す・ファイルから入れる（配る分析の結果。入れるのは同じ分析の版のものだけで、手元の結果は置き換えない）。
+    // 書いた・入れた譜面の数（失敗は -1）
+    int export_chart_attrs(const std::string& path) const;
+    int import_chart_attrs(const std::string& path);
+    // 配った分析の結果（MOD のフォルダの chart_attr.tsv）を、変わっていれば入れる（大きさで見る）。入れた数（入れなければ 0）
+    int import_chart_attrs_if_changed(const std::string& path, const std::string& key);
     int provisional_count() const;
     // LR2 の曲データベースに、難易度表の管理ツールが書いた難易度表の一覧（playlist 表）があれば、その URL を並び順に返す
     static std::vector<std::string> lr2_table_urls(const std::string& lr2_song_db);
@@ -186,10 +199,12 @@ public:
     bool refresh_chart(const std::string& path);
 
 private:
+    void move_scores_to_player(const std::string& path);
     sqlite3* db_ = nullptr;
 };
 
 // 1つの譜面ファイルを読んで、データベースに入れる内容を作る。DPなど対象外の譜面なら false
-bool make_chart_record(const std::string& path, ChartRecord& out);
+// attr があれば、譜面の傾向も分析する（chart/chart_attr.h）
+bool make_chart_record(const std::string& path, ChartRecord& out, ChartAttr* attr = nullptr);
 
 }  // namespace bmj

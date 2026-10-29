@@ -4,9 +4,11 @@
 #include <filesystem>
 #include <fstream>
 
+#include "app/config.h"
 #include "app/lr2_import.h"
 #include "chart/bmson_parser.h"
 #include "chart/osu_parser.h"
+#include "audio/system_sound.h"
 #include "test.h"
 #include "util/data_dir.h"
 #include "util/hash.h"
@@ -317,4 +319,34 @@ TEST(lr2_settings_and_keyconfig) {
     CHECK(has(kSelect, Binding::Type::JoyButton, 5, 0, 2));  // 2 台目のパッド（297 = 256 + 32 + 9）
     CHECK(k.buttons[kKey1 + 1].empty());  // 書かれていないボタンは空にする（LR2 の割り当てに置き換える）
     fs::remove_all(dir);
+}
+
+// サウンドセットの音を選んでいる #CUSTOMFILE の項目（BGM のセットで、選曲と決定を別々に選ぶのに使う）
+TEST(sound_set_custom_item) {
+    const std::filesystem::path f = std::filesystem::temp_directory_path() / "bmj_ss_item.lr2ss";
+    std::ofstream(f) << "#CUSTOMFILE,SE,LR2files/Sound/se/*,default\n"
+                        "#CUSTOMFILE,BGM,LR2files/Sound/bgm/*,default\n"
+                        "#SELECT,LR2files/Sound/bgm/*/select.wav\n"
+                        "#DECIDE,LR2files/Sound/fixed/decide.wav\n"
+                        "#FOLDER_OPEN,LR2files/Sound/se/*/f_open.wav\n";
+    CHECK_EQ(system_sound_custom_item(f.string(), kSysSelect), 1);
+    CHECK_EQ(system_sound_custom_item(f.string(), kSysDecide), -1);
+    CHECK_EQ(system_sound_custom_item(f.string(), kSysFolderOpen), 0);
+    std::filesystem::remove(f);
+}
+
+// 設定の文字の値（プレイヤーの ID など）は、書いて読めば同じ。前の版が値の後ろに書いた説明は値に入れない
+TEST(config_string_values) {
+    const std::filesystem::path f = std::filesystem::temp_directory_path() / "bmj_cfg_strings.txt";
+    AppConfig a;
+    a.player = "3tzami", a.lr2_player = "ichi";
+    CHECK(a.save(f.string()));
+    AppConfig b;
+    CHECK(b.load(f.string()));
+    CHECK(b.player == "3tzami" && b.lr2_player == "ichi");
+    std::ofstream(f) << "lr2_player =   # 書き出すスコアの名前\nplayer = me  # 今のプレイヤー\n";
+    AppConfig c;
+    CHECK(c.load(f.string()));
+    CHECK(c.lr2_player.empty() && c.player == "me");
+    std::filesystem::remove(f);
 }

@@ -265,7 +265,10 @@ mod.json に書いた値は、最初の中身です。
 持っている譜面の配列です。1 つの譜面には次の値が入っています。
 
 - 譜面の値：`sha256` `md5` `path` `folder` `title` `subtitle` `artist` `genre` `playlevel` `difficulty` `notes` `ln` `rank` `total` `keys` `bpm_min` `bpm_max` `bpm_main` `length_ms` `scratch` `added`
-- 記録の値：`clear` `exscore` `bp` `playcount`（記録が無ければ `clear` は 0）
+- 記録の値：`clear` `exscore` `bp` `playcount` `last_played`（記録が無ければ `clear` は 0）
+- mod.json に `"chart_attr": true` を書いた MOD には、さらに次も入ります（まだ分析していない譜面には `attr` がありません。分析は裏で進み、終わるとフォルダを作り直します）
+  - `attr`：譜面の傾向。`code`（0 判定保留・1 16分乱打・2 腕ガチ・3 指ガチ微縦連・4 ディレイ）、`code2`（二番目）、`sub`（副分類）、`mask`（複合。1 乱打・2 腕・4 指・8 ディレイ）、`practice_low`、`conf`、`grid_bpm` `avg_chord` `micro_rate` `subgrid_rate` `avg_density` `d10` `randa_33` `randa_42` `randa_51` `stair_rate` `full_rate` `chart_seconds`
+  - `tables`：入っている難易度表のレベルの配列。1 つは `{ table, symbol, level, table_order, level_order }`
 
 戻り値はフォルダの配列です。
 

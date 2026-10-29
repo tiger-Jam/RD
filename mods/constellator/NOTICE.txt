@@ -1,0 +1,5 @@
+この MOD と、本体の譜面の傾向の分析（src/chart/chart_attr.cpp）は、oraja-constellator
+（https://github.com/DJHemorrhoid/oraja-constellator、commit 3b142e8）の、
+譜面の特徴量と分類（python/attr_core.py・analysis_packs/official_attribute_rules.json）と、
+常設フォルダーの分け方（filter_packs/official_standard_filters.json）を移したものです。
+ライセンスは LICENSE（MIT License, Copyright (c) 2026 oraja-constellator contributors）のとおりです。

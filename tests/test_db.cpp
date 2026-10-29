@@ -10,6 +10,7 @@
 #include "db/song_db.h"
 #include "test.h"
 #include "sqlite3.h"
+#include "util/data_dir.h"
 #include "util/hash.h"
 
 using namespace bmj;
@@ -458,5 +459,96 @@ TEST(lr2_export) {
     CHECK(one("SELECT clear || ',' || rate || ',' || rank || ',' || failcount || ',' || totalnotes FROM score") == "5,87,7,3,1000");
     CHECK(one("SELECT name || ',' || playcount FROM player") == "me,5");
     sqlite3_close(db);
+    fs::remove_all(dir);
+}
+
+// プレイヤーを分ける：前の songs.db の記録は、最初に開いたプレイヤーの score.db へ移る。別のプレイヤーの記録は別
+TEST(song_db_players) {
+    fs::path dir = fs::temp_directory_path() / "bmj_test_players";
+    fs::remove_all(dir);
+    write(dir / "songs" / "a.bme", "#TITLE A\n#BPM 120\n#00111:0101\n");
+    const std::string songs = (dir / "songs.db").string();
+    {
+        SongDb db;  // プレイヤーを分けていない（前の形）
+        CHECK(db.open(songs));
+        db.scan({(dir / "songs").string()}, 1);
+        db.save_score(db.all_charts()[0].sha256, 4, 3, 1, 2);
+    }
+    const std::string sha = [&] {
+        SongDb db;
+        db.open(songs);
+        return db.all_charts()[0].sha256;
+    }();
+    set_player_id("bmj_test_player_a");
+    fs::remove_all(fs::u8path(player_dir()));
+    {
+        SongDb db;
+        CHECK(db.open(songs));
+        ScoreRecord r;
+        CHECK(db.get_score(sha, r) && r.clear == 4);  // 移った
+        CHECK(fs::exists(fs::u8path(player_dir() + "score.db")));
+        CHECK(fs::exists(songs + ".before-players"));
+        CHECK_EQ(db.own_player_stats().playcount, 1);
+    }
+    const std::string dir_a = player_dir();
+    set_player_id("bmj_test_player_b");
+    fs::remove_all(fs::u8path(player_dir()));
+    {
+        SongDb db;
+        CHECK(db.open(songs));
+        ScoreRecord r;
+        CHECK(!db.get_score(sha, r) || r.clear == 0);  // 別のプレイヤーには記録が無い
+        db.save_score(sha, 2, 1, 5, 1);
+        CHECK(db.get_score(sha, r) && r.clear == 2);
+        CHECK_EQ(db.all_charts().size(), size_t(1));  // 譜面は共通
+    }
+    set_player_id("bmj_test_player_a");
+    {
+        SongDb db;
+        CHECK(db.open(songs));
+        ScoreRecord r;
+        CHECK(db.get_score(sha, r) && r.clear == 4);  // A の記録は A のまま
+    }
+    fs::remove_all(fs::u8path(dir_a));
+    set_player_id("bmj_test_player_b");
+    fs::remove_all(fs::u8path(player_dir()));
+    set_player_id("");
+    fs::remove_all(dir);
+}
+
+// 譜面の傾向：曲フォルダを読むと分析し、書き出したものを別の曲データベースに入れられる（手元の結果は置き換えない）
+TEST(song_db_chart_attr_bundle) {
+    fs::path dir = fs::temp_directory_path() / "bmj_test_attr";
+    fs::remove_all(dir);
+    std::string bms = "#BPM 160\n";
+    static const char* ch[] = {"11", "13", "15", "19", "12", "14", "18"};
+    int k = 0;
+    for (int bar = 1; bar <= 24; ++bar) {
+        std::string lanes[7];
+        for (std::string& l : lanes) l = std::string(32, '0');
+        for (int s = 0; s < 16; ++s, ++k) lanes[k % 7].replace(s * 2, 2, "01");
+        char head[16];
+        for (int c = 0; c < 7; ++c) std::snprintf(head, sizeof(head), "#%03d%s:", bar, ch[c]), bms += head + lanes[c] + "\n";
+    }
+    write(dir / "songs" / "randa.bme", bms);
+    std::string sha;
+    {
+        SongDb db;
+        CHECK(db.open((dir / "a.db").string()));
+        db.scan({(dir / "songs").string()}, 1);
+        sha = db.all_charts()[0].sha256;
+        auto attrs = db.chart_attrs();
+        CHECK(attrs.count(sha) && attrs[sha].attr == kAttrRanda);
+        CHECK_EQ(db.fill_chart_attrs(100, 1), 0);  // 読むときに分析してあるので、残りは無い
+        CHECK_EQ(db.export_chart_attrs((dir / "chart_attr.tsv").string()), 1);
+    }
+    {
+        SongDb db;
+        CHECK(db.open((dir / "b.db").string()));
+        CHECK_EQ(db.import_chart_attrs_if_changed((dir / "chart_attr.tsv").string(), "t"), 1);
+        CHECK_EQ(db.import_chart_attrs_if_changed((dir / "chart_attr.tsv").string(), "t"), 0);  // 変わっていなければ入れ直さない
+        auto attrs = db.chart_attrs();
+        CHECK(attrs.count(sha) && attrs[sha].attr == kAttrRanda && attrs[sha].sub == kSubRandaMid && attrs[sha].grid_bpm > 150);
+    }
     fs::remove_all(dir);
 }

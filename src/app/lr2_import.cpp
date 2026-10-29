@@ -12,6 +12,7 @@
 #include "db/difficulty_table.h"
 #include "db/lr2_export.h"
 #include "sqlite3.h"
+#include "util/data_dir.h"
 #include "util/hash.h"
 #include "util/text.h"
 
@@ -295,6 +296,9 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     std::smatch m;
     static const std::regex id_re("<player>\\s*<id>([^<]*)</id>");
     if (std::regex_search(xml, m, id_re)) res.player = m[1].str();
+    // 今のプレイヤーと同じ ID の LR2 のプレイヤーがいれば、その人を引き継ぐ（LR2 で使っていたプレイヤーでなくても）
+    if (std::error_code ec; !player_id().empty() && fs::exists(root / "Database" / "Score" / fs::u8path(player_id() + ".db"), ec))
+        res.player = player_id();
     if (dirs.empty()) return res.error = "LR2 の設定に曲フォルダが無い", res;
     cfg.song_dirs = dirs;
     if (!res.player.empty()) cfg.lr2_player = res.player;  // LR2 の形で書き出すスコアも同じ名前にする

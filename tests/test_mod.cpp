@@ -58,6 +58,24 @@ TEST(mod_official_manifests) {
             CHECK_EQ(n.metronome_volume, 35);
             std::filesystem::remove(f);
         }
+    // BGM のセット：音に触れる（記録は分けない）。セット（名前と選曲・決定の候補）と使うセットが設定に残る
+    for (ModManifest& m : mods)
+        if (m.id == "bgm-set") {
+            CHECK(m.has_setting("bgm") && (m.touches & static_cast<uint32_t>(ModTouch::Sound)) && !m.affects_play());
+            m.bgm_sets = {{"夜", {"LR2files/Sound/a.lr2ss|0|bgm2", "LR2files/Sound/a.lr2ss|0|bgm3"}, {"LR2files/Sound/b.lr2ss|-1|"}},
+                          {"空", {}, {}}};
+            m.bgm_use = "夜";
+            const std::string f = (std::filesystem::temp_directory_path() / "bmj_bgm.json").string();
+            CHECK(save_mod_settings(m, f));
+            ModManifest n = m;
+            n.bgm_sets.clear(), n.bgm_use.clear();
+            apply_mod_settings(n, f);
+            CHECK(n.bgm_use == "夜" && n.bgm_sets.size() == 2);
+            if (n.bgm_sets.size() == 2)
+                CHECK(n.bgm_sets[0].name == "夜" && n.bgm_sets[0].select == m.bgm_sets[0].select && n.bgm_sets[0].decide == m.bgm_sets[0].decide &&
+                      n.bgm_sets[1].name == "空" && n.bgm_sets[1].select.empty());
+            std::filesystem::remove(f);
+        }
     // カスタム判定：遊ぶ判定を選ぶまでは、判定を変えず記録も分けない
     CHECK(judge->judges.empty() && !judge->affects_play() && play_mod_key({judge}).empty());
     judge->judges = standard_judge_samples();

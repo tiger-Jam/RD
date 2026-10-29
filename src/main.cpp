@@ -86,6 +86,9 @@ struct Options {
     std::string import_lr2_dir;  // LR2 のフォルダ（曲フォルダの登録・曲の情報・スコアをまとめて引き継いで終わる）
     bool copy_assets = false;
     std::string import_lr2_courses;
+    std::string chart_attr_list;
+    bool fill_chart_attrs = false;
+    std::string export_chart_attrs;
     // 持っていない譜面の一覧（難易度表の名前・記号・URL のどれか）。--level で絞る（何度でも）。出したら終わる
     std::string list_missing;
     bool list_all = false;  // --list-charts：持っている譜面も出す
@@ -138,6 +141,9 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--list-charts") o.list_missing = next(), o.list_all = true;
         else if (a == "--skin-parts") o.skin_parts = next();
         else if (a == "--list-owned") o.list_owned = true;
+        else if (a == "--chart-attr") o.chart_attr_list = next();  // 開発用：ファイルの 1 行ずつの譜面を分析して出す
+        else if (a == "--fill-chart-attrs") o.fill_chart_attrs = true;  // まだ傾向を分析していない譜面を全部分析して終わる
+        else if (a == "--export-chart-attrs") o.export_chart_attrs = next();  // 分析した傾向を書き出して終わる（配る分析の結果を作る）
         else if (a == "--serve") o.serve = true;
         else if (a == "--update-tables") o.update_tables = true;
         else if (a == "--rescan") o.rescan = true;
@@ -468,7 +474,7 @@ std::vector<std::string> table_urls_with(const AppConfig& cfg, const std::string
 // プレースキンを部品ごとに切り出す（設定は読むだけで書かない）
 int export_parts(const char* argv0, const Options& opt) {
     AppConfig cfg;
-    cfg.load(config_path());
+    load_config(cfg);
     std::error_code ec;
     const std::string root = find_lr2_root(opt.lr2_root.empty() ? cfg.lr2_root : opt.lr2_root, argv0);
     const std::string path = opt.skin.empty() ? cfg.play_skin : std::filesystem::absolute(opt.skin, ec).string();
@@ -496,7 +502,7 @@ int export_parts(const char* argv0, const Options& opt) {
 int list_missing(const std::string& which, const std::vector<std::string>& levels, const std::string& tables_file, bool all = false) {
     AppConfig cfg;
     migrate_old_data();
-    cfg.load(config_path());
+    load_config(cfg);
     SongDb db;
     if (!db.open(song_db_path())) {
         std::fprintf(stderr, "曲データベースを開けない: %s\n", song_db_path().c_str());
@@ -544,7 +550,7 @@ int list_missing(const std::string& which, const std::vector<std::string>& level
 int serve_charts() {
     AppConfig cfg;
     migrate_old_data();
-    cfg.load(config_path());
+    load_config(cfg);
     if (cfg.serve_key.empty()) {
         std::fprintf(stderr, "合言葉が決まっていないので貸さない（設定の serve_key）\n");
         return 1;
@@ -655,11 +661,54 @@ int main(int argc, char** argv) {
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
     if (opt.serve) return serve_charts();
     if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file, opt.list_all);
+    if (!opt.chart_attr_list.empty()) {
+        // 開発用：譜面の傾向の分析（oraja-constellator と比べるため）。1 行に「パス<TAB>傾向<TAB>二番目<TAB>副分類<TAB>複合<TAB>特徴量…」
+        std::ifstream in(std::filesystem::u8path(opt.chart_attr_list));
+        for (std::string path; std::getline(in, path);) {
+            if (!path.empty() && path.back() == '\r') path.pop_back();
+            ChartRecord r;
+            ChartAttr a;
+            if (!make_chart_record(path, r, &a) || !a.ok) {
+                std::printf("%s\t-\n", path.c_str());
+                continue;
+            }
+            std::printf("%s\t%d\t%d\t%d\t%d\t%.1f\t%.3f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%d\n", path.c_str(), a.attr, a.attr2,
+                        a.sub, a.mask, a.grid_bpm, a.avg_chord, a.chord_ge3, a.micro_rate, a.subgrid_rate, a.randa_33, a.randa_42,
+                        a.randa_51, a.stair_rate, a.total_notes);
+        }
+        return 0;
+    }
     if (!opt.skin_parts.empty()) return export_parts(argv[0], opt);
+    if (!opt.export_chart_attrs.empty()) {
+        AppConfig cfg;
+        load_config(cfg);
+        SongDb db;
+        if (!db.open(song_db_path())) return 1;
+        const int n = db.export_chart_attrs(opt.export_chart_attrs);
+        std::printf("譜面の傾向を書き出した：%d\n", n);
+        return n < 0 ? 1 : 0;
+    }
+    if (opt.fill_chart_attrs) {
+        AppConfig cfg;
+        migrate_old_data();
+        load_config(cfg);
+        SongDb db;
+        if (!db.open(song_db_path())) return 1;
+        const int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
+        const auto t0 = std::chrono::steady_clock::now();
+        int total = 0;
+        for (int n; (n = db.fill_chart_attrs(500, threads)) > 0;) {
+            total += n;
+            if (total % 5000 < n) std::printf("譜面の傾向を分析した：%d\n", total);
+        }
+        std::printf("譜面の傾向の分析を終えた：%d（%.0f 秒）\n", total,
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+        return 0;
+    }
     if (opt.update_tables || opt.rescan) {
         AppConfig cfg;
         migrate_old_data();
-        cfg.load(config_path());
+        load_config(cfg);
         int rc = 0;
         if (opt.update_tables) {
             // 表が何百あっても、同時に取りに行くのは 16 個まで
@@ -747,7 +796,7 @@ int main(int argc, char** argv) {
         App app;
         migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の LR2files へ
         app.cfg_path = config_path();
-        if (app.cfg.load(app.cfg_path)) std::printf("設定: %s\n", app.cfg_path.c_str());
+        if (load_config(app.cfg)) std::printf("設定: %s（プレイヤー %s）\n", app.cfg_path.c_str(), app.cfg.player.c_str());
         // コマンドラインの指定は設定に上書きし、終了時に保存する
         AppConfig& c = app.cfg;
         std::error_code ec;

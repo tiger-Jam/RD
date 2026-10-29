@@ -2,9 +2,11 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
 
 namespace fs = std::filesystem;
 
@@ -106,6 +108,34 @@ std::string from_portable(const std::string& path) {
     std::string abs = (fs::u8path(base) / p).lexically_normal().string();
     // "." のときは末尾の区切りを落とさない（素材のフォルダは区切りまでで覚えている）
     return abs;
+}
+
+namespace {
+std::string g_player;
+}  // namespace
+
+const std::string& player_id() { return g_player; }
+void set_player_id(const std::string& id) { g_player = id; }
+
+std::string player_dir() { return data_dir() + "Player/" + g_player + "/"; }
+
+std::vector<std::string> list_players() {
+    std::vector<std::string> out;
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(fs::u8path(data_dir() + "Player"), ec))
+        if (e.is_directory(ec)) {
+            const auto u8 = e.path().filename().u8string();  // ID は UTF-8 で持つ
+            out.emplace_back(u8.begin(), u8.end());
+        }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+bool valid_player_id(const std::string& id) {
+    if (id.empty() || id.size() > 64 || id == "." || id == "..") return false;
+    for (unsigned char c : id)
+        if (c < 0x20 || std::string_view("\\/:*?\"<>|").find(static_cast<char>(c)) != std::string_view::npos) return false;
+    return id.front() != ' ' && id.back() != ' ' && id.back() != '.';
 }
 
 }  // namespace bmj

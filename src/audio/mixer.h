@@ -71,6 +71,14 @@ public:
         }
         sys_samples_ = std::move(sounds);
     }
+    // システム音を 1 つだけ替える（その音を止め、コールバックが止めたのを待ってから）
+    void set_system_sound(int id, Sample sound) {
+        if (id < 0 || id >= static_cast<int>(sys_samples_.size())) return;
+        stop_system(id);
+        wait_callback();
+        wait_callback();
+        sys_samples_[id] = std::move(sound);
+    }
     void play_system(int id, bool loop = false) { push_command(kSysBase + id + (loop ? kSysLoop : 0)); }
     void stop_system(int id) { push_command(kSysBase + id + kSysStop); }
     // 音量（LR2: volumeflag / master / key / bgm。0〜100）。on が false なら音量の設定を使わない（全部 100）。

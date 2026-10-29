@@ -6,6 +6,7 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <random>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -46,6 +47,7 @@ struct App {
     SongDb db;
     KeyConfig keycfg = KeyConfig::lr2_default();
     AppConfig cfg;
+    std::mt19937 bgm_rng_{std::random_device{}()};  // BGM のセットの選び方
     std::string cfg_path;
     std::string lr2_root;  // 実際に使うLR2のフォルダ（見つからなければ空）
     std::unique_ptr<Lr2Skin> play_skin, result_skin, select_skin, decide_skin, courseresult_skin;
@@ -97,6 +99,8 @@ struct App {
     bool init(const char* argv0);
     // プレイスキンを読む。options はスキン読み込み時の #IF の判定に使う値
     void load_sound_set();
+    // BGM のセット（MOD）の候補から、選曲・決定の BGM を選び直す（選曲画面に入るたび）
+    void pick_bgm();
     void load_play_skin(const std::array<bool, 1000>& options);
     void load_result_skin(const std::array<bool, 1000>& options);
     void load_courseresult_skin(const std::array<bool, 1000>& options);
@@ -108,7 +112,7 @@ struct App {
     // 描画の論理解像度を変える。resize_window ならウィンドウの大きさも合わせる
     void set_view(int w, int h, bool resize_window = true);
     void window_size(int skin_w, int skin_h, int& w, int& h) const;
-    void save_config() const { cfg.save(cfg_path); }
+    void save_config() const { bmj::save_config(cfg); }
     // フルスクリーンとウインドウを切り替え、次の起動もその状態で始める
     void toggle_fullscreen();
     // 設定の音量をミキサーに渡す（スライダーで変えたときも呼ぶ）

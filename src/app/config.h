@@ -2,6 +2,7 @@
 #pragma once
 
 #include <map>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@ struct SkinCustomChoice {
 };
 
 struct AppConfig {
+    std::string player;            // 今のプレイヤーの ID（LR2files/Player/<ID>。共通の設定に書く）
     std::string lr2_root;          // LR2のフォルダ（LR2files があるところ）
     // 外部ツールのために、LR2 の形の曲データベースとスコアを LR2files/Database に書き出すか
     bool lr2_export = false;
@@ -140,12 +142,26 @@ struct AppConfig {
     std::string borrow_url, borrow_key;
     int borrow_cache_mb = 20480;
 
+    // 1 つのファイルを読む・書く（ふつうは load_config・save_config で、共通の設定とプレイヤーの設定を分けて読み書きする）
     bool load(const std::string& path);
     bool save(const std::string& path) const;
+    void write(std::ostream& f) const;
 };
 
-// 設定ファイルの置き場所（macOS なら ~/Library/Application Support/BMjoy/config.txt）
+// 全員で共通の設定ファイル（LR2files/Config/config.txt）
 std::string config_path();
+// 設定を読む：共通の設定（config.txt）から今のプレイヤーを決め（util/data_dir.h の set_player_id）、プレイヤーの設定を重ねる。
+// プレイヤーがまだいなければ最初のプレイヤーを作り、前の置き場のキーコンフィグ・リプレイ・MOD のファイルを移す。共通の設定があれば true
+// player を渡すと、共通の設定に書いたプレイヤーではなくその人の設定を読む（切り替え。cfg は新しいものを渡す）
+bool load_config(AppConfig& cfg, const std::string& player = {});
+// 設定を書く：鍵ごとに、共通の設定とプレイヤーの設定に分けて書く
+bool save_config(const AppConfig& cfg);
+// プレイヤーを作る（copy_from のプレイヤーの設定とキーコンフィグを写す。空なら写さない）・消す
+bool create_player(const std::string& id, const std::string& copy_from, std::string* error = nullptr);
+bool delete_player(const std::string& id, std::string* error = nullptr);
+// プレイヤーごとの設定と記録（LR2files/Player/<ID>/config.txt・score.db）
+std::string player_config_path();
+std::string player_score_db_path();
 
 // config.txt の skin_custom の値（"2,\"name\",0" の形）を読む・書く
 std::vector<SkinCustomChoice> parse_skin_custom(const std::string& val);
@@ -166,10 +182,10 @@ std::string replay_path(const std::string& sha256);
 // 全プレーの入力の記録（LR2files/Replay/InputLog/<sha256>/<日時>.bjr）
 std::string input_log_path(const std::string& sha256, int64_t played_at);
 // MOD の置き場所：公式（実行ファイルの横の mods/）。自分で入れる MOD は今は読まない。
-// MOD が書いてよいのは LR2files/Mods/ModData/<MOD の id>/ だけ
+// MOD が書いてよいのは LR2files/Player/<ID>/ModData/<MOD の id>/ だけ
 std::string official_mods_dir();
 std::string mod_data_dir(const std::string& id);
-// MOD の詳細の設定（LR2files/Mods/ModData/<MOD の id>/settings.json）
+// MOD の詳細の設定（LR2files/Player/<ID>/ModData/<MOD の id>/settings.json）
 std::string mod_settings_path(const std::string& id);
 // ゲージで「GAS」を選んだときの custom_gauge の値（カスタムゲージの鍵は「MOD/ゲージ」なので重ならない）
 inline constexpr const char* kGasKey = "gas";

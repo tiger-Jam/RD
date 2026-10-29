@@ -277,6 +277,6 @@ bool KeyConfig::save(const std::string& path) const {
     return static_cast<bool>(f);
 }
 
-std::string keyconfig_path() { return data_dir() + "Config/keyconfig.txt"; }
+std::string keyconfig_path() { return player_id().empty() ? data_dir() + "Config/keyconfig.txt" : player_dir() + "keyconfig.txt"; }
 
 }  // namespace bmj

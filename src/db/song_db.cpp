@@ -13,9 +13,11 @@
 #include <unordered_map>
 
 #include "chart/bms_parser.h"
+#include "chart/chart_attr.h"
 #include "chart/chart_loader.h"
 #include "game/lane_option.h"
 #include "sqlite3.h"
+#include "util/data_dir.h"
 #include "util/hash.h"
 #include "util/text.h"
 
@@ -46,43 +48,78 @@ CREATE INDEX IF NOT EXISTS chart_folder ON chart(folder);
 CREATE TABLE IF NOT EXISTS skipped(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);
 CREATE TABLE IF NOT EXISTS chart_added(path TEXT PRIMARY KEY, added INTEGER);
 CREATE TABLE IF NOT EXISTS favorite(md5 TEXT PRIMARY KEY, value INTEGER);
-CREATE TABLE IF NOT EXISTS mod_set(id INTEGER PRIMARY KEY, key TEXT UNIQUE);
-CREATE TABLE IF NOT EXISTS play_log(
+CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER);
+CREATE TABLE IF NOT EXISTS chart_attr(
+    sha256 TEXT PRIMARY KEY, version INTEGER, ok INTEGER, attr INTEGER, attr2 INTEGER, sub INTEGER, mask INTEGER, practice_low INTEGER,
+    conf REAL, total_notes INTEGER, grid_bpm REAL, avg_chord REAL, chord_ge3 REAL, micro_rate REAL, long_jack_rate REAL,
+    subgrid_rate REAL, ongrid_rate REAL, stream_sec REAL, d2 REAL, d10 REAL, d20 REAL, avg_density REAL, last_kill REAL,
+    recovery_sec REAL, chart_seconds REAL, full_rate REAL, full_alt_rate REAL, micro_thin REAL, micro_chord REAL, micro_full REAL,
+    tail_grid_bpm REAL, tail_chord REAL, tail_sub REAL, randa_33 REAL, randa_42 REAL, randa_51 REAL, stair_rate REAL);
+)SQL";
+
+// 譜面の傾向の数の欄（chart_attr の欄と ChartAttr の値。並びは表の欄の順）
+struct AttrColumn {
+    const char* name;
+    double ChartAttr::*value;
+};
+const AttrColumn kAttrColumns[] = {
+    {"conf", &ChartAttr::conf}, {"grid_bpm", &ChartAttr::grid_bpm}, {"avg_chord", &ChartAttr::avg_chord},
+    {"chord_ge3", &ChartAttr::chord_ge3}, {"micro_rate", &ChartAttr::micro_rate}, {"long_jack_rate", &ChartAttr::long_jack_rate},
+    {"subgrid_rate", &ChartAttr::subgrid_rate}, {"ongrid_rate", &ChartAttr::ongrid_rate}, {"stream_sec", &ChartAttr::stream_sec},
+    {"d2", &ChartAttr::d2}, {"d10", &ChartAttr::d10}, {"d20", &ChartAttr::d20}, {"avg_density", &ChartAttr::avg_density},
+    {"last_kill", &ChartAttr::last_kill}, {"recovery_sec", &ChartAttr::recovery_sec}, {"chart_seconds", &ChartAttr::chart_seconds},
+    {"full_rate", &ChartAttr::full_rate}, {"full_alt_rate", &ChartAttr::full_alt_rate}, {"micro_thin", &ChartAttr::micro_thin},
+    {"micro_chord", &ChartAttr::micro_chord}, {"micro_full", &ChartAttr::micro_full}, {"tail_grid_bpm", &ChartAttr::tail_grid_bpm},
+    {"tail_chord", &ChartAttr::tail_chord}, {"tail_sub", &ChartAttr::tail_sub}, {"randa_33", &ChartAttr::randa_33},
+    {"randa_42", &ChartAttr::randa_42}, {"randa_51", &ChartAttr::randa_51}, {"stair_rate", &ChartAttr::stair_rate},
+};
+
+std::string insert_attr_sql() {
+    std::string cols = "sha256, version, ok, attr, attr2, sub, mask, practice_low, total_notes", marks = "?,?,?,?,?,?,?,?,?";
+    for (const AttrColumn& c : kAttrColumns) cols += std::string(", ") + c.name, marks += ",?";
+    return "INSERT OR REPLACE INTO chart_attr(" + cols + ") VALUES(" + marks + ")";
+}
+
+// プレイヤーごとの記録の表。プレイヤーを分けているときは、プレイヤーの score.db（p）に作る（{P} が「p.」になる）
+const char* kScoreSchema = R"SQL(
+CREATE TABLE IF NOT EXISTS {P}mod_set(id INTEGER PRIMARY KEY, key TEXT UNIQUE);
+CREATE TABLE IF NOT EXISTS {P}play_log(
     sha256 TEXT, played_at INTEGER, kind TEXT, rate REAL,
     clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     pg INTEGER, gr INTEGER, gd INTEGER, bd INTEGER, pr INTEGER, op_history INTEGER, rseed INTEGER, op_best INTEGER, ghost TEXT);
-CREATE TABLE IF NOT EXISTS play(
+CREATE TABLE IF NOT EXISTS {P}play(
     id INTEGER PRIMARY KEY, sha256 TEXT, played_at INTEGER, kind TEXT, rate REAL, ln_mode INTEGER, profile INTEGER,
     gauge TEXT, clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     pg INTEGER, gr INTEGER, gd INTEGER, bd INTEGER, pr INTEGER, fast INTEGER, slow INTEGER,
     offset_count INTEGER, offset_mean REAL, offset_sd REAL, gauges TEXT,
     op_history INTEGER, rseed INTEGER, op_best INTEGER, ghost TEXT, input_log TEXT);
-CREATE INDEX IF NOT EXISTS play_sha ON play(sha256);
-CREATE TABLE IF NOT EXISTS custom_lamp(
+CREATE INDEX IF NOT EXISTS {P}play_sha ON play(sha256);
+CREATE TABLE IF NOT EXISTS {P}custom_lamp(
     sha256 TEXT, ln_mode INTEGER, profile INTEGER, gauge TEXT, lamp INTEGER,
     PRIMARY KEY(sha256, ln_mode, profile, gauge));
-CREATE TABLE IF NOT EXISTS lr2_score(
+CREATE TABLE IF NOT EXISTS {P}lr2_score(
     md5 TEXT PRIMARY KEY, clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     playcount INTEGER, clearcount INTEGER,
     pg INTEGER DEFAULT 0, gr INTEGER DEFAULT 0, gd INTEGER DEFAULT 0, bd INTEGER DEFAULT 0, pr INTEGER DEFAULT 0,
     op_history INTEGER DEFAULT 0, rseed INTEGER DEFAULT -1, op_best INTEGER DEFAULT 0, ghost TEXT);
-CREATE TABLE IF NOT EXISTS score(
+CREATE TABLE IF NOT EXISTS {P}score(
     sha256 TEXT, ln_mode INTEGER, judge_profile INTEGER,
     clear INTEGER, exscore INTEGER, bp INTEGER, max_combo INTEGER,
     playcount INTEGER, clearcount INTEGER, last_played INTEGER,
     pg INTEGER DEFAULT 0, gr INTEGER DEFAULT 0, gd INTEGER DEFAULT 0, bd INTEGER DEFAULT 0, pr INTEGER DEFAULT 0,
     op_history INTEGER DEFAULT 0, rseed INTEGER DEFAULT -1, op_best INTEGER DEFAULT 0, ghost TEXT,
     PRIMARY KEY(sha256, ln_mode, judge_profile));
-CREATE TABLE IF NOT EXISTS saved_random(
+CREATE TABLE IF NOT EXISTS {P}saved_random(
     id INTEGER PRIMARY KEY, sha256 TEXT, random INTEGER, seed INTEGER, version INTEGER, saved_at INTEGER, used INTEGER DEFAULT 0);
-CREATE INDEX IF NOT EXISTS saved_random_sha ON saved_random(sha256);
-CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER);
-CREATE TABLE IF NOT EXISTS player(
+CREATE INDEX IF NOT EXISTS {P}saved_random_sha ON saved_random(sha256);
+CREATE TABLE IF NOT EXISTS {P}player(
     id INTEGER PRIMARY KEY, playcount INTEGER, clear INTEGER, fail INTEGER,
     pg INTEGER, gr INTEGER, gd INTEGER, bd INTEGER, pr INTEGER);
-CREATE TABLE IF NOT EXISTS lr2_player(name TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS lr2_course_key(key TEXT PRIMARY KEY, lr2 TEXT);
+CREATE TABLE IF NOT EXISTS {P}lr2_player(name TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS {P}lr2_course_key(key TEXT PRIMARY KEY, lr2 TEXT);
 )SQL";
+// 記録の表の名前（共通の songs.db からプレイヤーの score.db へ移すときに使う）
+const char* const kScoreTables[] = {"mod_set", "play_log", "play", "custom_lamp", "lr2_score", "score", "saved_random", "player", "lr2_player", "lr2_course_key"};
 
 bool is_chart_file(const fs::path& p) {
     std::string e = to_upper_ascii(p.extension().string());
@@ -171,7 +208,7 @@ const char* kChartColumns =
 }  // namespace
 
 
-bool make_chart_record(const std::string& path, ChartRecord& r) {
+bool make_chart_record(const std::string& path, ChartRecord& r, ChartAttr* attr) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
     std::string bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -217,6 +254,7 @@ bool make_chart_record(const std::string& path, ChartRecord& r) {
     r.banner = c.meta.banner;
     r.stagefile = c.meta.stagefile;
     r.backbmp = c.meta.backbmp;
+    if (attr) *attr = res.double_play ? ChartAttr{} : analyze_chart_attr(c);  // 譜面の傾向（SP の譜面だけ）
     return true;
 }
 
@@ -257,6 +295,26 @@ bool SongDb::open(const std::string& path) {
     char* err = nullptr;
     if (sqlite3_exec(db_, kSchema, nullptr, nullptr, &err) != SQLITE_OK) {
         std::fprintf(stderr, "曲データベースを作れない: %s\n", err ? err : "?");
+        sqlite3_free(err);
+        return false;
+    }
+    // 記録はプレイヤーごとの score.db（p として付ける。表の名前はどちらにあっても同じに書ける）。プレイヤーを分けていなければ songs.db に置く
+    std::string score_schema = kScoreSchema;
+    const bool per_player = !player_id().empty();
+    for (size_t at; (at = score_schema.find("{P}")) != std::string::npos;) score_schema.replace(at, 3, per_player ? "p." : "");
+    if (per_player) {
+        std::error_code ec;
+        fs::create_directories(fs::u8path(player_dir()), ec);
+        Stmt attach(db_, "ATTACH DATABASE ? AS p");
+        attach.text(1, player_dir() + "score.db");
+        if (sqlite3_step(attach.s) != SQLITE_DONE) {
+            std::fprintf(stderr, "プレイヤーの記録を開けない: %s\n", sqlite3_errmsg(db_));
+            return false;
+        }
+        sqlite3_exec(db_, "PRAGMA p.journal_mode=WAL;", nullptr, nullptr, nullptr);
+    }
+    if (sqlite3_exec(db_, score_schema.c_str(), nullptr, nullptr, &err) != SQLITE_OK) {
+        std::fprintf(stderr, "プレイヤーの記録を作れない: %s\n", err ? err : "?");
         sqlite3_free(err);
         return false;
     }
@@ -352,7 +410,61 @@ bool SongDb::open(const std::string& path) {
                  "UPDATE OR REPLACE custom_lamp SET gauge = 'exhard/exhard' WHERE gauge = 'custom-gauge/exhard';"
                  "UPDATE OR REPLACE custom_lamp SET gauge = 'assist-easy/assist-easy' WHERE gauge = 'custom-gauge/assist-easy';",
                  nullptr, nullptr, nullptr);
+    if (per_player) move_scores_to_player(path);
     return true;
+}
+
+// プレイヤーを分ける前の songs.db にある記録を、今のプレイヤーの score.db へ移す（1 回だけ。移す前に songs.db の写しを取る）
+void SongDb::move_scores_to_player(const std::string& path) {
+    auto has_main = [&](const char* table) {
+        Stmt st(db_, "SELECT 1 FROM main.sqlite_master WHERE type = 'table' AND name = ?");
+        st.text(1, table);
+        return st.step();
+    };
+    if (!has_main("score")) return;
+    sqlite3_exec(db_, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
+    if (!has_main("score")) {  // ほかの接続が先に移した
+        sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+        return;
+    }
+    int64_t already = 0;
+    {
+        Stmt st(db_, "SELECT count(*) FROM p.score");
+        if (st.step()) already = st.col_i64(0);
+    }
+    if (already > 0) {  // プレイヤーの側にもう記録がある：移さない（songs.db の記録は残す）
+        sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+        std::fprintf(stderr, "songs.db に前の記録が残っているが、プレイヤーの記録がもうあるので移さない\n");
+        return;
+    }
+    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+    {
+        Stmt bk(db_, "VACUUM main INTO ?");
+        bk.text(1, path + ".before-players");
+        sqlite3_step(bk.s);
+    }
+    sqlite3_exec(db_, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr);
+    int moved = 0;
+    for (const char* table : kScoreTables) {
+        if (!has_main(table)) continue;
+        // 両方にある欄だけを写す（古い songs.db は欄が少ないことがある）
+        std::vector<std::string> mine, theirs;
+        {
+            Stmt st(db_, (std::string("PRAGMA main.table_info(") + table + ")").c_str());
+            while (st.step()) mine.push_back(st.col_text(1));
+            Stmt pt(db_, (std::string("PRAGMA p.table_info(") + table + ")").c_str());
+            while (pt.step()) theirs.push_back(pt.col_text(1));
+        }
+        std::string cols;
+        for (const std::string& c : mine)
+            if (std::find(theirs.begin(), theirs.end(), c) != theirs.end()) cols += (cols.empty() ? "\"" : ",\"") + c + "\"";
+        const std::string sql = "INSERT OR REPLACE INTO p." + std::string(table) + "(" + cols + ") SELECT " + cols + " FROM main." + table +
+                                "; DROP TABLE main." + table + ";";
+        if (!cols.empty() && sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK) ++moved;
+    }
+    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+    std::printf("前の記録をプレイヤー %s へ移した（表 %d。移す前の songs.db は %s）\n", player_id().c_str(), moved,
+                (path + ".before-players").c_str());
 }
 
 void SongDb::close() {
@@ -369,6 +481,15 @@ void put_chart(Stmt& ins, const ChartRecord& r) {
         .dbl(18, r.bpm_main).i64(19, r.length_ms).i64(20, r.scratch).i64(21, r.mtime).i64(22, r.size)
         .text(23, r.banner).text(24, r.stagefile).text(25, r.backbmp).i64(26, r.ln_free).i64(27, r.keys);
     ins.run();
+}
+
+// 譜面の傾向を書く（分析できなかった譜面も、分析したしるしとして ok = 0 で残す）
+void put_attr(Stmt& st, const std::string& sha256, const ChartAttr& a) {
+    st.text(1, sha256).i64(2, kChartAttrVersion).i64(3, a.ok ? 1 : 0).i64(4, a.attr).i64(5, a.attr2).i64(6, a.sub).i64(7, a.mask)
+        .i64(8, a.practice_low).i64(9, a.total_notes);
+    int k = 10;
+    for (const AttrColumn& c : kAttrColumns) st.dbl(k++, a.*(c.value));
+    st.run();
 }
 std::string insert_chart_sql() {
     return std::string("INSERT OR REPLACE INTO chart(") + kChartColumns + ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
@@ -462,6 +583,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
 
     // 3. 変わったファイルだけを並列にパースする
     std::vector<ChartRecord> records(to_parse.size());
+    std::vector<ChartAttr> attrs(to_parse.size());
     std::vector<char> ok(to_parse.size(), 0);
     std::atomic<size_t> next{0};
     std::atomic<int> done{0};
@@ -469,7 +591,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
         for (;;) {
             size_t i = next.fetch_add(1);
             if (i >= to_parse.size()) break;
-            ok[i] = make_chart_record(to_parse[i], records[i]);
+            ok[i] = make_chart_record(to_parse[i], records[i], &attrs[i]);
             if (ok[i]) {
                 const FileInfo& fi = on_disk[to_parse[i]];
                 records[i].mtime = fi.mtime;
@@ -498,6 +620,8 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
         Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
         Stmt unskip(db_, "DELETE FROM skipped WHERE path = ?");
         Stmt added(db_, "INSERT OR IGNORE INTO chart_added(path, added) VALUES(?, ?)");
+        std::string attr_sql = insert_attr_sql();
+        Stmt attr(db_, attr_sql.c_str());
         const int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         for (size_t i = 0; i < records.size(); ++i) {
             if (!ok[i]) {
@@ -510,6 +634,7 @@ ScanStats SongDb::scan(const std::vector<std::string>& dirs, int threads,
             }
             unskip.text(1, to_parse[i]).run();
             put_chart(ins, records[i]);
+            put_attr(attr, records[i].sha256, attrs[i]);
             if (!in_db.count(to_parse[i])) added.text(1, to_parse[i]).i64(2, now).run();
         }
         Stmt unadd(db_, "DELETE FROM chart_added WHERE path = ?");
@@ -1135,13 +1260,14 @@ int SongDb::fill_provisional(int limit, int threads) {
         while (st.step()) paths.push_back({st.col_text(0), {st.col_i64(1), st.col_i64(2)}});
     }
     std::vector<ChartRecord> recs(paths.size());
+    std::vector<ChartAttr> attrs(paths.size());
     std::vector<char> ok(paths.size(), 0);
     std::atomic<size_t> next{0};
     auto worker = [&] {
         for (;;) {
             size_t i = next.fetch_add(1);
             if (i >= paths.size()) return;
-            ok[i] = make_chart_record(paths[i].first, recs[i]);
+            ok[i] = make_chart_record(paths[i].first, recs[i], &attrs[i]);
             recs[i].mtime = paths[i].second.first;
             recs[i].size = paths[i].second.second;
         }
@@ -1157,9 +1283,12 @@ int SongDb::fill_provisional(int limit, int threads) {
         Stmt ins(db_, sql.c_str());
         Stmt del(db_, "DELETE FROM chart WHERE path = ?");
         Stmt skip(db_, "INSERT OR REPLACE INTO skipped(path, mtime, size) VALUES(?,?,?)");
+        std::string attr_sql = insert_attr_sql();
+        Stmt attr(db_, attr_sql.c_str());
         for (size_t i = 0; i < paths.size(); ++i) {
             if (ok[i]) {
                 put_chart(ins, recs[i]);
+                put_attr(attr, recs[i].sha256, attrs[i]);
             } else {
                 // 読めない譜面は一覧から外し、変わるまで読み直さない
                 del.text(1, paths[i].first).run();
@@ -1169,6 +1298,133 @@ int SongDb::fill_provisional(int limit, int threads) {
     }
     sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
     return static_cast<int>(paths.size());
+}
+
+int SongDb::fill_chart_attrs(int limit, int threads) {
+    if (!db_) return 0;
+    // まだ分析していない（か、分析の版が古い）SP の譜面。同じ譜面がいくつあっても 1 回
+    std::vector<std::pair<std::string, std::string>> todo;  // sha256・パス
+    {
+        Stmt st(db_, "SELECT c.sha256, MIN(c.path) FROM chart c LEFT JOIN chart_attr a ON a.sha256 = c.sha256 "
+                     "WHERE c.keys < 10 AND c.sha256 NOT LIKE 'md5:%' AND (a.sha256 IS NULL OR a.version < ?) GROUP BY c.sha256 LIMIT ?");
+        st.i64(1, kChartAttrVersion).i64(2, limit);
+        while (st.step()) todo.push_back({st.col_text(0), st.col_text(1)});
+    }
+    std::vector<ChartAttr> attrs(todo.size());
+    std::atomic<size_t> next{0};
+    auto worker = [&] {
+        for (size_t i; (i = next.fetch_add(1)) < todo.size();) {
+            ChartRecord r;
+            if (!make_chart_record(todo[i].second, r, &attrs[i])) attrs[i] = ChartAttr{};
+        }
+    };
+    {
+        std::vector<std::thread> pool;
+        for (int t = 0; t < std::max(1, threads); ++t) pool.emplace_back(worker);
+        for (auto& th : pool) th.join();
+    }
+    sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
+    {
+        std::string sql = insert_attr_sql();
+        Stmt attr(db_, sql.c_str());
+        for (size_t i = 0; i < todo.size(); ++i) put_attr(attr, todo[i].first, attrs[i]);
+    }
+    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+    return static_cast<int>(todo.size());
+}
+
+// 傾向のファイル：1 行目は「# BMjoy chart_attr <分析の版>」。2 行目から「sha256 ok 傾向 二番目 副分類 複合 練習 ノーツ数 数の欄…」（タブ区切り）
+int SongDb::export_chart_attrs(const std::string& path) const {
+    if (!db_) return -1;
+    std::ofstream f(fs::u8path(path), std::ios::binary | std::ios::trunc);
+    if (!f) return -1;
+    f << "# BMjoy chart_attr " << kChartAttrVersion << "\n";
+    std::string sql = "SELECT sha256, ok, attr, attr2, sub, mask, practice_low, total_notes";
+    for (const AttrColumn& c : kAttrColumns) sql += std::string(", ") + c.name;
+    sql += " FROM chart_attr WHERE version = ? ORDER BY sha256";
+    Stmt st(db_, sql.c_str());
+    st.i64(1, kChartAttrVersion);
+    int n = 0;
+    char buf[32];
+    while (st.step()) {
+        f << st.col_text(0);
+        for (int k = 1; k <= 7; ++k) f << '\t' << st.col_i64(k);
+        for (size_t k = 0; k < std::size(kAttrColumns); ++k) {
+            std::snprintf(buf, sizeof(buf), "%.6g", sqlite3_column_double(st.s, 8 + static_cast<int>(k)));
+            f << '\t' << buf;
+        }
+        f << '\n';
+        ++n;
+    }
+    return f ? n : -1;
+}
+
+int SongDb::import_chart_attrs(const std::string& path) {
+    if (!db_) return -1;
+    std::ifstream f(fs::u8path(path), std::ios::binary);
+    std::string line;
+    if (!f || !std::getline(f, line) || line != "# BMjoy chart_attr " + std::to_string(kChartAttrVersion)) return -1;  // 版が違うものは使わない
+    sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
+    int n = 0;
+    {
+        // 手元で分析したものは置き換えない
+        std::string sql = insert_attr_sql();
+        sql.replace(0, std::string("INSERT OR REPLACE").size(), "INSERT OR IGNORE");
+        Stmt st(db_, sql.c_str());
+        std::vector<std::string> cols;
+        while (std::getline(f, line)) {
+            cols.clear();
+            for (size_t i = 0, j; i <= line.size(); i = j + 1) {
+                j = line.find('\t', i);
+                if (j == std::string::npos) j = line.size();
+                cols.push_back(line.substr(i, j - i));
+            }
+            if (cols.size() != 8 + std::size(kAttrColumns) || cols[0].size() != 64) continue;
+            st.text(1, cols[0]).i64(2, kChartAttrVersion);
+            for (int k = 1; k <= 7; ++k) st.i64(k + 2, std::atoll(cols[k].c_str()));
+            for (size_t k = 0; k < std::size(kAttrColumns); ++k) st.dbl(10 + static_cast<int>(k), std::atof(cols[8 + k].c_str()));
+            st.run();
+            ++n;
+        }
+    }
+    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+    return n;
+}
+
+int SongDb::import_chart_attrs_if_changed(const std::string& path, const std::string& key) {
+    std::error_code ec;
+    const int64_t size = static_cast<int64_t>(fs::file_size(fs::u8path(path), ec));
+    if (ec || !db_) return 0;
+    const std::string k = "chart_attr_bundle:" + key + ":" + std::to_string(kChartAttrVersion);
+    {
+        Stmt get(db_, "SELECT value FROM meta WHERE key = ?");
+        get.text(1, k);
+        if (get.step() && get.col_i64(0) == size) return 0;
+    }
+    const int n = import_chart_attrs(path);
+    if (n >= 0) {
+        Stmt put(db_, "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)");
+        put.text(1, k).i64(2, size).run();
+    }
+    return std::max(n, 0);
+}
+
+std::unordered_map<std::string, ChartAttr> SongDb::chart_attrs() const {
+    std::unordered_map<std::string, ChartAttr> out;
+    if (!db_) return out;
+    std::string sql = "SELECT sha256, attr, attr2, sub, mask, practice_low, total_notes";
+    for (const AttrColumn& c : kAttrColumns) sql += std::string(", ") + c.name;
+    sql += " FROM chart_attr WHERE ok = 1";
+    Stmt st(db_, sql.c_str());
+    while (st.step()) {
+        ChartAttr& a = out[st.col_text(0)];
+        a.ok = true;
+        a.attr = static_cast<int>(st.col_i64(1)), a.attr2 = static_cast<int>(st.col_i64(2)), a.sub = static_cast<int>(st.col_i64(3));
+        a.mask = static_cast<int>(st.col_i64(4)), a.practice_low = static_cast<int>(st.col_i64(5)), a.total_notes = static_cast<int>(st.col_i64(6));
+        int k = 7;
+        for (const AttrColumn& c : kAttrColumns) a.*(c.value) = sqlite3_column_double(st.s, k++);
+    }
+    return out;
 }
 
 bool SongDb::refresh_chart(const std::string& path) {

@@ -198,6 +198,8 @@ struct Library {
     std::shared_ptr<CustomFolderQuery> custom_query;
     // MOD が作ったフォルダ（仕様書14章「フォルダの作成」）
     std::vector<ModFolder> mod_folders;
+    // 譜面の傾向（使う MOD があるときに初めて読む。記録を読み直すときは前のものを使い回す）
+    mutable std::shared_ptr<const std::unordered_map<std::string, ChartAttr>> attrs;
     // md5 → 譜面（カスタムフォルダの中身を集めるときに、初めて要ったら作る）
     std::unordered_map<std::string, const ChartRecord*> md5_index;
     // 曲フォルダ → その中の譜面（難易度ごとの枠に使う。初めて要ったら作る）
@@ -272,12 +274,40 @@ void load_custom_entry(Library& lib, const Entry& e) {
     fill_custom_entry(lib, e, lib.custom_query->run(*e.custom));
 }
 
+// MOD のフォルダを作る。譜面の傾向を使う MOD があれば、分析した傾向と、譜面が入っている難易度表のレベルも渡す
+std::vector<ModFolder> make_mod_folders(const Library& lib, const std::vector<const ModManifest*>& mods, std::vector<std::string>* errors) {
+    std::unordered_map<std::string, std::vector<ModTableLevel>> tables;
+    ModChartExtra extra;
+    if (std::any_of(mods.begin(), mods.end(), [](const ModManifest* m) { return m->chart_attr; })) {
+        if (!lib.attrs) {
+            SongDb rd;
+            auto a = std::make_shared<std::unordered_map<std::string, ChartAttr>>();
+            if (rd.open(song_db_path())) *a = rd.chart_attrs();
+            lib.attrs = std::move(a);
+        }
+        for (size_t ti = 0; ti < lib.tables.size(); ++ti) {
+            const DifficultyTable& t = lib.tables[ti];
+            std::unordered_map<std::string, int> order;
+            for (size_t li = 0; li < t.levels.size(); ++li) order.emplace(t.levels[li], static_cast<int>(li));
+            for (const TableChart& tc : t.charts) {
+                if (tc.md5.empty()) continue;
+                auto& v = tables[tc.md5];
+                const int lo = order.count(tc.level) ? order[tc.level] : static_cast<int>(t.levels.size());
+                if (std::none_of(v.begin(), v.end(), [&](const ModTableLevel& x) { return x.table_order == static_cast<int>(ti) && x.level == tc.level; }))
+                    v.push_back({t.name.empty() ? t.url : t.name, t.symbol, tc.level, static_cast<int>(ti), lo});
+            }
+        }
+        extra.attrs = lib.attrs.get(), extra.tables = &tables;
+    }
+    return build_mod_folders(mods, lib.charts, lib.scores, mod_data_dir(""), errors, extra);
+}
+
 // カスタムフォルダを読み、中身を集める表を作り直す（曲・記録・お気に入りが変わったとき）
 // MOD のフォルダも、ここで作り直す
 void load_custom(Library& lib, const std::vector<const ModManifest*>& mods, const std::vector<std::string>& custom_dirs,
                  const std::unordered_map<std::string, int>& favs) {
     std::vector<std::string> errors;
-    lib.mod_folders = build_mod_folders(mods, lib.charts, lib.scores, mod_data_dir(""), &errors);
+    lib.mod_folders = make_mod_folders(lib, mods, &errors);
     for (const std::string& e : errors) std::printf("MOD のフォルダを作れない：%s\n", e.c_str());
     lib.custom_nodes.clear();
     for (const std::string& d : custom_dirs) {
@@ -1019,6 +1049,33 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     std::shared_ptr<std::vector<Entry>> pending_root;
     std::atomic<bool> busy{false};
     std::atomic<bool> stop_worker{false};  // 選曲画面を抜けるときに、裏の読み込みを止める
+    // 譜面の傾向を使う MOD があれば、まだ分析していない譜面を裏で分析する。終わったら MOD のフォルダを作り直す
+    std::atomic<bool> attr_ready{false};
+    std::thread attr_worker;
+    {
+        const auto mods_now = app.active_mods();
+        if (std::any_of(mods_now.begin(), mods_now.end(), [](const ModManifest* m) { return m->chart_attr; }))
+            attr_worker = std::thread([&, mods_now] {
+                SongDb db;
+                if (!db.open(song_db_path())) return;
+                // 配った分析の結果を先に入れる（その譜面は分析しない）
+                for (const ModManifest* m : mods_now)
+                    if (m->chart_attr)
+                        if (int n = db.import_chart_attrs_if_changed(m->dir + "/chart_attr.tsv", m->id); n > 0) {
+                            std::printf("配った譜面の傾向を入れた：%d\n", n);
+                            attr_ready = true;
+                        }
+                const int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency() / 2));
+                int total = 0;
+                while (!stop_worker) {
+                    const int n = db.fill_chart_attrs(300, threads);
+                    if (n == 0) break;
+                    total += n;
+                    if (total % 3000 < n) std::printf("譜面の傾向を分析した：%d\n", total);
+                }
+                if (total > 0 && !stop_worker) std::printf("譜面の傾向の分析を終えた：%d\n", total), attr_ready = true;
+            });
+    }
     std::string status = "";
     std::thread worker;
     // scan_songs：曲フォルダも読み直すか（false なら難易度表だけ取りに行く）。
@@ -1345,7 +1402,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         const auto info = app.db.lr2_player_info();
         auto it = info.find("name");
         if (it == info.end() || it->second.empty()) it = info.find("id");
-        if (it != info.end()) sctx.player_name = it->second;
+        sctx.player_name = it != info.end() ? it->second : player_id();  // 引き継いでいなければ BMjoy のプレイヤーの ID
     }
     uint64_t scene_start = SDL_GetTicksNS();
     auto scene_ms = [&] { return (SDL_GetTicksNS() - scene_start) / 1e6; };
@@ -1658,7 +1715,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                               cfg_now = app.cfg] {
             const uint64_t t0 = SDL_GetTicksNS();
             auto next = std::make_shared<Library>();
-            next->roots = base->roots, next->charts = base->charts, next->tables = base->tables;
+            next->roots = base->roots, next->charts = base->charts, next->tables = base->tables, next->attrs = base->attrs;
             const uint64_t t1 = SDL_GetTicksNS();
             SongDb rdb;
             const bool rdb_ok = rdb.open(song_db_path());
@@ -1755,7 +1812,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                             }
                     }
                 std::vector<std::string> errors;
-                lib->mod_folders = build_mod_folders(app.active_mods(), lib->charts, lib->scores, mod_data_dir(""), &errors);
+                lib->mod_folders = make_mod_folders(*lib, app.active_mods(), &errors);
                 for (const std::string& er : errors) std::printf("MOD のフォルダを作れない：%s\n", er.c_str());
             }
             const uint64_t t2 = SDL_GetTicksNS();
@@ -2869,6 +2926,12 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             reload_records_async();
         }
         if (records_reload_wanted && !busy) reload_records_async();
+        if (attr_ready && !busy) {
+            // 分析し終えた傾向で、MOD のフォルダを作り直す
+            attr_ready = false;
+            lib->attrs.reset();
+            reload_records_async();
+        }
         {
             std::lock_guard<std::mutex> lock(mu);
             if (pending) {
@@ -3686,6 +3749,13 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                         while (!want.empty() && (want.back() == '\r' || want.back() == ' ')) want.pop_back();
                     }
                     std::vector<std::string> chain;  // 開くフォルダの名前と、最後に目当ての名前
+                    // 「folder:」で始まれば、> で区切ったフォルダの名前を順に開く
+                    if (want.rfind("folder:", 0) == 0) {
+                        std::string rest = want.substr(7);
+                        for (size_t k; (k = rest.find('>')) != std::string::npos; rest.erase(0, k + 1)) chain.push_back(rest.substr(0, k));
+                        chain.push_back(rest);
+                        want.clear();
+                    }
                     std::function<bool(const std::vector<Entry>&)> dfs = [&](const std::vector<Entry>& l) {
                         for (const Entry& x : l) {
                             if ((x.kind == Entry::Kind::Course || x.kind == Entry::Kind::Chart || x.kind == Entry::Kind::Missing) &&
@@ -3702,7 +3772,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                         return false;
                     };
                     while (stack.size() > 1) back();
-                    if (!want.empty() && dfs(root))
+                    if (!chain.empty() || (!want.empty() && dfs(root)))
                         for (size_t ci = 0; ci < chain.size(); ++ci) {
                             const std::vector<Entry>& l = *stack.back().list;
                             for (size_t i = 0; i < l.size(); ++i)
@@ -3777,7 +3847,12 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             ft_banner = ft_text = ft_draw = ft_draw0 = 0;
             lamp_ns = 0, lamp_nodes = 0;
         }
-        if (bgm_pending) bgm_pending = false, app.mixer.play_system(kSysSelect, true);
+        if (bgm_pending) {
+            // 選曲画面に入るたび（遊んで戻ったときも）、BGM のセットの候補から選び直す
+            bgm_pending = false;
+            app.pick_bgm();
+            app.mixer.play_system(kSysSelect, true);
+        }
         if (app.scene_end_ns) {
             std::printf("選曲画面の最初の絵まで %.0f ms\n", (SDL_GetTicksNS() - app.scene_end_ns) / 1e6);
             app.scene_end_ns = 0;
@@ -3806,6 +3881,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     if (banner_tex) app.select_renderer->set_image_override(102, nullptr), SDL_DestroyTexture(banner_tex);
     stop_worker = true;
     if (worker.joinable()) worker.join();
+    if (attr_worker.joinable()) attr_worker.join();
     std::printf("選曲画面を出る：裏の読み込みを待った %.0f ms\n", (SDL_GetTicksNS() - exit_t0) / 1e6);
 }
 

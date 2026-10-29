@@ -19,5 +19,9 @@ enum SystemSound : int {
 // chosen は #CUSTOMFILE ごとに選んだ名前（書いた順。空なら既定の名前）
 std::vector<Sample> load_system_sounds(const std::string& lr2_root, const std::string& lr2ss_path, uint32_t rate,
                                        const std::vector<std::string>& chosen = {});
+// その音（SystemSound）のファイル（見つからなければ空。chosen は load_system_sounds と同じ）
+std::string system_sound_file(const std::string& lr2_root, const std::string& lr2ss_path, int id, const std::vector<std::string>& chosen = {});
+// その音（SystemSound）のファイルを選んでいる #CUSTOMFILE の項目の番号（書いた順。無ければ -1）
+int system_sound_custom_item(const std::string& lr2ss_path, int id);
 
 }  // namespace bmj

@@ -1,17 +1,20 @@
 #include "app/config.h"
 
-#include "util/data_dir.h"
-
 #include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <set>
 #include <sstream>
 
-#include "util/data_dir.h"
 #include "skin/skin_compose.h"
+#include "sqlite3.h"
+#include "util/data_dir.h"
 #include "util/text.h"
+
+namespace fs = std::filesystem;
 
 namespace bmj {
 
@@ -71,8 +74,15 @@ bool AppConfig::load(const std::string& path) {
         std::string key(trim(l.substr(0, eq)));
         std::string val(trim(l.substr(eq + 1)));
         int iv = std::atoi(val.c_str());
+        // 前の版は、この 2 つの値の後ろに説明を書いていた（「  #」から後ろは値ではない）
+        auto bare = [](std::string v) {
+            if (!v.empty() && v[0] == '#') return std::string();  // 値が空で、説明だけ
+            if (size_t k = v.find("  #"); k != std::string::npos) v = std::string(trim(std::string_view(v).substr(0, k)));
+            return v;
+        };
         if (key == "lr2_root") lr2_root = from_portable(val);
-        else if (key == "lr2_player") lr2_player = val;
+        else if (key == "player") player = bare(val);
+        else if (key == "lr2_player") lr2_player = bare(val);
         else if (key == "lr2_export") lr2_export = iv != 0;
         else if (key == "play_skin") play_skin = from_portable(val);
         else if (key == "result_skin") result_skin = from_portable(val);
@@ -212,10 +222,17 @@ bool AppConfig::load(const std::string& path) {
 bool AppConfig::save(const std::string& path) const {
     std::ofstream f(path);
     if (!f) return false;
+    write(f);
+    return static_cast<bool>(f);
+}
+
+void AppConfig::write(std::ostream& f) const {
     f << "# BMjoy の設定\n";
+    f << "# 今のプレイヤー（LR2files/Player/<ID>）\n";
+    f << "player = " << player << "\n";
     f << "lr2_root = " << to_portable(lr2_root) << "\n";
     f << "lr2_export = " << (lr2_export ? 1 : 0) << "  # 外部ツールのために LR2 の形の曲データベースとスコアを Database に書き出す\n";
-    f << "lr2_player = " << lr2_player << "  # 書き出すスコアの名前（Database/Score/<名前>.db。空なら LR2 から引き継いだ ID か BMjoy）\n";
+    f << "lr2_player = " << lr2_player << "\n";  // 書き出すスコアの名前（Database/Score/<名前>.db。空なら LR2 から引き継いだ ID かプレイヤーの ID）
     f << "play_skin = " << to_portable(play_skin) << "\n";
     f << "result_skin = " << to_portable(result_skin) << "\n";
     f << "courseresult_skin = " << to_portable(courseresult_skin) << "\n";
@@ -327,20 +344,150 @@ bool AppConfig::save(const std::string& path) const {
             f << "skin_adjust " << to_portable(skin) << " = " << a.shift_x << "," << a.shift_y << "," << a.rate_x << "," << a.rate_y << ","
               << a.judge_x << "," << a.judge_y << "," << a.size_x << "," << a.size_y << "," << a.dark << "," << a.note_x << ","
               << a.note_y << "," << a.judge_scale << "," << a.note_fine_y << "\n";
-    return static_cast<bool>(f);
 }
 
 std::string config_path() { return data_dir() + "Config/config.txt"; }
 
-std::string replay_path(const std::string& sha256) { return data_dir() + "Replay/" + sha256 + ".bjr"; }
+namespace {
+
+// プレイヤーごとの設定の鍵（スキン・MOD・プレーのオプション・選曲の並べ方など）。ほかは全員で共通（曲フォルダ・難易度表・画面・音・貸し借りなど）
+bool is_player_key(const std::string& key) {
+    static const std::set<std::string> keys = {
+        "lr2_player", "play_skin", "result_skin", "courseresult_skin", "select_skin", "decide_skin", "keyconfig_skin", "skinselect_skin",
+        "sound_set", "mod", "custom_gauge", "hi_speed", "judge_timing", "hs_min", "hs_max", "hs_margin", "hs_fix", "lane_cover",
+        "lane_cover_v", "shutter_margin", "ln_mode", "auto_adjust", "target", "target_percent", "ghost", "bga_size", "score_graph",
+        "replay_save", "eq_on", "pitch_on", "pitch", "pitch_type", "select_difficulty", "select_mode", "select_sort",
+        "no_right_click_exit", "bga", "hs_mode", "fhs_green", "fhs_base", "gear_mode", "lift", "lift_v", "effect", "random",
+        "seven_key", "gauge", "gas", "base_speed", "poor_bga_ms", "select_speed_first", "select_speed_next"};
+    if (keys.count(key)) return true;
+    for (const char* prefix : {"eq_", "fx", "skin_custom ", "skin_parts ", "skin_adjust "})
+        if (key.rfind(prefix, 0) == 0) return true;
+    return false;
+}
+
+// プレイヤーを分ける前の置き場から、プレイヤーの置き場へ移す（キーコンフィグ・リプレイ・MOD が書いたファイル）
+void move_into_player(const std::string& from, const std::string& to) {
+    std::error_code ec;
+    const fs::path f = fs::u8path(from), t = fs::u8path(to);
+    if (!fs::exists(f, ec) || fs::exists(t, ec)) return;
+    fs::create_directories(t.parent_path(), ec);
+    fs::rename(f, t, ec);
+    if (ec) std::printf("プレイヤーの置き場へ移せない: %s（%s）\n", from.c_str(), ec.message().c_str());
+}
+
+// 最初のプレイヤーの ID：LR2 から引き継いだ ID（前の songs.db にあれば）、無ければ player
+std::string first_player_id(const AppConfig& cfg) {
+    std::string id = cfg.lr2_player;
+    sqlite3* db = nullptr;
+    // 読むだけだが、WAL の songs.db は -shm を作れないと読めないので、書ける形で開く（無ければ作らない）
+    if (id.empty() && sqlite3_open_v2((data_dir() + "Database/songs.db").c_str(), &db, SQLITE_OPEN_READWRITE, nullptr) == SQLITE_OK) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, "SELECT value FROM lr2_player WHERE name = 'id'", -1, &st, nullptr) == SQLITE_OK &&
+            sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+            id = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
+    return valid_player_id(id) ? id : "player";
+}
+
+}  // namespace
+
+bool load_config(AppConfig& cfg, const std::string& player) {
+    const bool had = cfg.load(config_path());
+    std::string id = player.empty() ? cfg.player : player;
+    const bool fresh = id.empty() || !fs::is_directory(fs::u8path(data_dir() + "Player/" + id));
+    if (!valid_player_id(id)) {
+        // ID が無い：プレイヤーがいればその最初の人、いなければ最初のプレイヤーを作る（前の設定・記録はこの人のものにする）
+        const std::vector<std::string> players = list_players();
+        id = players.empty() ? first_player_id(cfg) : players.front();
+    }
+    set_player_id(id);
+    cfg.player = id;
+    std::error_code ec;
+    fs::create_directories(fs::u8path(player_dir()), ec);
+    if (fs::exists(fs::u8path(player_config_path()), ec)) {
+        // プレイヤーの設定で置き換える（足していく一覧は先に空にする）
+        cfg.enabled_mods.clear(), cfg.skin_custom.clear(), cfg.skin_parts.clear(), cfg.skin_adjust.clear();
+        cfg.load(player_config_path());
+    } else if (fresh) {
+        // 初めてのプレイヤー：前の置き場のものを移し、設定を共通とプレイヤーに分けて書く
+        move_into_player(data_dir() + "Config/keyconfig.txt", player_dir() + "keyconfig.txt");
+        move_into_player(data_dir() + "Replay", player_dir() + "Replay");
+        move_into_player(data_dir() + "Mods/ModData", player_dir() + "ModData");
+        if (had) save_config(cfg);
+    }
+    return had;
+}
+
+bool save_config(const AppConfig& cfg) {
+    std::ostringstream all;
+    cfg.write(all);
+    std::string common, mine = "# BMjoy のプレイヤー " + cfg.player + " の設定\n";
+    std::istringstream in(all.str());
+    for (std::string line; std::getline(in, line);) {
+        const size_t eq = line.find('=');
+        const std::string key = eq == std::string::npos ? std::string() : std::string(trim(std::string_view(line).substr(0, eq)));
+        (!key.empty() && key[0] != '#' && is_player_key(key) ? mine : common) += line + "\n";
+    }
+    std::error_code ec;
+    fs::create_directories(fs::u8path(config_path()).parent_path(), ec);
+    fs::create_directories(fs::u8path(player_config_path()).parent_path(), ec);
+    std::ofstream g(fs::u8path(config_path()), std::ios::binary | std::ios::trunc);
+    g << common;
+    std::ofstream p(fs::u8path(player_config_path()), std::ios::binary | std::ios::trunc);
+    p << mine;
+    return static_cast<bool>(g) && static_cast<bool>(p);
+}
+
+namespace {
+bool set_error(std::string* error, const std::string& msg) {
+    if (error) *error = msg;
+    return false;
+}
+}  // namespace
+
+bool create_player(const std::string& id, const std::string& copy_from, std::string* error) {
+    if (!valid_player_id(id)) return set_error(error, "その名前は使えません");
+    const fs::path dir = fs::u8path(data_dir() + "Player/" + id);
+    std::error_code ec;
+    if (fs::exists(dir, ec)) return set_error(error, "同じ名前のプレイヤーがいます");
+    fs::create_directories(dir, ec);
+    if (ec) return set_error(error, "フォルダを作れません: " + ec.message());
+    // 設定とキーコンフィグは、元にするプレイヤーのものを写す（スキンやキーを一から選び直さなくてよい）。記録は写さない
+    if (!copy_from.empty())
+        for (const char* f : {"config.txt", "keyconfig.txt"})
+            fs::copy_file(fs::u8path(data_dir() + "Player/" + copy_from + "/" + f), dir / f, ec), ec.clear();
+    return true;
+}
+
+bool delete_player(const std::string& id, std::string* error) {
+    if (!valid_player_id(id)) return false;
+    std::error_code ec;
+    fs::remove_all(fs::u8path(data_dir() + "Player/" + id), ec);
+    if (ec) return set_error(error, "消せません: " + ec.message());
+    return true;
+}
+
+// プレイヤーごとのものの置き場（プレイヤーを分けていなければ、前の置き場）
+namespace {
+std::string replay_dir() { return player_id().empty() ? data_dir() + "Replay/" : player_dir() + "Replay/"; }
+}  // namespace
+
+std::string player_config_path() { return player_dir() + "config.txt"; }
+std::string player_score_db_path() { return player_dir() + "score.db"; }
+
+std::string replay_path(const std::string& sha256) { return replay_dir() + sha256 + ".bjr"; }
 
 std::string input_log_path(const std::string& sha256, int64_t played_at) {
-    return data_dir() + "Replay/InputLog/" + sha256 + "/" + std::to_string(played_at) + ".bjr";
+    return replay_dir() + "InputLog/" + sha256 + "/" + std::to_string(played_at) + ".bjr";
 }
 
 std::string official_mods_dir() { return base_dir() + "mods"; }
 
-std::string mod_data_dir(const std::string& id) { return data_dir() + "Mods/ModData/" + id; }
+std::string mod_data_dir(const std::string& id) {
+    return (player_id().empty() ? data_dir() + "Mods/ModData/" : player_dir() + "ModData/") + id;
+}
 std::string mod_settings_path(const std::string& id) { return mod_data_dir(id) + "/settings.json"; }
 
 std::string lr2_courses_path() { return data_dir() + "Database/lr2_courses.txt"; }

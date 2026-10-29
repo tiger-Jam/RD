@@ -19,6 +19,8 @@
 #include <vector>
 
 #include "app/config.h"
+#include "app/bgm_set.h"
+#include "audio/system_sound.h"
 #include "app/lr2_import.h"
 #include "app/skin_catalog.h"
 #include "db/song_db.h"
@@ -175,6 +177,7 @@ struct Gui {
     const void* combo_open = nullptr;
     SDL_FRect combo_rect{};
     std::vector<std::string> combo_items;
+    int combo_first = 0, combo_rows = 0;  // 一覧の見えている先頭の行と、見えている行の数（窓に入らなければホイールで送る）
     std::function<void(int)> combo_pick;
     // 開いているのが色の見本（color_button）なら true。選んだ色は color_target に入る
     bool combo_colors = false;
@@ -329,7 +332,14 @@ struct Gui {
         if (enabled && clicked(rc)) {
             combo_open = id;
             combo_colors = false;
-            combo_rect = {x, y + h, w, static_cast<float>(items.size()) * 18 + 2};
+            // 窓に収まる行の数だけ見せる。下に入らなければ、広いほう（上か下）に開く
+            const int n = static_cast<int>(items.size());
+            const int below = static_cast<int>((kH - (y + h) - 4) / 18), above = static_cast<int>((y - 4) / 18);
+            const bool up = n > below && above > below;
+            combo_rows = std::max(1, std::min(n, up ? above : below));
+            const float ph = combo_rows * 18.0f + 2;
+            combo_rect = {x, up ? y - ph : y + h, w, ph};
+            combo_first = std::clamp(sel - combo_rows / 2, 0, std::max(0, n - combo_rows));  // 選んでいる行が見えるように
             combo_items = items;
             combo_pick = std::move(pick);
             pressed = false;
@@ -372,8 +382,16 @@ struct Gui {
         }
         fill(combo_rect, SDL_Color{255, 255, 255, 255});
         frame(combo_rect, kText);
-        for (size_t i = 0; i < combo_items.size(); ++i) {
-            SDL_FRect row{combo_rect.x + 1, combo_rect.y + 1 + i * 18.0f, combo_rect.w - 2, 18};
+        const int n = static_cast<int>(combo_items.size());
+        if (n > combo_rows) {
+            // 入りきらない一覧：ホイールで送る（下の部品には渡さない）。右の端に今の位置を出す
+            if (in(combo_rect) && wheel != 0) combo_first -= static_cast<int>(wheel) * 3, wheel = 0;
+            combo_first = std::clamp(combo_first, 0, n - combo_rows);
+            const float track = combo_rect.h - 2, thumb = std::max(12.0f, track * combo_rows / n);
+            fill({combo_rect.x + combo_rect.w - 7, combo_rect.y + 1 + (track - thumb) * combo_first / (n - combo_rows), 5, thumb}, kShadow);
+        }
+        for (int i = combo_first; i < std::min(n, combo_first + combo_rows); ++i) {
+            SDL_FRect row{combo_rect.x + 1, combo_rect.y + 1 + (i - combo_first) * 18.0f, combo_rect.w - (n > combo_rows ? 10 : 2), 18};
             bool hot = in(row);
             if (hot) fill(row, kSel);
             text->draw(row.x + 3, row.y + 3, font, hot ? SDL_Color{255, 255, 255, 255} : kText, combo_items[i], 0, 0, 0);
@@ -397,7 +415,7 @@ struct Gui {
         raised({x + w - 22, y + 2, 20, 16});
         label(x + 6, y + 3, header);
         int visible = static_cast<int>((h - 22) / 16);
-        if (in(rc) && wheel != 0) scroll -= static_cast<int>(wheel) * 3;
+        if (in(rc) && wheel != 0 && !(combo_open && in(combo_rect))) scroll -= static_cast<int>(wheel) * 3;  // 開いている一覧の上なら、そちらを送る
         scroll = std::clamp(scroll, 0, std::max(0, static_cast<int>(rows.size()) - visible));
         for (int i = 0; i < visible && scroll + i < static_cast<int>(rows.size()); ++i) {
             int k = scroll + i;
@@ -907,6 +925,80 @@ void draw_mod_detail(Gui& g, std::vector<ModManifest>& mods, ModManifest& m, con
             g.label(x0, sy - 2, "見本");
         }
     }
+    if (st.type == "bgm") {
+        // BGM のセット：セットごとに、選曲・決定の BGM の候補（手元のサウンドセットの中の BGM）をいくつでも入れる。
+        // 使うセットの候補から、選曲画面に入るたびにランダムに 1 つずつ選ぶ
+        static std::string listed;
+        static std::vector<BgmChoice> sel_choices, dec_choices;
+        static int edit = 0, sel_row[2] = {-1, -1}, sel_scroll[2] = {0, 0}, pick[2] = {0, 0};
+        if (listed != lr2_root) {
+            listed = lr2_root;
+            sel_choices = bgm_choices(lr2_root, kSysSelect), dec_choices = bgm_choices(lr2_root, kSysDecide);
+        }
+        auto name_of = [](const std::vector<BgmChoice>& choices, const std::string& key) {
+            for (const BgmChoice& c : choices)
+                if (same_bgm_key(c.key, key)) return c.name;
+            return key;  // 見つからないものはそのまま見せる
+        };
+        g.label(X + 14, Y + 36, st.name);
+        // 使うセット（先頭は「使わない」＝サウンドセットのまま）
+        std::vector<std::string> use_names = {"使わない（サウンドセットのまま）"};
+        int use_cur = 0;
+        for (size_t i = 0; i < m.bgm_sets.size(); ++i) {
+            use_names.push_back(m.bgm_sets[i].name);
+            if (m.bgm_sets[i].name == m.bgm_use) use_cur = static_cast<int>(i) + 1;
+        }
+        g.label(X + 14, Y + 64, "使うセット");
+        g.combo(&m.bgm_use, X + 100, Y + 58, 260, 20, use_names, use_cur,
+                [&m](int i) { m.bgm_use = i == 0 ? std::string() : m.bgm_sets[i - 1].name; });
+        // 直すセット
+        g.label(X + 14, Y + 94, "直すセット");
+        edit = std::clamp(edit, 0, std::max(0, static_cast<int>(m.bgm_sets.size()) - 1));
+        if (!m.bgm_sets.empty()) {
+            std::vector<std::string> names;
+            for (const auto& b : m.bgm_sets) names.push_back(b.name);
+            g.combo(&edit, X + 100, Y + 88, 160, 20, names, edit, [](int i) { edit = i; });
+        }
+        if (g.button(X + 270, Y + 87, 60, 22, "追加")) {
+            std::string name;
+            for (int n = static_cast<int>(m.bgm_sets.size()) + 1;; ++n) {
+                name = "SET" + std::to_string(n);
+                if (std::none_of(m.bgm_sets.begin(), m.bgm_sets.end(), [&](const auto& b) { return b.name == name; })) break;
+            }
+            m.bgm_sets.push_back({name, {}, {}});
+            edit = static_cast<int>(m.bgm_sets.size()) - 1;
+        }
+        if (m.bgm_sets.empty()) return;
+        auto& set = m.bgm_sets[edit];
+        if (g.button(X + 336, Y + 87, 60, 22, "削除")) {
+            if (m.bgm_use == set.name) m.bgm_use.clear();
+            m.bgm_sets.erase(m.bgm_sets.begin() + edit);
+            edit = std::max(0, edit - 1);
+            return;
+        }
+        // 名前（使うセットに選んでいれば、そちらの名前も直す）
+        g.label(X + 410, Y + 94, "名前");
+        const std::string before = set.name;
+        g.edit_str(set.name, X + 446, Y + 88, 110, 20);
+        if (set.name != before && m.bgm_use == before) m.bgm_use = set.name;
+        // 選曲・決定の候補の一覧と、足す・外す
+        auto column = [&](int k, float x, const char* title, std::vector<std::string>& list, const std::vector<BgmChoice>& choices) {
+            std::vector<std::string> rows;
+            for (const std::string& key : list) rows.push_back(name_of(choices, key));
+            g.listview(x, Y + 120, 268, 150, std::string(title) + "（" + std::to_string(list.size()) + " 曲）", rows, sel_row[k], sel_scroll[k]);
+            std::vector<std::string> names;
+            for (const BgmChoice& c : choices) names.push_back(c.name);
+            pick[k] = std::clamp(pick[k], 0, std::max(0, static_cast<int>(names.size()) - 1));
+            if (!names.empty()) g.combo(&pick[k], x, Y + 276, 268, 20, names, pick[k], [k](int i) { pick[k] = i; });
+            if (g.button(x, Y + 302, 80, 22, "足す", !choices.empty()) &&
+                std::none_of(list.begin(), list.end(), [&](const std::string& key) { return same_bgm_key(key, choices[pick[k]].key); }))
+                list.push_back(choices[pick[k]].key);
+            const bool has = sel_row[k] >= 0 && sel_row[k] < static_cast<int>(list.size());
+            if (g.button(x + 88, Y + 302, 80, 22, "外す", has)) list.erase(list.begin() + sel_row[k]), sel_row[k] = -1;
+        };
+        column(0, X + 14, "選曲の BGM", set.select, sel_choices);
+        column(1, X + 290, "決定の BGM", set.decide, dec_choices);
+    }
     if (st.type == "metronome") {
         // メトロノームの音量（0〜500%。曲の BGM の音量にも合わせて鳴る）
         g.label(X + 14, Y + 40, st.name);
@@ -1015,7 +1107,7 @@ int main(int, char**) {
     std::error_code first_ec;
     // 初めての起動（設定ファイルがまだ無い）なら、案内の画面から始める
     const bool first_run = !fs::exists(fs::u8path(cfg_path), first_ec);
-    cfg.load(cfg_path);
+    load_config(cfg);
     // 譜面を貸す設定（変わったら、保存するときに配信を登録し直す）
     auto serve_state = [](const AppConfig& c) { return std::make_tuple(c.serve, c.serve_port, c.serve_key); };
     auto serve_applied = serve_state(cfg);
@@ -1067,6 +1159,9 @@ int main(int, char**) {
         }
     };
     int mod_sel = mods.empty() ? -1 : 0, mod_scroll = 0;
+    // プレイヤーの作成・削除（PLAYER の欄）
+    bool new_player = false, delete_armed = false;
+    std::string new_player_id;
     // MOD の詳細の画面（-1 なら一覧）。det_sel は詳細の中の一覧で選んでいる行
     int mod_detail = -1, det_page = 0, det_sel = 0, det_scroll = 0, det_add = 0;
     if (const char* d = dev_env("BMJ_LAUNCHER_DETAIL"))  // 開発用：その MOD の詳細を開いておく
@@ -1074,6 +1169,22 @@ int main(int, char**) {
             if (mods[i].id == d) mod_detail = mod_sel = static_cast<int>(i);
     if (const char* d = dev_env("BMJ_LAUNCHER_PAGE")) det_page = std::atoi(d);  // 開発用：詳細の何枚目を開くか
     if (const char* d = dev_env("BMJ_LAUNCHER_ROW")) det_sel = std::atoi(d);    // 開発用：詳細の一覧の何行目を選ぶか
+    // プレイヤーを切り替える：今の人の設定を書いてから、その人の設定と MOD の詳細の設定を読み直す
+    auto switch_player = [&](const std::string& id) {
+        save_changed_settings();
+        save_config(cfg);
+        AppConfig next;
+        load_config(next, id);
+        cfg = next;
+        save_config(cfg);  // 共通の設定に、今のプレイヤーを書く
+        mods = scan_mods(official_mods_dir(), true, &mod_errors);
+        for (ModManifest& m : mods) apply_mod_settings(m, mod_settings_path(m.id));
+        resolve_gauge_lamps(mods);
+        saved_settings.clear();
+        for (const ModManifest& m : mods)
+            if (!m.settings.empty()) saved_settings[m.id] = mod_settings_json(m);
+        mod_detail = -1;
+    };
     int song_sel = -1, song_scroll = 0, table_sel = -1, table_scroll = 0;
     std::string table_input;
     std::string message;
@@ -1258,20 +1369,58 @@ int main(int, char**) {
                 if (g.button(gx + 376, gy + 300, 74, 24, "戻る")) guide = 1;
                 if (g.button(gx + 456, gy + 300, 74, 24, "完了")) {
                     guide = -1;
-                    cfg.save(cfg_path);
+                    save_config(cfg);
                     message = "準備ができました。「BMjoyの起動」で始めると、最初に曲フォルダを読み込みます";
                 }
             }
         } else if (tab == 0) {
             // LR2 SETUP（100201）の MAIN と同じ並び。プレイヤーと IR は BMjoy に無いので灰色
+            // プレイヤー（LR2 SETUP と同じ並び）。スコア・オプション・キー・スキン・MOD はプレイヤーごと。パスワードは IR 用なので灰色
             g.group(X + 9, Y + 9, 556, 99, "PLAYER");
             g.label(X + 26, Y + 40, "PLAYER ID");
-            g.combo(&d_flash, X + 90, Y + 33, 142, 19, {""}, 0, [](int) {}, false);
-            g.label(X + 251, Y + 40, "PASSWORD");
-            std::string pw;
-            g.edit_str(pw, X + 324, Y + 33, 107, 21, false);
-            g.button(X + 27, Y + 72, 143, 23, "新規プレイヤーデータ作成", false);
-            g.button(X + 189, Y + 72, 143, 23, "プレイヤーデータ削除", false);
+            const std::vector<std::string> players = list_players();
+            if (new_player) {
+                g.edit_str(new_player_id, X + 90, Y + 33, 142, 21);
+                if (g.button(X + 251, Y + 32, 80, 23, "作成", !new_player_id.empty())) {
+                    std::string err;
+                    if (create_player(new_player_id, cfg.player, &err)) {
+                        switch_player(new_player_id);
+                        message = "プレイヤー " + new_player_id + " を作りました（設定とキーは前のプレイヤーのものを写しました）";
+                        new_player = false;
+                    } else {
+                        message = err;
+                    }
+                }
+                if (g.button(X + 340, Y + 32, 80, 23, "やめる")) new_player = false;
+            } else {
+                int cur = 0;
+                for (size_t i = 0; i < players.size(); ++i)
+                    if (players[i] == cfg.player) cur = static_cast<int>(i);
+                // 選んだときの処理はフレームの終わりに呼ばれるので、一覧は写して持たせる
+                g.combo(&cfg.player, X + 90, Y + 33, 142, 19, players, cur, [&, players](int i) {
+                    if (players[i] != cfg.player) switch_player(players[i]), delete_armed = false;
+                });
+                g.label(X + 251, Y + 40, "PASSWORD");
+                std::string pw;
+                g.edit_str(pw, X + 324, Y + 33, 107, 21, false);
+            }
+            if (g.button(X + 27, Y + 72, 143, 23, "新規プレイヤーデータ作成", !new_player)) new_player = true, new_player_id.clear(), delete_armed = false;
+            // 消すのは 2 回押したとき。最後の 1 人は消せない
+            if (g.button(X + 189, Y + 72, 143, 23, delete_armed ? "本当に消す" : "プレイヤーデータ削除", !new_player && players.size() > 1)) {
+                if (!delete_armed) {
+                    delete_armed = true;
+                    message = "もう一度押すと、プレイヤー " + cfg.player + " の記録と設定を消します";
+                } else {
+                    const std::string gone = cfg.player;
+                    std::string next;
+                    for (const std::string& p : players)
+                        if (p != gone && next.empty()) next = p;
+                    switch_player(next);
+                    std::string err;
+                    message = delete_player(gone, &err) ? "プレイヤー " + gone + " を消しました" : err;
+                    delete_armed = false;
+                }
+            }
             bool windowed = !cfg.fullscreen;
             if (g.check(X + 19, Y + 132, "ウインドウモード", windowed)) cfg.fullscreen = !windowed;
             g.label(X + 17, Y + 164, "データベース自動更新");
@@ -1574,7 +1723,7 @@ int main(int, char**) {
         g.button(409, kH - 29, 83, 21, "動画作成", false);
         if (g.button(514, kH - 29, 87, 21, "終了")) {
             g.unfocus();
-            cfg.save(cfg_path);
+            save_config(cfg);
             if (serve_state(cfg) != serve_applied) apply_serve(cfg, message), serve_applied = serve_state(cfg);
             quit = true;
         }
@@ -1584,8 +1733,8 @@ int main(int, char**) {
             g.unfocus();
             std::string err;
             // 配信は起動したそばから設定を読むので、先に保存してから登録し直す
-            if (serve_state(cfg) != serve_applied) cfg.save(cfg_path), apply_serve(cfg, message), serve_applied = serve_state(cfg);
-            if (!cfg.save(cfg_path)) {
+            if (serve_state(cfg) != serve_applied) save_config(cfg), apply_serve(cfg, message), serve_applied = serve_state(cfg);
+            if (!save_config(cfg)) {
                 message = "設定を保存できません: " + cfg_path;
             } else if (save_changed_settings(), std::printf("本体を起動します\n"), !launch_body(err)) {
                 message = err;

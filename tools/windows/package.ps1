@@ -19,6 +19,9 @@ $crt = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022\*\VC\Redi
 if ($crt) { Get-ChildItem $crt.FullName -Filter *.dll | Copy-Item -Destination $stage }
 else { Write-Output "Visual C++ のランタイムが見つからない（入れずに作る）" }
 if (Test-Path "$Build\mods") { Copy-Item -Recurse "$Build\mods" "$stage\mods" }
+# 使っているもののライセンス（リポジトリの THIRD_PARTY_NOTICES.md。ビルドのフォルダの 2 つ上にある）
+$notices = Join-Path (Split-Path (Split-Path $Build)) "THIRD_PARTY_NOTICES.md"
+if (Test-Path $notices) { Copy-Item $notices $stage } else { Write-Output "THIRD_PARTY_NOTICES.md が見つからない（入れずに作る）" }
 Copy-Item -Recurse "$Build\LR2files" "$stage\LR2files"
 # 素材のフォルダに入っている設定と記録は、-WithData のときだけ入れる（入れないときは空の状態で渡す）
 foreach ($f in "Config\config.txt", "Config\keyconfig.txt") { Remove-Item -Force "$stage\LR2files\$f" -ErrorAction SilentlyContinue }

@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include "sqlite3.h"
+#include "util/data_dir.h"
 #include "util/text.h"
 
 namespace fs = std::filesystem;
@@ -261,7 +262,7 @@ bool export_lr2_files(const SongDb& db, const std::string& database_dir, const s
     Lr2Carry carry{db.lr2_player_info(), db.lr2_course_keys()};
     if (player.empty())
         if (auto it = carry.player.find("id"); it != carry.player.end()) player = it->second;
-    if (player.empty()) player = "BMjoy";
+    if (player.empty()) player = player_id().empty() ? "BMjoy" : player_id();
     std::vector<ChartRecord> charts = db.all_charts();
     fill_difficulties(charts);  // LR2 は #DIFFICULTY の無い譜面の難易度を補って入れている
     if (songs && !export_lr2_song_db(database_dir + "/song.db", charts, roots, error)) return false;
