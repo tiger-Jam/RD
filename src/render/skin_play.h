@@ -26,7 +26,8 @@ struct PlayContext {
     const PlayStats* stats_override = nullptr;
     double hp_override = -1;
     const PlayStats* stats() const { return stats_override ? stats_override : judge ? &judge->stats() : nullptr; }
-    double gauge_hp() const { return hp_override >= 0 ? hp_override : judge ? judge->gauge().hp(judge->gauge_type()) : 0; }
+    // 遊んでいるゲージの値（カスタムゲージならそのゲージ。リザルトでも同じ）
+    double gauge_hp() const { return hp_override >= 0 ? hp_override : judge ? judge->play_hp() : 0; }
     SkinTimers timers;
     double now_ms = 0;       // シーンの時刻
     double song_ms = -1;     // タイマー41の経過（曲の時刻）
