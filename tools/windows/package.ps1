@@ -17,7 +17,7 @@ $stage = Join-Path $work $Name
 New-Item -ItemType Directory -Force $prog, $stage | Out-Null
 
 # 実行ファイルと DLL（SDL・FFmpeg）、公式の MOD、ライセンス
-Copy-Item "$Build\rd.exe", "$Build\RDbody.exe" $prog
+Copy-Item "$Build\RD.exe", "$Build\RDbody.exe" $prog
 Get-ChildItem $Build -Filter *.dll | Copy-Item -Destination $prog
 # Visual C++ のランタイム（vcruntime140.dll・msvcp140.dll など）。入れていない PC でも動くように、実行ファイルの横に置く
 $crt = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT" -Directory -ErrorAction SilentlyContinue |

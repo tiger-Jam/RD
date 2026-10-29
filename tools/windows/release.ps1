@@ -23,7 +23,7 @@ try {
     & powershell -ExecutionPolicy Bypass -File (Join-Path $src "tools\windows\package.ps1") -Build $bin -Name "RD-$Ver" -OutDir $out -Assets $Assets -Notices (Join-Path $src "THIRD_PARTY_NOTICES.md")
     if ($LASTEXITCODE -ne 0) { throw "zip を作れない" }
     # 落ちたときのダンプを読むための .pdb（配らない。Mac に持って帰って版ごとに残す）
-    Copy-Item "$bin\RDbody.pdb", "$bin\rd.pdb" $out
+    Copy-Item "$bin\RDbody.pdb", "$bin\RD.pdb" $out
     Write-Output "RELEASE_OK $out"
 } finally {
     Pop-Location

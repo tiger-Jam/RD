@@ -55,7 +55,7 @@ grep -q RELEASE_OK "$tmp/release.log" || { echo "Windows で作れなかった";
 
 OUT="$SERVICE/releases/$VER"
 mkdir -p "$OUT"
-for f in "RD-$VER.zip" "RD-$VER-update.zip" RDbody.pdb rd.pdb; do
+for f in "RD-$VER.zip" "RD-$VER-update.zip" RDbody.pdb RD.pdb; do
     scp -q -o BatchMode=yes "$HOST:RD-release/$VER/out/$f" "$OUT/$f"
 done
 SHA=$(shasum -a 256 "$OUT/RD-$VER-update.zip" | cut -d' ' -f1)
