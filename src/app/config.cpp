@@ -178,6 +178,7 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "serve") serve = iv != 0;
         else if (key == "serve_port") serve_port = iv;
         else if (key == "serve_key") serve_key = val;
+        else if (key == "serve_public") serve_public = iv != 0;
         else if (key == "borrow_url") borrow_url = val;
         else if (key == "borrow_key") borrow_key = val;
         else if (key == "borrow_cache_mb") borrow_cache_mb = iv;
@@ -332,6 +333,7 @@ void AppConfig::write(std::ostream& f) const {
     f << "serve = " << (serve ? 1 : 0) << "  # 1 = 譜面を貸す（ログインしている間、裏で）\n";
     f << "serve_port = " << serve_port << "\n";
     f << "serve_key = " << serve_key << "\n";
+    f << "serve_public = " << (serve_public ? 1 : 0) << "  # 1 = インターネットからも借りられるようにする（Tailscale の funnel）\n";
     f << "borrow_url = " << borrow_url << "\n";
     f << "borrow_key = " << borrow_key << "\n";
     f << "borrow_cache_mb = " << borrow_cache_mb << "  # 借りた譜面の置き場の上限（MB）\n";

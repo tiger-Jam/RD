@@ -49,12 +49,21 @@ HttpResponse text(int status, std::string body) {
     return r;
 }
 
+// 合言葉を比べる（違う文字の位置で時間が変わらないように、最後まで比べる）
+bool same_key(const std::string& a, const std::string& b) {
+    unsigned diff = a.size() == b.size() ? 0u : 1u;
+    for (size_t i = 0; i < a.size(); ++i) diff |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i % std::max<size_t>(1, b.size())]);
+    return diff == 0;
+}
+
 std::string folder_id(const std::string& folder) { return sha256_hex(folder).substr(0, 16); }
 
 HttpHeaders key_header(const BorrowSource& src) { return {{kKeyHeader, src.key}}; }
 
 std::string base_url(const BorrowSource& src) {
     std::string u = src.url;
+    while (!u.empty() && u.front() == ' ') u.erase(0, 1);
+    if (u.find("://") == std::string::npos) u = "http://" + u;  // 「tiger-pc:7275」のように書いてもよい
     while (!u.empty() && u.back() == '/') u.pop_back();
     return u + kPrefix;
 }
@@ -91,7 +100,7 @@ void BorrowLibrary::build(const std::vector<ChartRecord>& charts) {
 HttpResponse BorrowLibrary::handle(const HttpRequest& req, const std::string& key) const {
     // 合言葉が無い配信はしない
     auto k = req.headers.find("x-bmjoy-key");
-    if (key.empty() || k == req.headers.end() || k->second != key) return text(403, "forbidden\n");
+    if (key.empty() || k == req.headers.end() || !same_key(k->second, key)) return text(403, "forbidden\n");
     if (req.path.rfind(kPrefix, 0) != 0) return text(404, "not found\n");
     std::string rest;
     if (!url_decode(req.path.substr(std::string(kPrefix).size()), rest)) return text(400, "bad path\n");

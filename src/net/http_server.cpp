@@ -28,6 +28,8 @@ namespace bmj {
 
 namespace {
 
+constexpr int kMaxActive = 32;
+
 #if defined(_WIN32)
 void close_socket(intptr_t s) { closesocket(static_cast<SOCKET>(s)); }
 #else
@@ -49,6 +51,8 @@ const char* reason(int status) {
     case 400: return "Bad Request";
     case 403: return "Forbidden";
     case 404: return "Not Found";
+    case 429: return "Too Many Requests";
+    case 503: return "Service Unavailable";
     default: return "Error";
     }
 }
@@ -122,6 +126,11 @@ bool HttpServer::start(int port, Handler handler, std::string& error) {
 #endif
                 if (!running_) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+            // 同時につなぐ数には上限を置く（つなぎっぱなしで埋められないように）。超えたら答えずに切る
+            if (active_ >= kMaxActive) {
+                close_socket(static_cast<intptr_t>(c));
                 continue;
             }
             ++active_;

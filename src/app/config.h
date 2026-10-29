@@ -141,6 +141,7 @@ struct AppConfig {
     bool serve = false;
     int serve_port = 7275;
     std::string serve_key;
+    bool serve_public = false;  // インターネットからも借りられるようにする（Tailscale の funnel で、貸す口だけを外に出す）
     // 譜面を借りる先（例 http://tiger-pc:7275）と合言葉、借りた譜面の置き場の上限（MB）
     std::string borrow_url, borrow_key;
     int borrow_cache_mb = 20480;

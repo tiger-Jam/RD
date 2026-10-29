@@ -8,6 +8,7 @@
 #endif
 
 #include <algorithm>
+#include <random>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -30,6 +31,8 @@
 #include "util/data_dir.h"
 #include "util/log.h"
 #include "util/dev.h"
+#include "net/borrow.h"
+#include "yyjson.h"
 
 namespace fs = std::filesystem;
 using namespace bmj;
@@ -140,6 +143,67 @@ void relaunch_self() {
 #endif
 }
 
+// インターネットに出す口の番号（Tailscale の funnel が使える 443・8443・10000 のうち、ほかと重なりにくいもの）
+constexpr int kFunnelPort = 8443;
+
+#ifdef _WIN32
+std::wstring tailscale_exe() {
+    wchar_t pf[MAX_PATH] = {};
+    const DWORD n = GetEnvironmentVariableW(L"ProgramFiles", pf, MAX_PATH);
+    return (n ? std::wstring(pf) : std::wstring(L"C:\\Program Files")) + L"\\Tailscale\\tailscale.exe";
+}
+
+// コマンドを黒い窓を出さずに動かし、標準出力を返す（終わるまで最大 10 秒待つ）
+std::string run_capture(std::wstring cmd) {
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE rd = nullptr, wr = nullptr;
+    if (!CreatePipe(&rd, &wr, &sa, 0)) return {};
+    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = wr, si.hStdError = wr, si.hStdInput = nullptr;
+    PROCESS_INFORMATION pi{};
+    const bool ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    CloseHandle(wr);
+    std::string out;
+    if (ok) {
+        char buf[4096];
+        DWORD got = 0;
+        while (ReadFile(rd, buf, sizeof(buf), &got, nullptr) && got > 0) out.append(buf, got);
+        WaitForSingleObject(pi.hProcess, 10000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    CloseHandle(rd);
+    return out;
+}
+#endif
+
+// この PC の Tailscale の名前（例 tiger-pc.tailxxxx.ts.net）。Tailscale が無ければ空
+std::string tailscale_name() {
+#ifdef _WIN32
+    const std::string json = run_capture(L"\"" + tailscale_exe() + L"\" status --json --peers=false");
+    yyjson_doc* doc = yyjson_read(json.data(), json.size(), 0);
+    const char* v = doc ? yyjson_get_str(yyjson_obj_get(yyjson_obj_get(yyjson_doc_get_root(doc), "Self"), "DNSName")) : nullptr;
+    std::string name = v ? v : "";
+    yyjson_doc_free(doc);
+    while (!name.empty() && name.back() == '.') name.pop_back();
+    return name;
+#else
+    return {};
+#endif
+}
+
+// 合言葉を作る（見間違えやすい 0・o・1・l・i を除いた英小文字と数字で 12 文字）
+std::string make_serve_key() {
+    static const char kChars[] = "abcdefghjkmnpqrstuvwxyz23456789";
+    std::random_device rd;
+    std::string k;
+    for (int i = 0; i < 12; ++i) k += kChars[rd() % (sizeof(kChars) - 1)];
+    return k;
+}
+
 // 譜面を貸す（BMjoybody --serve）を、ログインしている間ずっと動かす（Windows のタスクスケジューラ）。
 // 設定を変えたら、動いているものを止めて登録し直し、すぐ動かす。貸さないなら登録を消す
 void apply_serve(const AppConfig& cfg, std::string& message) {
@@ -168,15 +232,22 @@ void apply_serve(const AppConfig& cfg, std::string& message) {
     };
     const std::wstring task = L"BMjoy 譜面の配信";
     run(L"schtasks /End /TN \"" + task + L"\"");
-    if (!cfg.serve || cfg.serve_key.empty()) {
+    const bool serving = cfg.serve && static_cast<int>(cfg.serve_key.size()) >= kMinServeKey;
+    // インターネットに出す口（Tailscale の funnel）。貸さないときと、外に出さないときは閉じる
+    const std::wstring ts = L"\"" + tailscale_exe() + L"\"";
+    if (!serving || !cfg.serve_public) run(ts + L" funnel --https=" + std::to_wstring(kFunnelPort) + L" off");
+    if (!serving) {
         run(L"schtasks /Delete /F /TN \"" + task + L"\"");
-        if (cfg.serve) message = "合言葉が無いので、譜面を貸しません";
+        if (cfg.serve) message = "合言葉が " + std::to_string(kMinServeKey) + " 文字より短いので、譜面を貸しません";
         return;
     }
     const std::wstring exe = wide(dir + "BMjoybody.exe");
     const bool ok = run(L"schtasks /Create /F /SC ONLOGON /RL LIMITED /TN \"" + task + L"\" /TR \"\\\"" + exe + L"\\\" --serve\"") &&
                     run(L"schtasks /Run /TN \"" + task + L"\"");
     message = ok ? "譜面を貸し始めました（ポート " + std::to_string(cfg.serve_port) + "）" : "譜面の配信を登録できません";
+    if (ok && cfg.serve_public &&
+        !run(ts + L" funnel --bg --https=" + std::to_wstring(kFunnelPort) + L" http://127.0.0.1:" + std::to_wstring(cfg.serve_port)))
+        message = "譜面を貸し始めましたが、インターネットには出せません（Tailscale の funnel が使えるか確かめてください）";
 #else
     (void)cfg;
     if (cfg.serve) message = "譜面を貸すのは Windows だけです（BMjoybody --serve を動かしてください）";
@@ -1141,7 +1212,7 @@ int main(int, char**) {
     remove_old_update_files();
     upload_logs_async(cfg);
     // 譜面を貸す設定（変わったら、保存するときに配信を登録し直す）
-    auto serve_state = [](const AppConfig& c) { return std::make_tuple(c.serve, c.serve_port, c.serve_key); };
+    auto serve_state = [](const AppConfig& c) { return std::make_tuple(c.serve, c.serve_port, c.serve_key, c.serve_public); };
     auto serve_applied = serve_state(cfg);
 
     SDL_Window* window = SDL_CreateWindow("BMjoy SETUP", kW, kH, SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -1267,6 +1338,16 @@ int main(int, char**) {
             update.done = true;
         });
     }
+    // 借りる先につながるか試す（裏で動かす）
+    struct BorrowTest {
+        std::thread th;
+        std::mutex mu;
+        std::string result;
+        bool running = false, done = false;
+        ~BorrowTest() {
+            if (th.joinable()) th.join();
+        }
+    } borrow_test;
     bool quit = false, start = false;
     bool autostart = dev_env("BMJ_LAUNCHER_AUTOSTART") != nullptr;  // 開発用：すぐ起動する
     // LR2 から引き継ぐ（BMJOY タブのボタンと、初めての起動の案内から）
@@ -1671,17 +1752,47 @@ int main(int, char**) {
             // 譜面の貸し借り（仕様書10章「借りて返す」）。持っていない譜面を、遊ぶときだけ自分のほかの PC から借りる
             g.label(X + 20, Y + 16, "貸す（この PC の譜面を、ほかの PC に）");
             g.check(X + 34, Y + 40, "譜面を貸す", cfg.serve);
-            g.label(X + 34, Y + 70, "ポート");
-            g.edit_int(cfg.serve_port, X + 124, Y + 64, 70, 20, true, 1, 65535);
-            g.label(X + 34, Y + 98, "合言葉");
-            g.edit_str(cfg.serve_key, X + 124, Y + 92, 240, 20);
-            g.label(X + 20, Y + 140, "借りる（ほかの PC の譜面を）");
-            g.label(X + 34, Y + 168, "借りる先");
-            g.edit_str(cfg.borrow_url, X + 124, Y + 162, 300, 20);
-            g.label(X + 34, Y + 196, "合言葉");
-            g.edit_str(cfg.borrow_key, X + 124, Y + 190, 240, 20);
-            g.label(X + 34, Y + 224, "置き場の上限（MB）");
-            g.edit_int(cfg.borrow_cache_mb, X + 170, Y + 218, 90, 20, true, 100, 10000000);
+            g.check(X + 200, Y + 40, "インターネットからも借りられるようにする", cfg.serve_public, cfg.serve);
+            g.label(X + 34, Y + 70, "ポート", cfg.serve);
+            g.edit_int(cfg.serve_port, X + 124, Y + 64, 70, 20, cfg.serve, 1, 65535);
+            g.label(X + 34, Y + 98, "合言葉", cfg.serve);
+            g.edit_str(cfg.serve_key, X + 124, Y + 92, 240, 20, cfg.serve);
+            if (g.button(X + 372, Y + 91, 60, 22, "作る", cfg.serve)) g.unfocus(), cfg.serve_key = make_serve_key();
+            // 借りる側に入れる住所（Tailscale の名前から）
+            static std::string ts_name;
+            static bool ts_asked = false;
+            if (!ts_asked) ts_asked = true, ts_name = tailscale_name();
+            if (cfg.serve) {
+                const std::string here = cfg.serve_public && !ts_name.empty()
+                                             ? "https://" + ts_name + ":" + std::to_string(kFunnelPort)
+                                             : "http://" + (ts_name.empty() ? std::string("<この PC の名前>") : ts_name) + ":" + std::to_string(cfg.serve_port);
+                g.label(X + 34, Y + 126, "住所");
+                g.label(X + 124, Y + 126, here);
+                if (g.button(X + 488, Y + 119, 60, 22, "写す")) SDL_SetClipboardText(here.c_str()), message = "住所を写しました";
+            }
+            g.label(X + 20, Y + 160, "借りる（ほかの PC の譜面を）");
+            g.label(X + 34, Y + 188, "借りる先");
+            g.edit_str(cfg.borrow_url, X + 124, Y + 182, 300, 20);
+            g.label(X + 34, Y + 216, "合言葉");
+            g.edit_str(cfg.borrow_key, X + 124, Y + 210, 240, 20);
+            g.label(X + 34, Y + 244, "置き場の上限（MB）");
+            g.edit_int(cfg.borrow_cache_mb, X + 170, Y + 238, 90, 20, true, 100, 10000000);
+            // つながるか試す（貸せる譜面の一覧を取ってみる）
+            if (g.button(X + 432, Y + 181, 60, 22, "試す", !cfg.borrow_url.empty() && !borrow_test.running)) {
+                g.unfocus();
+                borrow_test.running = true, borrow_test.done = false;
+                borrow_test.th = std::thread([&borrow_test, src = BorrowSource{cfg.borrow_url, cfg.borrow_key}] {
+                    std::vector<std::pair<std::string, std::string>> list;
+                    std::string err;
+                    const bool ok = borrow_list(src, list, err);
+                    std::lock_guard<std::mutex> lock(borrow_test.mu);
+                    borrow_test.result = ok ? "つながりました（借りられる譜面 " + std::to_string(list.size()) + "）"
+                                            : err.find("403") != std::string::npos ? "合言葉が違います"
+                                                                                   : "つながりません：" + err;
+                    borrow_test.done = true;
+                });
+                message = "借りる先につないでいます";
+            }
         } else if (tab == 8 && mod_detail >= 0 && mod_detail < static_cast<int>(mods.size())) {
             draw_mod_detail(g, mods, mods[mod_detail], cfg.enabled_mods, cfg.lr2_root.empty() ? base_dir() : from_portable(cfg.lr2_root), X, Y, det_page, det_sel, det_scroll, det_add, [&] { mod_detail = -1; });
         } else if (tab == 8) {
@@ -1782,6 +1893,10 @@ int main(int, char**) {
                     message = job.res.error;
                 }
             }
+        }
+        if (borrow_test.running) {
+            std::lock_guard<std::mutex> lock(borrow_test.mu);
+            if (borrow_test.done) borrow_test.th.join(), borrow_test.running = false, message = borrow_test.result;
         }
         bool updating = false;
         if (update.running) {

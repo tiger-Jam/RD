@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -99,6 +100,10 @@ struct Options {
     std::string skin_parts;  // 開発用：プレースキン（--skin で替えられる）を部品ごとに切り出して、このフォルダに書いて終わる
     bool list_owned = false;  // 持っている譜面の md5 とフォルダを 1 行ずつ出して終わる
     bool serve = false;       // 譜面を貸す（設定の serve が 0 になるまで動き続ける）
+    int serve_dev_port = 0;   // 開発用：設定を使わずに、この口と合言葉で貸す（--serve-dev ポート 合言葉）
+    std::string serve_dev_key;
+    std::string borrow_test;  // 開発用：借りる先・合言葉・譜面のハッシュ（--borrow-test URL 合言葉 ハッシュ）で借りてみて終わる
+    std::string borrow_test_key, borrow_test_hash;
     // 外の道具（曲を集める道具）から使う：登録した難易度表を取り直す（その日の 2 回目からは手元の版）／登録した曲フォルダを全部読み直す
     bool update_tables = false, rescan = false;
     std::string tables_file;  // 登録した表に足して使う表の URL の一覧（1 行に 1 つ。収集だけに使い、選曲画面には出さない）
@@ -149,6 +154,10 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--chart-dump") o.chart_dump_list = next();  // 開発用：ファイルの 1 行ずつの譜面を読み、ノーツの中身の要約を出す  // まだ傾向を分析していない譜面を全部分析して終わる
         else if (a == "--export-chart-attrs") o.export_chart_attrs = next();  // 分析した傾向を書き出して終わる（配る分析の結果を作る）
         else if (a == "--serve") o.serve = true;
+#ifdef BMJ_DEV
+        else if (a == "--serve-dev") o.serve = true, o.serve_dev_port = std::atoi(next()), o.serve_dev_key = next();
+        else if (a == "--borrow-test") o.borrow_test = next(), o.borrow_test_key = next(), o.borrow_test_hash = next();
+#endif
         else if (a == "--update-tables") o.update_tables = true;
         else if (a == "--rescan") o.rescan = true;
         else if (a == "--tables-file") o.tables_file = next();
@@ -551,12 +560,15 @@ int list_missing(const std::string& which, const std::vector<std::string>& level
 
 // 譜面を貸す（仕様書10章「借りて返す」）。曲データベースの譜面を、合言葉を知っている相手に貸す。
 // 曲データベースは 10 分ごとに読み直し（曲を集める道具が足したものも貸す）、設定の serve が 0 になったら終わる
-int serve_charts() {
+// dev_port・dev_key は開発用（設定を書き換えずに、ほかの口と合言葉で貸す。設定が変わっても止まらない）
+int serve_charts(int dev_port, const std::string& dev_key) {
     AppConfig cfg;
     migrate_old_data();
     load_config(cfg);
-    if (cfg.serve_key.empty()) {
-        std::fprintf(stderr, "合言葉が決まっていないので貸さない（設定の serve_key）\n");
+    const bool dev = dev_port > 0;
+    if (dev) cfg.serve = true, cfg.serve_port = dev_port, cfg.serve_key = dev_key;
+    if (static_cast<int>(cfg.serve_key.size()) < kMinServeKey) {
+        std::fprintf(stderr, "合言葉が短いので貸さない（%d 文字以上。設定の serve_key）\n", kMinServeKey);
         return 1;
     }
     std::mutex mu;
@@ -576,16 +588,35 @@ int serve_charts() {
         return 1;
     }
     const std::string key = cfg.serve_key;
+    // 合言葉の違う問い合わせが 1 分に 20 回を超えたら、1 分のあいだ誰にも答えない（インターネットから合言葉を試し続けられないように）
+    std::deque<std::chrono::steady_clock::time_point> refused;
+    std::chrono::steady_clock::time_point locked_until{};
     HttpServer server;
     std::string err;
     if (!server.start(cfg.serve_port, [&](const HttpRequest& r) {
             std::shared_ptr<const BorrowLibrary> l;
+            const auto now = std::chrono::steady_clock::now();
             {
                 std::lock_guard<std::mutex> lock(mu);
+                if (now < locked_until) {
+                    HttpResponse busy;
+                    busy.status = 429, busy.body = "too many requests\n";
+                    return busy;
+                }
                 l = lib;
             }
             HttpResponse res = l->handle(r, key);
             if (res.status != 200) std::printf("断った %d：%s\n", res.status, r.path.c_str());
+            if (res.status == 403) {
+                std::lock_guard<std::mutex> lock(mu);
+                refused.push_back(now);
+                while (!refused.empty() && now - refused.front() > std::chrono::minutes(1)) refused.pop_front();
+                if (refused.size() > 20) {
+                    locked_until = now + std::chrono::minutes(1);
+                    refused.clear();
+                    std::printf("合言葉の違う問い合わせが続いたので、1 分止める\n");
+                }
+            }
             return res;
         }, err)) {
         std::fprintf(stderr, "%s\n", err.c_str());
@@ -596,7 +627,7 @@ int serve_charts() {
         std::this_thread::sleep_for(std::chrono::minutes(1));
         AppConfig now;
         now.load(config_path());
-        if (!now.serve || now.serve_key != key || now.serve_port != cfg.serve_port) break;  // 止めた・変えた（変えたときは呼び直してもらう）
+        if (!dev && (!now.serve || now.serve_key != key || now.serve_port != cfg.serve_port)) break;  // 止めた・変えた（変えたときは呼び直してもらう）
         if (minute % 10 == 0) rebuild();
     }
     server.stop();
@@ -651,7 +682,34 @@ int main(int argc, char** argv) {
 #endif
         start_log(opt.serve ? "serve" : "body");
     if (opt.latency_test) return latency_test(opt.exclusive, opt.buffer);
-    if (opt.serve) return serve_charts();
+    if (opt.serve) return serve_charts(opt.serve_dev_port, opt.serve_dev_key);
+    if (!opt.borrow_test.empty()) {
+        // 開発用：借りる先から、一覧・フォルダ・ファイルを取ってみて、譜面のハッシュが合うかを確かめる
+        const BorrowSource src{opt.borrow_test, opt.borrow_test_key};
+        std::vector<std::pair<std::string, std::string>> list;
+        std::string err;
+        if (!borrow_list(src, list, err)) return std::printf("一覧を取れない：%s\n", err.c_str()), 1;
+        std::printf("借りられる譜面：%zu\n", list.size());
+        BorrowFolder f;
+        if (!borrow_info(src, opt.borrow_test_hash, f, err)) return std::printf("フォルダを取れない：%s\n", err.c_str()), 1;
+        int64_t total = 0;
+        for (const auto& [size, rel] : f.files) total += size;
+        std::printf("フォルダ %s（%s）：ファイル %zu、%.1f MB、譜面 %s\n", f.name.c_str(), f.id.c_str(), f.files.size(), total / 1048576.0, f.chart.c_str());
+        const std::string dir = (std::filesystem::temp_directory_path() / ("bmj_borrow_test_" + f.id)).string();
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        const auto t0 = std::chrono::steady_clock::now();
+        if (!borrow_fetch(src, f, dir, false, nullptr, err)) return std::printf("ファイルを取れない：%s\n", err.c_str()), 1;
+        const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        std::ifstream in(std::filesystem::u8path(dir) / std::filesystem::u8path(f.chart), std::ios::binary);
+        const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::string want = opt.borrow_test_hash;
+        for (char& ch : want) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        const std::string h = want.size() == 32 ? md5_hex(bytes) : sha256_hex(bytes);
+        std::printf("取った：%.1f 秒。譜面のハッシュ %s\n", sec, h == want ? "一致" : "不一致");
+        std::filesystem::remove_all(dir, ec);
+        return h == want ? 0 : 1;
+    }
     if (!opt.list_missing.empty()) return list_missing(opt.list_missing, opt.levels, opt.tables_file, opt.list_all);
     if (!opt.chart_dump_list.empty()) {
         // 開発用：読み込みを書き直す前後で、ノーツが同じかを比べる。1 行に「パス<TAB>ノーツ数<TAB>中身の md5」

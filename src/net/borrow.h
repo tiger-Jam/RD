@@ -18,6 +18,9 @@
 
 namespace bmj {
 
+// 合言葉の長さの下限（インターネットからも借りられるようにするので、短いものは使わせない）
+inline constexpr int kMinServeKey = 8;
+
 // 貸す側：曲データベースの譜面から作り、HTTP の問い合わせに答える
 class BorrowLibrary {
 public:
