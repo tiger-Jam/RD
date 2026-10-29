@@ -560,7 +560,6 @@ int compose_check(const char* argv0, const Options& opt) {
 
 int list_missing(const std::string& which, const std::vector<std::string>& levels, const std::string& tables_file, bool all = false) {
     AppConfig cfg;
-    migrate_old_data();
     load_config(cfg);
     SongDb db;
     if (!db.open(song_db_path())) {
@@ -609,7 +608,6 @@ int list_missing(const std::string& which, const std::vector<std::string>& level
 // dev_port・dev_key は開発用（設定を書き換えずに、ほかの口と合言葉で貸す。設定が変わっても止まらない）
 int serve_charts(int dev_port, const std::string& dev_key) {
     AppConfig cfg;
-    migrate_old_data();
     load_config(cfg);
     const bool dev = dev_port > 0;
     if (!kShareReady && !dev) {
@@ -824,7 +822,6 @@ int main(int argc, char** argv) {
     }
     if (opt.fill_chart_attrs) {
         AppConfig cfg;
-        migrate_old_data();
         load_config(cfg);
         SongDb db;
         if (!db.open(song_db_path())) return 1;
@@ -841,7 +838,6 @@ int main(int argc, char** argv) {
     }
     if (opt.update_tables || opt.rescan) {
         AppConfig cfg;
-        migrate_old_data();
         load_config(cfg);
         int rc = 0;
         if (opt.update_tables) {
@@ -928,7 +924,6 @@ int main(int argc, char** argv) {
     int rc = 0;
     {
         App app;
-        migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の RDfiles へ
         app.cfg_path = config_path();
         if (load_config(app.cfg)) std::printf("設定: %s（プレイヤー %s）\n", app.cfg_path.c_str(), app.cfg.player.c_str());
         // コマンドラインの指定は設定に上書きし、終了時に保存する

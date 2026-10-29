@@ -18,9 +18,6 @@ std::string base_dir();
 std::string data_dir();
 // データの置き場のフォルダの名前（RDfiles。名前を変えられなかったときは前の名前の LR2files）
 std::string data_dir_name();
-// 前の置き場（OS の設定フォルダ）にだけ設定があれば、新しい置き場へ写す（前の置き場は消さずに残す）。
-// 起動のはじめに 1 回呼ぶ。写したら true
-bool migrate_old_data();
 // 今のプレイヤーの ID（空ならプレイヤーを分けない。テストなど）
 const std::string& player_id();
 void set_player_id(const std::string& id);

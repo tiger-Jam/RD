@@ -22,9 +22,9 @@ namespace {
 
 constexpr const char* kDataDirName = "RDfiles";
 
-// OS の設定フォルダ。app は名前（前の置き場は RD の前の名前の BMjoy）
-std::string pref_dir(const char* app = "RD") {
-    char* d = SDL_GetPrefPath(nullptr, app);
+// OS の設定フォルダ（実行ファイルのフォルダに書けないときだけ使う）
+std::string pref_dir() {
+    char* d = SDL_GetPrefPath(nullptr, "RD");
     std::string p = d ? d : "";
     SDL_free(d);
     return p;
@@ -87,35 +87,6 @@ std::string data_dir_name() {
     const fs::path d = fs::u8path(data_dir()).parent_path();
     if (fs::u8path(base_dir()).lexically_normal() == d.parent_path().lexically_normal() / "") return d.filename().string();
     return kDataDirName;
-}
-
-bool migrate_old_data() {
-    const fs::path old = fs::u8path(pref_dir("BMjoy")), now = fs::u8path(data_dir());
-    std::error_code ec;
-    if (old.empty() || fs::equivalent(old, now, ec)) return false;
-    if (fs::exists(now / "Config" / "config.txt", ec) || !fs::exists(old / "config.txt", ec)) return false;
-    // 前の置き場 → 新しい置き場（ファイルは上書きしない）
-    struct Move {
-        const char* from;
-        fs::path to;
-    };
-    const Move moves[] = {{"config.txt", now / "Config" / "config.txt"},     {"keyconfig.txt", now / "Config" / "keyconfig.txt"},
-                          {"songs.db", now / "Database" / "songs.db"},       {"lr2_courses.txt", now / "Database" / "lr2_courses.txt"},
-                          {"tables", now / "Database" / "Table"},            {"replay", now / "Replay"},
-                          {"inputlog", now / "Replay" / "InputLog"},         {"mods", now / "Mods"},
-                          {"moddata", now / "Mods" / "ModData"}};
-    for (const Move& m : moves) {
-        const fs::path src = old / m.from;
-        if (!fs::exists(src, ec)) continue;
-        fs::create_directories(fs::is_directory(src, ec) ? m.to : m.to.parent_path(), ec);
-        if (fs::is_directory(src, ec))
-            fs::copy(src, m.to, fs::copy_options::recursive | fs::copy_options::skip_existing, ec);
-        else
-            fs::copy_file(src, m.to, fs::copy_options::skip_existing, ec);
-        if (ec) std::printf("前の置き場から写せない: %s（%s）\n", src.string().c_str(), ec.message().c_str());
-    }
-    std::printf("設定と記録を %s から %s へ写した（前の置き場は残してある）\n", old.string().c_str(), now.string().c_str());
-    return true;
 }
 
 std::string to_portable(const std::string& path) {
