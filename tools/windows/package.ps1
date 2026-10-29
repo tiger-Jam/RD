@@ -25,6 +25,7 @@ $crt = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022\*\VC\Redi
 if ($crt) { Get-ChildItem $crt.FullName -Filter *.dll | Copy-Item -Destination $prog }
 else { Write-Output "Visual C++ のランタイムが見つからない（入れずに作る）" }
 Copy-Item -Recurse "$Build\mods" "$prog\mods"
+Copy-Item -Recurse "$Build\skinpatch" "$prog\skinpatch"  # RD で足したスキンの表示（スキンのファイルは書き換えない）
 Copy-Item $Notices $prog
 # FFmpeg（LGPL 2.1）を入れるので、その全文も置く（vcpkg が入れたもの）
 $ffl = Join-Path $env:USERPROFILE "vcpkg\installed\x64-windows\share\ffmpeg\copyright"

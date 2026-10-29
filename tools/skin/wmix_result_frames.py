@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ※ 書き換えた CSV は配らない。tools/skin/make_skin_patch.py で元の CSV との差分（skinpatch/）を作り、元の CSV のまま配る
 # W-MIX（WMIX_HD）のリザルト画面に、RD のゲージ（GAS・EX-HARD・ASSIST・CUSTOM1〜9）の名前のコマを足し、
 # 「今回のクリア」の絵を RD のボタン 901（ランプの色に染めて出す）にする。
 #

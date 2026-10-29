@@ -9,6 +9,8 @@
 #include "skin/lr2_skin.h"
 #include "skin/skin_color.h"
 #include "skin/skin_compose.h"
+#include "skin/skin_patch.h"
+#include "util/hash.h"
 #include "test.h"
 
 using namespace rd;
@@ -458,4 +460,31 @@ TEST(skin_adjust_judge_scale_config) {
     CHECK_EQ(c.skin_adjust.begin()->second.judge_x, 10);
     CHECK_EQ(c.skin_adjust.begin()->second.note_fine_y, 0);
     std::filesystem::remove_all(root);
+}
+
+// スキンの差分：中身が同じファイルにだけ当たり、元の行が合わなければ当てない。差分の絵は差分の置き場から読む
+TEST(skin_patch_apply) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "rd_test_skinpatch";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::string bytes = "#IMAGE,a.png\r\n#SRC_BUTTON,0,0,1\r\n#END\r\n";
+    std::ofstream(dir / (sha256_hex(bytes) + ".patch"), std::ios::binary)
+        << "# 説明\n@ 1 1\n+ #IMAGE,rdpatch:X/b.png\n@ 1 2\n- #SRC_BUTTON,0,0,1\n+ #SRC_BUTTON,0,1,2\n@ 3 3\n+ #NEW\n";
+    set_skin_patch_dir(dir.string());
+    std::vector<std::string> lines = skin_lines(bytes);
+    CHECK(apply_skin_patch(bytes, lines));
+    CHECK(lines == std::vector<std::string>({"#IMAGE,a.png", "#IMAGE,rdpatch:X/b.png", "#SRC_BUTTON,0,1,2", "#END", "#NEW"}));
+    // 違う中身には当たらない
+    std::vector<std::string> other = skin_lines("#IMAGE,a.png\r\n");
+    CHECK(!apply_skin_patch("#IMAGE,a.png\r\n", other));
+    // 元の行が合わなければ当てない
+    std::ofstream(dir / (sha256_hex(bytes) + ".patch"), std::ios::binary | std::ios::trunc) << "@ 1 2\n- #SRC_BUTTON,9\n+ x\n";
+    lines = skin_lines(bytes);
+    CHECK(!apply_skin_patch(bytes, lines));
+    CHECK(lines.size() == 3);
+    CHECK(fs::path(skin_patch_file("rdpatch:X/b.png")) == dir / "X" / "b.png");
+    CHECK(skin_patch_file("rdpatch:../x.png").empty() && skin_patch_file("LR2files/a.png").empty());
+    set_skin_patch_dir("");
+    fs::remove_all(dir);
 }

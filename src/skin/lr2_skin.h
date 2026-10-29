@@ -169,6 +169,9 @@ struct Lr2Skin {
 // 先頭の LR2files は、RDfiles（RD の素材の置き場）があればそれに読み替える
 std::string resolve_lr2_path(const std::string& lr2_root, const std::string& path, bool allow_wildcard = true);
 
+// スキンのファイルの中身を、読むときと同じに行へ分ける（文字は UTF-8 に直す）。スキンの差分を作る道具が使う
+std::vector<std::string> skin_lines(const std::string& bytes);
+
 // .lr2skin のヘッダ（#INFORMATION と カスタマイズ項目）だけを読む
 bool read_skin_header(const std::string& lr2_root, const std::string& skin_path, SkinHeader& out);
 

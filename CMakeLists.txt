@@ -63,6 +63,7 @@ add_library(rd_core STATIC
     src/skin/lr2_skin.cpp
     src/skin/skin_color.cpp
     src/skin/skin_compose.cpp
+    src/skin/skin_patch.cpp
     src/util/hash.cpp
     src/util/http.cpp
     src/net/http_server.cpp
@@ -185,7 +186,8 @@ endforeach()
 enable_testing()
 add_test(NAME rd_tests COMMAND rd_tests)
 
-# 公式の MOD を実行ファイルの横の mods/ に置く
+# 公式の MOD とスキンの差分を、実行ファイルの横の mods/・skinpatch/ に置く
 add_custom_command(TARGET RDbody POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_FILE_DIR:RDbody>/mods
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/mods $<TARGET_FILE_DIR:RDbody>/mods)
+    COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_FILE_DIR:RDbody>/mods $<TARGET_FILE_DIR:RDbody>/skinpatch
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/mods $<TARGET_FILE_DIR:RDbody>/mods
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/skinpatch $<TARGET_FILE_DIR:RDbody>/skinpatch)

@@ -1,4 +1,5 @@
 #include "skin/lr2_skin.h"
+#include "skin/skin_patch.h"
 
 #include <algorithm>
 #include <atomic>
@@ -408,7 +409,9 @@ struct Loader {
         enum class Branch { Taking, Waiting, Done };
         constexpr size_t kMaxIfDepth = 99;
         std::vector<Branch> branches;
-        for (std::string line : lines_of(bytes)) {
+        std::vector<std::string> all = lines_of(bytes);
+        apply_skin_patch(bytes, all);  // RD で足した表示（skinpatch/。中身が同じファイルにだけ当たる）
+        for (std::string line : all) {
             // LR2 は改行を含めて 7 文字以上の行だけを読む（skinload:888）。改行を除けば 6 文字以上。
             // 素の #ENDIF（6 文字）は読み、素の #ELSE（5 文字）は読まない
             if (line.size() < 6 || line[0] != '#') continue;
@@ -515,7 +518,8 @@ struct Loader {
             const int index = image_count++;
             SkinImage& img = sk.images[index];
             img = SkinImage{};
-            std::string resolved = resolve_lr2_path(root, apply_custom_file(p, &img.custom));
+            std::string resolved = skin_patch_file(p);  // 差分で足した絵
+            if (resolved.empty()) resolved = resolve_lr2_path(root, apply_custom_file(p, &img.custom));
             if (is_movie(p)) {
                 // 動画の大きさは開くまで分からないので、SRC の -1 はそのまま残す（描くときに動画の大きさにする）
                 if (resolved.empty()) sk.warnings.push_back("動画が見つからない: " + p);
@@ -1113,5 +1117,7 @@ int src_frame(const SkinSrc& src, double time) {
     const int frame = in_cycle * frames / src.cycle;
     return frame >= 0 && frame < frames ? frame : 0;
 }
+
+std::vector<std::string> skin_lines(const std::string& bytes) { return lines_of(bytes); }
 
 }  // namespace rd

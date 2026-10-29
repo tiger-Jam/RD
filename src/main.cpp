@@ -57,6 +57,7 @@
 #include "render/skin_play.h"
 #include "skin/lr2_skin.h"
 #include "skin/skin_compose.h"
+#include "skin/skin_patch.h"
 #include "skin/skin_parts.h"
 #include "util/data_dir.h"
 #include "util/log.h"
@@ -98,6 +99,8 @@ struct Options {
     std::string list_missing;
     bool list_all = false;  // --list-charts：持っている譜面も出す
     std::vector<std::string> levels;
+    std::string skin_dump;      // 開発用：スキンを（画像を読まずに）読み、画像の名前と部品の SRC・DST を出す（スキンの差分を確かめる）
+    std::string skin_lines;     // 開発用：スキンのファイルを、RD が読むときと同じに行へ分けて（UTF-8）出す（スキンの差分を作る道具が使う）
     std::string compose_check;  // 開発用：このフォルダの下のプレースキンから、部品を持ってこられるかを数える
     std::string skin_parts;  // 開発用：プレースキン（--skin で替えられる）を部品ごとに切り出して、このフォルダに書いて終わる
     bool list_owned = false;  // 持っている譜面の md5 とフォルダを 1 行ずつ出して終わる
@@ -151,6 +154,8 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--list-charts") o.list_missing = next(), o.list_all = true;
         else if (a == "--skin-parts") o.skin_parts = next();
         else if (a == "--compose-check") o.compose_check = next();
+        else if (a == "--skin-lines") o.skin_lines = next();
+        else if (a == "--skin-dump") o.skin_dump = next();
         else if (a == "--list-owned") o.list_owned = true;
         else if (a == "--chart-attr") o.chart_attr_list = next();  // 開発用：ファイルの 1 行ずつの譜面を分析して出す
         else if (a == "--fill-chart-attrs") o.fill_chart_attrs = true;
@@ -731,6 +736,7 @@ int main(int argc, char** argv) {
     if (!output_is_redirected())
 #endif
         start_log(opt.serve ? "serve" : "body");
+    set_skin_patch_dir(base_dir() + "skinpatch");  // RD で足したスキンの表示（スキンのファイルは書き換えない）
     // コマンドで動かすときも、先に設定を読んで今のプレイヤーを決める（決めずに曲データベースを開くと、
     // songs.db に空の記録の表を作り、プレイヤーの記録が見えなくなる）
     if (player_id().empty()) {
@@ -811,6 +817,36 @@ int main(int argc, char** argv) {
     }
     if (!opt.skin_parts.empty()) return export_parts(argv[0], opt);
     if (!opt.compose_check.empty()) return compose_check(argv[0], opt);
+    if (!opt.skin_dump.empty()) {
+        AppConfig cfg;
+        load_config(cfg);
+        const std::string root = find_lr2_root(opt.lr2_root.empty() ? cfg.lr2_root : opt.lr2_root, argv[0]);
+        SkinHeader h;
+        Lr2Skin sk;
+        std::string err;
+        if (!read_skin_header(root, opt.skin_dump, h) || !load_lr2_skin(root, opt.skin_dump, h, PlayContext{}.load_options(), sk, err, nullptr, false))
+            return std::fprintf(stderr, "読めない: %s\n", err.c_str()), 1;
+        for (size_t i = 0; i < sk.images.size(); ++i)
+            if (!sk.images[i].path.empty()) std::printf("image %zu %s\n", i, std::filesystem::u8path(sk.images[i].path).filename().u8string().c_str());
+        auto dump = [](const char* kind, const std::vector<SkinObject>& v) {
+            for (const SkinObject& o : v) {
+                std::printf("%s src %d %d %d %d %d %d %d %d %d %d %d", kind, o.src.n, o.src.gr, o.src.x, o.src.y, o.src.w, o.src.h,
+                            o.src.div_x, o.src.div_y, o.src.cycle, o.src.timer, o.src.op[0]);
+                for (const SkinDstKey& k : o.dst.keys) std::printf(" | %d %g %g %g %g %d %d", k.time, k.x, k.y, k.w, k.h, k.a, k.blend);
+                std::printf("\n");
+            }
+        };
+        dump("image", sk.image_objs), dump("number", sk.numbers), dump("bargraph", sk.bargraphs), dump("slider", sk.sliders);
+        dump("button", sk.buttons), dump("onmouse", sk.onmouse);
+        return 0;
+    }
+    if (!opt.skin_lines.empty()) {
+        std::ifstream in(std::filesystem::u8path(opt.skin_lines), std::ios::binary);
+        const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::printf("%s\n", sha256_hex(bytes).c_str());
+        for (const std::string& l : skin_lines(bytes)) std::printf("%s\n", l.c_str());
+        return 0;
+    }
     if (!opt.export_chart_attrs.empty()) {
         AppConfig cfg;
         load_config(cfg);
