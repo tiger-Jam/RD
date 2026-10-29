@@ -306,123 +306,123 @@ void fit_note_height(const SkinSrc& src, SkinDraw& d, float size_y) {
 
 }  // namespace
 
-// LR2: AddDrawingBuffer_PlayArea。フィルタは無し、合成はアルファ
-void SkinRenderer::add_play_area(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, float sx, float sy,
-                                 int alpha, float size_x, float size_y) {
+// レーンの DST の場所に置く（ノーツ・小節線・判定ライン）。大きさの調整は中心を動かさずに足し、そのあとずらす。
+// フィルタは無し、合成はアルファ
+void SkinRenderer::put_on_lane(const SkinSrc& src, const SkinDst& dst, const PlaySkinState& st, const LanePlacement& at) {
     if (dst.empty() || !src.valid) return;
     SkinDraw d = eval_dst(dst, st.timers->lapse(dst.timer, st.now_ms));
-    d.w += size_x, d.h += size_y;
-    d.x -= size_x * 0.5f, d.y -= size_y * 0.5f;
-    d.x += sx;
-    d.y += sy;
+    d.w += at.grow_w, d.h += at.grow_h;
+    d.x -= at.grow_w * 0.5f, d.y -= at.grow_h * 0.5f;
+    d.x += at.dx;
+    d.y += at.dy;
     d.filter = 0;
     d.blend = 1;
-    if (alpha >= 0) d.a = alpha;
-    fit_note_height(src, d, size_y);
+    if (at.alpha) d.a = *at.alpha;
+    fit_note_height(src, d, at.grow_h);
     add(src, d, src_time(src, dst, st));
 }
 
-// LR2: AddDrawingBuffer_LN（skindraw:279）
-void SkinRenderer::add_ln(const SkinSrc& s, const SkinSrc& e, const SkinSrc& b, const SkinDst& dst,
-                          const PlaySkinState& st, float shift_y, float long_y, int active, float shift_x, float size_x, float size_y) {
-    if (dst.empty() || !s.valid || !e.valid || !b.valid) return;
-    // active：-1 は押していない（取り逃した）LN で半透明、0 は止めた絵、それ以外は src のタイマーで動かす
-    const int opacity = active == -1 ? 128 : 255;
-    SkinDraw base = eval_dst(dst, st.timers->lapse(dst.timer, st.now_ms));
-    base.w += size_x, base.h += size_y;
-    base.x -= size_x * 0.5f - shift_x, base.y -= size_y * 0.5f;
+// LN：始点（head_y）と終点（tail_y）のノーツと、そのあいだの中身。中身は終点のノーツの下の端から始点のノーツの上の端まで
+void SkinRenderer::add_ln(const LnParts& parts, const SkinDst& dst, const PlaySkinState& st, float head_y, float tail_y, LnLook look,
+                          float dx, float grow_w, float grow_h) {
+    if (dst.empty() || !parts.head->valid || !parts.tail->valid || !parts.body->valid) return;
+    // 始点と終点は中身より手前に重ねる（始点がいちばん手前）
+    constexpr float kTailLayer = 1, kHeadLayer = 2;
+    SkinDraw lane = eval_dst(dst, st.timers->lapse(dst.timer, st.now_ms));
+    lane.w += grow_w, lane.h += grow_h;
+    lane.x -= grow_w * 0.5f - dx, lane.y -= grow_h * 0.5f;
     auto put = [&](const SkinSrc& src, SkinDraw d) {
         d.blend = 1;
-        d.a = opacity;
-        add(src, d, active == 0 ? -1.0 : src_time(src, dst, st));
+        d.a = look == LnLook::Done ? 128 : 255;
+        add(src, d, look == LnLook::Still ? -1.0 : src_time(src, dst, st));
     };
-    // 中身：終点のノーツの下の端（long_y の下）から、始点のノーツ（shift_y）まで
-    SkinDraw body = base;
-    const float body_from = long_y + base.h;
-    body.y += body_from;
-    body.h = shift_y - long_y - base.h;
-    // 始点の高さを変えていれば、中身は始点の上の端まで伸ばす（すき間を作らない）
-    if (s.draw_h > 0) body.h += base.h - (s.draw_h + size_y);
-    put(b, body);
-    // 始点と終点（中身より手前に描く）
-    SkinDraw head = base;
-    head.sort += 2;
-    head.y += shift_y;
-    fit_note_height(s, head, size_y);
-    put(s, head);
-    SkinDraw tail = base;
-    tail.sort += 1;
-    tail.y += long_y;
-    fit_note_height(e, tail, size_y);
-    put(e, tail);
+    const float tail_bottom = tail_y + lane.h;
+    SkinDraw body = lane;
+    body.y += tail_bottom;
+    body.h = head_y - tail_bottom;
+    // 始点のノーツの高さを変えていれば、その上の端は下がる（中身をそこまで伸ばしてすき間を作らない）
+    if (parts.head->draw_h > 0) body.h += lane.h - (parts.head->draw_h + grow_h);
+    put(*parts.body, body);
+    SkinDraw head = lane;
+    head.sort += kHeadLayer;
+    head.y += head_y;
+    fit_note_height(*parts.head, head, grow_h);
+    put(*parts.head, head);
+    SkinDraw tail = lane;
+    tail.sort += kTailLayer;
+    tail.y += tail_y;
+    fit_note_height(*parts.tail, tail, grow_h);
+    put(*parts.tail, tail);
 }
 
-// LR2: DrawNotes（Scene04_Play.cpp:310）。1P側（スキンのレーン番号0..7）だけ
+// 1P 側（スキンのレーン番号 0..7）のノーツ・小節線
 void SkinRenderer::add_notes(const Lr2Skin& skin, const PlaySkinState& st) {
     const Chart& chart = *st.chart;
     const JudgeEngine& judge = *st.judge;
     // 1拍=480（LR2の1小節=1920）。y = (今 − ノーツ) × ハイスピ / 600
-    double k = 480.0 * st.speed_multiplier * st.hi_speed * (st.base_speed / 100.0) / 600.0;
-    float draw_start = 0;
-    if (!skin.note_dst[1].empty()) draw_start = -skin.note_dst[1].keys.front().h;
+    const double px_per_beat = 480.0 * st.speed_multiplier * st.hi_speed * (st.base_speed / 100.0) / 600.0;
+    // これより上（鍵盤 1 のノーツの高さの分だけ画面の上の外）に来たノーツから先は描かない
+    const float visible_top = skin.note_dst[1].empty() ? 0.0f : -skin.note_dst[1].keys.front().h;
+    // 判定ラインから上へのずれ（画素。判定ラインより下には行かない）に、LIFT と位置の調整を入れたもの
+    auto px_above_judge = [&](double pos) {
+        const int rise = std::min(0, static_cast<int>((st.render_beat - pos) * px_per_beat));
+        return rise - static_cast<int>(st.lift_px) + st.adjust.note_y + st.adjust.note_fine_y;
+    };
+    LanePlacement at;
+    at.dx = static_cast<float>(st.adjust.note_x);
+    at.grow_w = static_cast<float>(st.adjust.size_x);
+    at.alpha = 255;
 
-    // 小節線
+    // 小節線（高さの調整はしない）
     if (!skin.line[0].dst.empty()) {
-        float base_y = skin.line[0].dst.keys.front().y;
+        const float line_y = skin.line[0].dst.keys.front().y;
         for (const BarLine& bar : chart.bars) {
             if (bar.pos < st.render_beat) continue;
-            float y = static_cast<float>((st.render_beat - bar.pos) * k) - st.lift_px;
-            if (base_y + y <= draw_start) break;
-            add_play_area(skin.line[0].src, skin.line[0].dst, st, static_cast<float>(st.adjust.note_x),
-                          y + st.adjust.note_y + st.adjust.note_fine_y, 255,
-                          static_cast<float>(st.adjust.size_x), 0);
+            const float y = static_cast<float>((st.render_beat - bar.pos) * px_per_beat) - st.lift_px;
+            if (line_y + y <= visible_top) break;
+            at.dy = y + st.adjust.note_y + st.adjust.note_fine_y;
+            put_on_lane(skin.line[0].src, skin.line[0].dst, st, at);
         }
     }
+    at.grow_h = static_cast<float>(st.adjust.size_y);
 
+    // HIDDEN / SUDDEN（LR2: Play.cpp:328）。判定ラインまでの高さに対する割合で、見せる縦の範囲を決める。
+    // OpenLR2 はここでスキンの行番号（sortID）を高さとして使っているが、移植の誤りと見て判定ラインの位置を使う
+    struct Band {
+        float top, bottom;
+        bool to_screen_bottom;  // 下は画面の下の端まで
+    };
+    static constexpr Band kBands[3] = {{0.0f, 0.6f, false}, {0.6f, 0.0f, true}, {0.55f, 0.65f, false}};
     for (int lane = 0; lane < kLaneCount; ++lane) {
         const SkinDst& dst = skin.note_dst[lane];
         if (dst.empty()) continue;
-        float dst_y = dst.keys.front().y;
-        // HIDDEN / SUDDEN（LR2: Play.cpp:328）。判定ラインまでの高さの 60% を境に隠す。
-        // OpenLR2 はここでスキンの行番号（sortID）を高さとして使っているが、移植の誤りと見て判定ラインの位置を使う
+        const float judge_y = dst.keys.front().y;
         clip_top_ = clip_bottom_ = -1;
-        if (st.effect == 1) clip_top_ = 0, clip_bottom_ = dst_y * 0.6f;
-        else if (st.effect == 2) clip_top_ = dst_y * 0.6f, clip_bottom_ = static_cast<float>(skin.height);
-        else if (st.effect == 3) clip_top_ = dst_y * 0.55f, clip_bottom_ = dst_y * 0.65f;
+        if (st.effect >= 1 && st.effect <= 3) {
+            const Band& b = kBands[st.effect - 1];
+            clip_top_ = b.top > 0 ? judge_y * b.top : 0.0f;
+            clip_bottom_ = b.to_screen_bottom ? static_cast<float>(skin.height) : judge_y * b.bottom;
+        }
         for (size_t i = 0; i < chart.notes.size(); ++i) {
             const Note& n = chart.notes[i];
             if (n.lane != lane || n.kind == NoteKind::Invisible) continue;
-            bool is_ln = n.kind == NoteKind::Long;
-            double end_pos = is_ln ? n.end_pos : n.pos;
+            const bool is_ln = n.kind == NoteKind::Long;
+            const double end_pos = is_ln ? n.end_pos : n.pos;
             // 判定が終わって、判定ラインも過ぎたものは描かない
             if (judge.note_done(i) && n.pos <= st.render_beat && end_pos <= st.render_beat) continue;
-            double raw = (st.render_beat - n.pos) * k;
-            if (dst_y + raw - st.lift_px <= draw_start && n.pos > st.render_beat) break;  // 画面より上
-            int note_y = static_cast<int>(raw);
-            int note_l = static_cast<int>((st.render_beat - end_pos) * k);
-            if (note_y > 0) note_y = 0;
-            if (note_l > 0) note_l = 0;
-            note_y -= static_cast<int>(st.lift_px);
-            note_l -= static_cast<int>(st.lift_px);
-            // ノーツの位置と大きさの調整（LR2: Play.cpp:561 の note_x / note_y / notesize）
-            note_y += st.adjust.note_y;
-            note_l += st.adjust.note_y;
-            // ノーツだけの縦の位置（BMjoy。判定ラインは動かさない）
-            note_y += st.adjust.note_fine_y;
-            note_l += st.adjust.note_fine_y;
-            const float nx = static_cast<float>(st.adjust.note_x), szx = static_cast<float>(st.adjust.size_x),
-                        szy = static_cast<float>(st.adjust.size_y);
-            if (n.kind == NoteKind::Mine) {
-                add_play_area(skin.mine[lane], dst, st, nx, static_cast<float>(note_y), 255, szx, szy);
-            } else if (!is_ln) {
-                add_play_area(skin.note[lane], dst, st, nx, static_cast<float>(note_y), 255, szx, szy);
-            } else {
-                int active;
-                if (st.autoplay) active = (n.pos <= st.render_beat && end_pos > st.render_beat) ? 5 : 0;
-                else active = judge.note_done(i) ? -1 : judge.ln_holding(i) ? 5 : 0;
-                add_ln(skin.ln_start[lane], skin.ln_end[lane], skin.ln_body[lane], dst, st, static_cast<float>(note_y),
-                       static_cast<float>(note_l), active, nx, szx, szy);
+            const double rise = (st.render_beat - n.pos) * px_per_beat;
+            if (n.pos > st.render_beat && judge_y + rise - st.lift_px <= visible_top) break;  // 画面より上
+            const float y = static_cast<float>(px_above_judge(n.pos));
+            if (!is_ln) {
+                at.dy = y;
+                put_on_lane(n.kind == NoteKind::Mine ? skin.mine[lane] : skin.note[lane], dst, st, at);
+                continue;
             }
+            // LN の見た目：押さえている間は絵を動かす。判定が終わったもの（取り逃がし・途中で離した）は半透明
+            const bool holding = st.autoplay ? n.pos <= st.render_beat && end_pos > st.render_beat : judge.ln_holding(i);
+            const LnLook look = !st.autoplay && judge.note_done(i) ? LnLook::Done : holding ? LnLook::Moving : LnLook::Still;
+            const LnParts parts{&skin.ln_start[lane], &skin.ln_end[lane], &skin.ln_body[lane]};
+            add_ln(parts, dst, st, y, static_cast<float>(px_above_judge(end_pos)), look, at.dx, at.grow_w, at.grow_h);
         }
     }
     clip_top_ = clip_bottom_ = -1;
@@ -547,10 +547,14 @@ void SkinRenderer::draw_play(const Lr2Skin& skin, const PlaySkinState& st) {
         if (st.show_judge) add_judge_combo(skin, st);
     }
     // 判定ラインも LIFT の分だけ上げる（OpenLR2 と同じ）
-    if (!skin.judgeline[0].dst.empty())
-        add_play_area(skin.judgeline[0].src, skin.judgeline[0].dst, st, static_cast<float>(st.adjust.note_x),
-                      static_cast<float>(st.adjust.note_y) - st.lift_px, -1, static_cast<float>(st.adjust.size_x),
-                      static_cast<float>(st.adjust.size_y));
+    if (!skin.judgeline[0].dst.empty()) {
+        LanePlacement at;
+        at.dx = static_cast<float>(st.adjust.note_x);
+        at.dy = static_cast<float>(st.adjust.note_y) - st.lift_px;
+        at.grow_w = static_cast<float>(st.adjust.size_x);
+        at.grow_h = static_cast<float>(st.adjust.size_y);
+        put_on_lane(skin.judgeline[0].src, skin.judgeline[0].dst, st, at);
+    }
     add_common(skin, st);
     flush(skin);
     adjust_ = SkinAdjust{};

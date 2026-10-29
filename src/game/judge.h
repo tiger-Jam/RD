@@ -117,12 +117,12 @@ public:
     // 描画用：レーンごとの、まだ判定していない先頭のノーツの添字（chart.notes 上）
     bool note_done(size_t index) const { return done_[index]; }
     // LNの始点を押して保持中か
-    bool ln_holding(size_t index) const { return active_[index] > 0; }
+    bool ln_holding(size_t index) const { return phase_[index] == LnPhase::Held; }
     bool lane_held(int lane) const { return held_[lane]; }
     // そのレーンでLNを押し続けている最中か
     bool lane_ln_holding(int lane) const {
         const Lane& l = lanes_[lane];
-        return l.cur < l.notes.size() && active_[l.notes[l.cur]] > 0;
+        return l.cur < l.notes.size() && ln_holding(l.notes[l.cur]);
     }
 
 private:
@@ -137,10 +137,30 @@ private:
         return judge;
     }
 
-    void proc(int lane, int keypress, int timing_ms, int64_t t_us);
-    void proc_single(int lane, int keypress, int timing_ms, int64_t t_us);
-    void proc_long(int lane, int keypress, int timing_ms, int64_t t_us);
-    void proc_charge(int lane, int keypress, int timing_ms, int64_t t_us);
+    // LN の始点の状態：まだ押していない・押さえている・終わった
+    enum class LnPhase : uint8_t { Waiting, Held, Closed };
+    // レーンの先頭のノーツの扱い
+    enum class Front : uint8_t { Mine, Tap, Ln, Charge };
+    Front front_of(const Note& n) const;
+    // レーンの先頭のノーツに、時刻が進んだこと（held は押し続けているか）・押したこと・離したことを伝える。
+    // hit は、同じ押下で次のノーツも判定するとき（BAD の連鎖）に true を返す
+    void sweep(int lane, bool held, int timing_ms, int64_t t_us);
+    bool hit(int lane, int timing_ms, int64_t t_us);
+    void lift(int lane, int timing_ms, int64_t t_us);
+    bool auto_step(int lane, int64_t t_us);
+    // 先頭のノーツを判定済みにして、次へ進む
+    void step_past(int lane);
+    void miss(int lane, int64_t t_us);
+    void miss_charge(int lane, int64_t t_us);
+    void close_long(int lane, LnPhase to);
+    void explode(int lane, const Note& mine, int64_t t_us);
+    void start_hcn(int lane, size_t index, int64_t from_us);
+    // レーンの音をそのノーツの音に替えて鳴らす／今のレーンの音を鳴らす
+    void sound_on(int lane, uint16_t sound);
+    void play_key(int lane);
+    // どのノーツの判定にもならなかった押下
+    void stray_press(int lane, const Note& n, int timing_ms, int64_t t_us, bool may_count);
+    bool counting() const { return stats_.note_current < stats_.total_notes; }
     // LN の種類（1 = LN 2 = CN 3 = HCN）
     int ln_type(const Note& n) const { return n.ln_type ? n.ln_type : cfg_.ln_mode + 1; }
     bool is_charge(const Note& n) const { return n.kind == NoteKind::Long && ln_type(n) >= 2; }
@@ -148,6 +168,7 @@ private:
     int tail_judge(int lane, int dm) const;
     void hcn_tick(int64_t t_us);
     void judge_to_score(int judge, int lane, int64_t t_us, int offset_ms, bool has_offset);
+    JudgeEvent make_event(int lane, int64_t t_us, int judge, int offset_ms, bool has_offset) const;
     void apply_judge(int judge, double mul = 1.0);
     void apply_mine(int damage, int lane, int64_t t_us);
 
@@ -180,8 +201,8 @@ private:
     };
     std::array<Hcn, kLaneCount> hcn_{};
     std::vector<bool> done_;
-    std::vector<int> active_;  // LN始点の判定（LR2: note.active）
-    std::vector<bool> head_fast_;
+    std::vector<LnPhase> phase_;  // LN の始点の状態（ノーツごと）
+    std::vector<int> head_;       // LN の始点の判定（終点で、この判定として数える）
     std::vector<size_t> invisible_;
     size_t invisible_next_ = 0;
     std::vector<uint16_t> play_, stop_;
