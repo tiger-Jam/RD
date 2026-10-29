@@ -18,6 +18,9 @@
 
 namespace rd {
 
+// 譜面の貸し借りは作りかけ（WIP）。PC どうしを直接つなぐ形（WebRTC）に作り直すまで、設定アプリでも本体でも使わない
+inline constexpr bool kShareReady = false;
+
 // 合言葉の長さの下限（インターネットからも借りられるようにするので、短いものは使わせない）
 inline constexpr int kMinServeKey = 8;
 

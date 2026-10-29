@@ -612,6 +612,10 @@ int serve_charts(int dev_port, const std::string& dev_key) {
     migrate_old_data();
     load_config(cfg);
     const bool dev = dev_port > 0;
+    if (!kShareReady && !dev) {
+        std::fprintf(stderr, "譜面の貸し借りは作りかけなので貸さない\n");
+        return 1;
+    }
     if (dev) cfg.serve = true, cfg.serve_port = dev_port, cfg.serve_key = dev_key;
     if (static_cast<int>(cfg.serve_key.size()) < kMinServeKey) {
         std::fprintf(stderr, "合言葉が短いので貸さない（%d 文字以上。設定の serve_key）\n", kMinServeKey);

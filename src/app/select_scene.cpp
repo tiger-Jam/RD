@@ -1858,7 +1858,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     // 譜面を借りる（仕様書10章「借りて返す」）。配信先の一覧（md5・sha256）は、選曲画面に入るたびに裏で取り直す
     std::unordered_set<std::string> borrowable;
     std::future<std::unordered_set<std::string>> borrowable_job;
-    const BorrowSource borrow_src{app.cfg.borrow_url, app.cfg.borrow_key};
+    const BorrowSource borrow_src{kShareReady ? app.cfg.borrow_url : std::string(), app.cfg.borrow_key};  // 作りかけの間は借りない
     if (borrow_src.ok())
         borrowable_job = std::async(std::launch::async, [borrow_src] {
             std::unordered_set<std::string> out;

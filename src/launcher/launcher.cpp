@@ -234,13 +234,14 @@ void apply_serve(const AppConfig& cfg, std::string& message) {
     run(L"schtasks /End /TN \"" + task + L"\"");
     // 前の名前（BMjoy）のときに登録したものは消す
     run(L"schtasks /End /TN \"BMjoy 譜面の配信\""), run(L"schtasks /Delete /F /TN \"BMjoy 譜面の配信\"");
-    const bool serving = cfg.serve && static_cast<int>(cfg.serve_key.size()) >= kMinServeKey;
+    // 作りかけ（WIP）の間は、前に登録したものも止めて消す
+    const bool serving = kShareReady && cfg.serve && static_cast<int>(cfg.serve_key.size()) >= kMinServeKey;
     // インターネットに出す口（Tailscale の funnel）。貸さないときと、外に出さないときは閉じる
     const std::wstring ts = L"\"" + tailscale_exe() + L"\"";
     if (!serving || !cfg.serve_public) run(ts + L" funnel --https=" + std::to_wstring(kFunnelPort) + L" off");
     if (!serving) {
         run(L"schtasks /Delete /F /TN \"" + task + L"\"");
-        if (cfg.serve) message = "合言葉が " + std::to_string(kMinServeKey) + " 文字より短いので、譜面を貸しません";
+        if (kShareReady && cfg.serve) message = "合言葉が " + std::to_string(kMinServeKey) + " 文字より短いので、譜面を貸しません";
         return;
     }
     const std::wstring exe = wide(dir + "RDbody.exe");
@@ -1754,19 +1755,22 @@ int main(int, char**) {
 #endif
         } else if (tab == 9) {
             // 譜面の貸し借り（仕様書10章「借りて返す」）。持っていない譜面を、遊ぶときだけ自分のほかの PC から借りる
-            g.label(X + 20, Y + 16, "貸す（この PC の譜面を、ほかの PC に）");
-            g.check(X + 34, Y + 40, "譜面を貸す", cfg.serve);
-            g.check(X + 200, Y + 40, "インターネットからも借りられるようにする", cfg.serve_public, cfg.serve);
-            g.label(X + 34, Y + 70, "ポート", cfg.serve);
-            g.edit_int(cfg.serve_port, X + 124, Y + 64, 70, 20, cfg.serve, 1, 65535);
-            g.label(X + 34, Y + 98, "合言葉", cfg.serve);
-            g.edit_str(cfg.serve_key, X + 124, Y + 92, 240, 20, cfg.serve);
-            if (g.button(X + 372, Y + 91, 60, 22, "作る", cfg.serve)) g.unfocus(), cfg.serve_key = make_serve_key();
+            // 作りかけ（WIP）の間は、全部を灰色にして触れないようにする
+            const bool on = kShareReady, serve_on = on && cfg.serve;
+            if (!on) g.label(X + 520, Y + 16, "WIP");
+            g.label(X + 20, Y + 16, "貸す（この PC の譜面を、ほかの PC に）", on);
+            g.check(X + 34, Y + 40, "譜面を貸す", cfg.serve, on);
+            g.check(X + 200, Y + 40, "インターネットからも借りられるようにする", cfg.serve_public, serve_on);
+            g.label(X + 34, Y + 70, "ポート", serve_on);
+            g.edit_int(cfg.serve_port, X + 124, Y + 64, 70, 20, serve_on, 1, 65535);
+            g.label(X + 34, Y + 98, "合言葉", serve_on);
+            g.edit_str(cfg.serve_key, X + 124, Y + 92, 240, 20, serve_on);
+            if (g.button(X + 372, Y + 91, 60, 22, "作る", serve_on)) g.unfocus(), cfg.serve_key = make_serve_key();
             // 借りる側に入れる住所（Tailscale の名前から）
             static std::string ts_name;
             static bool ts_asked = false;
-            if (!ts_asked) ts_asked = true, ts_name = tailscale_name();
-            if (cfg.serve) {
+            if (!ts_asked && on) ts_asked = true, ts_name = tailscale_name();
+            if (serve_on) {
                 const std::string here = cfg.serve_public && !ts_name.empty()
                                              ? "https://" + ts_name + ":" + std::to_string(kFunnelPort)
                                              : "http://" + (ts_name.empty() ? std::string("<この PC の名前>") : ts_name) + ":" + std::to_string(cfg.serve_port);
@@ -1774,15 +1778,15 @@ int main(int, char**) {
                 g.label(X + 124, Y + 126, here);
                 if (g.button(X + 488, Y + 119, 60, 22, "写す")) SDL_SetClipboardText(here.c_str()), message = "住所を写しました";
             }
-            g.label(X + 20, Y + 160, "借りる（ほかの PC の譜面を）");
-            g.label(X + 34, Y + 188, "借りる先");
-            g.edit_str(cfg.borrow_url, X + 124, Y + 182, 300, 20);
-            g.label(X + 34, Y + 216, "合言葉");
-            g.edit_str(cfg.borrow_key, X + 124, Y + 210, 240, 20);
-            g.label(X + 34, Y + 244, "置き場の上限（MB）");
-            g.edit_int(cfg.borrow_cache_mb, X + 170, Y + 238, 90, 20, true, 100, 10000000);
+            g.label(X + 20, Y + 160, "借りる（ほかの PC の譜面を）", on);
+            g.label(X + 34, Y + 188, "借りる先", on);
+            g.edit_str(cfg.borrow_url, X + 124, Y + 182, 300, 20, on);
+            g.label(X + 34, Y + 216, "合言葉", on);
+            g.edit_str(cfg.borrow_key, X + 124, Y + 210, 240, 20, on);
+            g.label(X + 34, Y + 244, "置き場の上限（MB）", on);
+            g.edit_int(cfg.borrow_cache_mb, X + 170, Y + 238, 90, 20, on, 100, 10000000);
             // つながるか試す（貸せる譜面の一覧を取ってみる）
-            if (g.button(X + 432, Y + 181, 60, 22, "試す", !cfg.borrow_url.empty() && !borrow_test.running)) {
+            if (g.button(X + 432, Y + 181, 60, 22, "試す", on && !cfg.borrow_url.empty() && !borrow_test.running)) {
                 g.unfocus();
                 borrow_test.running = true, borrow_test.done = false;
                 borrow_test.th = std::thread([&borrow_test, src = BorrowSource{cfg.borrow_url, cfg.borrow_key}] {
