@@ -148,10 +148,6 @@ void App::load_sound_set() {
 // ウィンドウの大きさ。解像度（SD/HD/FHD）の指定があればその大きさ、無ければスキンの大きさ（SD は 2 倍）。
 // スキンは自分の大きさで描いて、ウィンドウいっぱいに拡大する（縦横比は保つ）
 void App::window_size(int skin_w, int skin_h, int& w, int& h) const {
-    if (cfg.window_w > 0 && cfg.window_h > 0) {
-        w = cfg.window_w, h = cfg.window_h;
-        return;
-    }
     int scale = cfg.window_scale > 0 ? cfg.window_scale : 100;
     if (cfg.skin_res == "sd") w = 640, h = 480;
     else if (cfg.skin_res == "hd") w = 1280, h = 720;
@@ -250,7 +246,7 @@ static bool same_skin_path(const std::string& a, const std::string& b) {
     return norm(a) == norm(b);
 }
 
-void App::apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array<bool, 1000>& options) const {
+void App::apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array<bool, 1000>& options, PartSkinCache* part_cache) const {
     // 色は、部品が元々どのスキンのものかで決める（スキンを決めていないものは全部）。
     // 付け替える前に、遊ぶスキンと、部品を持ってくるスキンのそれぞれに当てる
     const std::vector<SkinColorFilter> all = skin_colors();
@@ -267,7 +263,7 @@ void App::apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array
     // ほかのスキンから持ってくる部品（スキン選択で選んだもの）。カスタマイズはそのスキンの設定に、部品ごとに選んだ絵の種類を重ねる。
     // 同じスキンを同じカスタマイズで使う部品どうしは、1 回だけ読む
     if (auto it = cfg.skin_parts.find(path); it != cfg.skin_parts.end()) {
-        std::map<std::string, std::unique_ptr<Lr2Skin>> others;
+        std::map<std::string, std::shared_ptr<const Lr2Skin>> others;
         int n = 0;
         for (const PlayPartSlot& slot : kPlayPartSlots) {
             auto f = it->second.from.find(slot.key);
@@ -278,10 +274,19 @@ void App::apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array
             std::string key = f->second;
             for (const auto& [i, name] : custom) key += "|" + std::to_string(i) + "=" + name;
             auto [o, fresh] = others.try_emplace(key);
+            // 覚えておく鍵：スキン自身のカスタマイズと、読み込みの条件も含める
+            std::string cache_key;
+            if (fresh && part_cache) {
+                cache_key = key;
+                if (auto sc = cfg.skin_custom.find(f->second); sc != cfg.skin_custom.end()) cache_key += "#" + format_skin_custom(sc->second);
+                cache_key += "#";
+                for (bool b : options) cache_key += b ? '1' : '0';
+                if (auto hit = part_cache->find(cache_key); hit != part_cache->end()) o->second = hit->second, fresh = false;
+            }
             if (fresh) {
                 SkinHeader h;
                 std::string err;
-                auto skin = std::make_unique<Lr2Skin>();
+                auto skin = std::make_shared<Lr2Skin>();
                 if (read_skin_header(lr2_root, f->second, h)) {
                     apply_skin_custom(cfg, f->second, h);
                     for (const auto& [i, name] : custom)
@@ -292,6 +297,10 @@ void App::apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array
                         if (!h.has_resolution) guess_resolution(*skin);
                         colors_for(*skin, f->second);
                         o->second = std::move(skin);
+                        if (part_cache) {
+                            if (part_cache->size() >= 6) part_cache->clear();  // 画素ごと持つので、増えすぎたら捨てる
+                            (*part_cache)[cache_key] = o->second;
+                        }
                     }
                 }
                 if (!o->second) std::printf("  部品を持ってくるスキンを読めない: %s\n", f->second.c_str());

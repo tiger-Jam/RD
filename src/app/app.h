@@ -77,7 +77,10 @@ struct App {
     std::vector<SkinColorFilter> skin_colors() const;
     // プレースキンの部品を、スキン選択で選んだほかのスキンから持ってきて、使っている MOD の色を当てる。
     // path は設定に書いたそのスキンのパス、options はスキンを読むときの値
-    void apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array<bool, 1000>& options) const;
+    // part_cache があれば、部品を持ってくるスキンを読んだものを覚えて使い回す（スキンセレクトの試し見。鍵に条件とカスタマイズを含める）
+    using PartSkinCache = std::map<std::string, std::shared_ptr<const Lr2Skin>>;
+    void apply_skin_mods(Lr2Skin& sk, const std::string& path, const std::array<bool, 1000>& options,
+                         PartSkinCache* part_cache = nullptr) const;
     // 使っているメトロノームの MOD（無ければ nullptr）
     const ModManifest* metronome() const;
     // 使っている MOD のうち、プレーに影響するものの組み合わせの記録の番号（0 は MOD 無し。初めてなら曲データベースに足す）。

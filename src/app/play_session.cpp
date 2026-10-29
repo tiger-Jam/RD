@@ -743,12 +743,12 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             print_result(chart, judge);
             const PlayStats& ps = judge.stats();
             // LR2（Main.cpp:1697）：オートプレイ・1 ノーツも判定していない・GOOD 以上が 1 つも無いときは、
-            // リザルトを出さず、記録もせずに選曲画面へ戻る
+            // リザルトを出さず、記録もせずに選曲画面へ戻る。リプレイを途中でやめたときも同じ（BMjoy の決め。落ちたように見せない）
             ctx.quit_early = quit_early;
             // 開発用：BMJ_COURSE_STAGE_RESULT なら、オートでもコースの各ステージのリザルトを出す（記録はしない）
             // 開発用：BMJ_AUTO_RESULT なら、オートの単曲でもリザルトを出す（記録はしない）
             const bool dev_stage_result = opt.autoplay && ((course && dev_env("BMJ_COURSE_STAGE_RESULT")) || (!course && dev_env("BMJ_AUTO_RESULT")));
-            if ((opt.autoplay && !dev_stage_result) || ps.note_current == 0 ||
+            if ((opt.autoplay && !dev_stage_result) || (opt.replay && quit_early) || ps.note_current == 0 ||
                 ps.judge_count[kGood] + ps.judge_count[kGreat] + ps.judge_count[kPGreat] == 0) {
                 // コースでは、オートプレイなら次のステージへ進み、それ以外はコースをやめて選曲へ戻る
                 if (course && !(opt.autoplay && !quit_early)) course->abandoned = true;

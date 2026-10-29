@@ -10,6 +10,7 @@
 
 #include "app/skin_catalog.h"
 #include "db/difficulty_table.h"
+#include "db/lr2_export.h"
 #include "sqlite3.h"
 #include "util/hash.h"
 #include "util/text.h"
@@ -173,8 +174,6 @@ int import_lr2_settings(const std::string& xml, AppConfig& cfg) {
     num(system, "vsync", cfg.vsync, 0, 1);
     num(system, "inputinterval", cfg.input_interval, 0, 1000);
     num(system, "titleflash", cfg.title_flash, 0, 100000);
-    num(system, "windowsize_x", cfg.window_w, 0, 16384);
-    num(system, "windowsize_y", cfg.window_h, 0, 16384);
     return count;
 }
 
@@ -298,6 +297,7 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     if (std::regex_search(xml, m, id_re)) res.player = m[1].str();
     if (dirs.empty()) return res.error = "LR2 の設定に曲フォルダが無い", res;
     cfg.song_dirs = dirs;
+    if (!res.player.empty()) cfg.lr2_player = res.player;  // LR2 の形で書き出すスコアも同じ名前にする
     cfg.custom_folder_dirs = custom_dirs;
     res.song_dirs = static_cast<int>(dirs.size());
     // 遊び方・音・選曲・画面の設定
@@ -462,6 +462,16 @@ int import_lr2_courses(const std::string& lr2_song_db) {
     sqlite3_close(db);
     if (!write_lr2_courses(lr2_courses_path(), courses)) return -1;
     return static_cast<int>(courses.size());
+}
+
+void write_lr2_files(const SongDb& db, const AppConfig& cfg, bool songs) {
+    if (!cfg.lr2_export) return;
+    const uint64_t t0 = SDL_GetTicksNS();
+    std::string err;
+    if (!export_lr2_files(db, lr2_database_dir(), cfg.song_dirs, cfg.lr2_player, songs, &err))
+        std::printf("LR2 の形で書き出せない: %s\n", err.c_str());
+    else
+        std::printf("LR2 の形で書き出した（%s）：%.0f ms\n", songs ? "曲とスコア" : "スコア", (SDL_GetTicksNS() - t0) / 1e6);
 }
 
 }  // namespace bmj

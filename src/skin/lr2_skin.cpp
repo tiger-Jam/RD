@@ -197,6 +197,22 @@ bool load_image_file(const std::string& path, SkinImage& img, const uint8_t tran
     return decode_image(bytes, img, trans, use_trans);
 }
 
+SkinImageCache* g_image_cache = nullptr;
+
+std::string cache_key(const std::string& path, const uint8_t trans[3], bool use_trans) {
+    char t[16];
+    std::snprintf(t, sizeof(t), "|%02x%02x%02x%d", trans[0], trans[1], trans[2], use_trans ? 1 : 0);
+    return path + t;
+}
+
+// ファイルの更新日時と大きさ（.dxa の中のものなど、ふつうのファイルでなければ 0）
+void file_stamp(const std::string& path, int64_t& mtime, uintmax_t& size) {
+    std::error_code ec;
+    const fs::path p = fs::path(path);  // read_file_or_dxa と同じ解釈
+    size = fs::file_size(p, ec);
+    if (!ec) mtime = static_cast<int64_t>(fs::last_write_time(p, ec).time_since_epoch().count());
+    if (ec) mtime = 0, size = 0;
+}
 // 画像を読むのはあとでまとめて（並べて）行う。読み込みの途中では、大きさだけを頭から読んでおく（SRC の -1 に使う）
 struct DecodeJob {
     int font = -1, index = 0;  // font < 0 なら sk.images[index]、そうでなければ sk.image_fonts[font].images[index]
@@ -754,6 +770,47 @@ struct Loader {
 
 }  // namespace
 
+SkinImageCache::Use::Use(SkinImageCache& c) { g_image_cache = &c; }
+SkinImageCache::Use::~Use() { g_image_cache = nullptr; }
+SkinImageCache* SkinImageCache::active() { return g_image_cache; }
+
+void SkinImageCache::clear() {
+    std::lock_guard<std::mutex> lock(mu_);
+    items_.clear();
+    bytes_ = 0;
+}
+
+bool SkinImageCache::get(const std::string& path, const uint8_t trans[3], bool use_trans, SkinImage& img) {
+    int64_t mtime = 0;
+    uintmax_t size = 0;
+    file_stamp(path, mtime, size);
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = items_.find(cache_key(path, trans, use_trans));
+    if (it == items_.end() || it->second.mtime != mtime || it->second.size != size) return false;
+    it->second.used = ++tick_;
+    img.w = it->second.w, img.h = it->second.h, img.rgba = it->second.rgba;
+    return true;
+}
+
+void SkinImageCache::put(const std::string& path, const uint8_t trans[3], bool use_trans, const SkinImage& img) {
+    Item item;
+    if (img.rgba.empty() || !img.movie.empty()) return;
+    file_stamp(path, item.mtime, item.size);
+    if (img.rgba.size() > limit_ / 4) return;  // 大きすぎるものは覚えない
+    item.w = img.w, item.h = img.h, item.rgba = img.rgba;
+    std::lock_guard<std::mutex> lock(mu_);
+    item.used = ++tick_;
+    Item& slot = items_[cache_key(path, trans, use_trans)];
+    bytes_ -= slot.rgba.size();
+    bytes_ += item.rgba.size();
+    slot = std::move(item);
+    while (bytes_ > limit_ && !items_.empty()) {
+        auto old = std::min_element(items_.begin(), items_.end(), [](const auto& a, const auto& b) { return a.second.used < b.second.used; });
+        bytes_ -= old->second.rgba.size();
+        items_.erase(old);
+    }
+}
+
 bool load_skin_image(const std::string& path, SkinImage& img, const uint8_t trans[3], bool use_trans) {
     std::memcpy(img.trans, trans, 3);
     img.use_trans = use_trans;
@@ -910,7 +967,13 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
             for (size_t i; (i = next.fetch_add(1)) < ld.jobs.size();) {
                 DecodeJob& j = ld.jobs[i];
                 SkinImage& img = j.font < 0 ? out.images[j.index] : out.image_fonts[j.font].images[j.index];
-                ok[i] = (!j.bytes.empty() || read_file_or_dxa(j.path, j.bytes)) && decode_image(j.bytes, img, j.trans, j.use_trans);
+                SkinImageCache* cache = SkinImageCache::active();
+                if (cache && cache->get(j.path, j.trans, j.use_trans, img)) {
+                    ok[i] = 1;
+                } else {
+                    ok[i] = (!j.bytes.empty() || read_file_or_dxa(j.path, j.bytes)) && decode_image(j.bytes, img, j.trans, j.use_trans);
+                    if (ok[i] && cache) cache->put(j.path, j.trans, j.use_trans, img);
+                }
                 std::vector<uint8_t>().swap(j.bytes);
             }
         };

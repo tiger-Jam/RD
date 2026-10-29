@@ -52,6 +52,7 @@ struct SelectContext {
     bool has_stagefile = false;  // 決定画面：STAGEFILE を読み込めた（op 191）
     bool has_text = false;       // 曲のフォルダに .txt がある（op 174/175）
     PlayerStats player;          // プレイヤーの累計（数値 30〜37）
+    std::string player_name;     // プレイヤーの名前（文字列 2。LR2 から引き継いだもの）
     const SkinCatalog* catalog = nullptr;  // スキンセレクト（文字列 50/51/100〜114、ボタン 170〜188、スライダー7）
     bool autoplay = false;
     bool windowed = true;

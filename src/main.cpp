@@ -299,6 +299,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
         frame_present(app.renderer);
     };
     draw({});
+    bool songs_changed = false;
     if (update) {
         SongDb db;
         if (db.open(song_db_path())) {
@@ -333,6 +334,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
             ScanStats s = scan_job.get();
             std::printf("曲データベースを更新した：%d 譜面（追加 %d／変更 %d／削除 %d／読めない %d）%.1f 秒\n", s.found,
                         s.added, s.updated, s.removed, s.failed, s.seconds);
+            songs_changed = s.added + s.updated + s.removed > 0;
             // LR2 から引き継いだ仮の譜面（中身をまだ読んでいないもの）も、ここで全部読む（LR2 と同じく起動の画面で済ませる）
             const int total = db.provisional_count();
             if (total > 0) {
@@ -352,6 +354,14 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
             }
         } else {
             std::printf("曲データベースを開けない: %s\n", song_db_path().c_str());
+        }
+    }
+    {
+        // 外部ツールのための LR2 の形の曲データベースとスコア（曲が変わったときと、まだ無いときに書く）
+        std::error_code ec;
+        if (app.cfg.lr2_export && (songs_changed || !std::filesystem::exists(std::filesystem::u8path(lr2_database_dir() + "/song.db"), ec))) {
+            SongDb db;
+            if (db.open(song_db_path())) write_lr2_files(db, app.cfg, true);
         }
     }
     startup_mark("曲データベースの更新を終えた");
@@ -683,6 +693,7 @@ int main(int argc, char** argv) {
             ScanStats s = db.scan(cfg.song_dirs, threads);
             std::printf("曲フォルダを読み直した：%d 譜面（追加 %d／変更 %d／削除 %d／読めない %d）%.1f 秒\n", s.found, s.added, s.updated,
                         s.removed, s.failed, s.seconds);
+            write_lr2_files(db, cfg, true);
             if (cfg.song_dirs.empty()) rc = 1;
         }
         return rc;
@@ -856,7 +867,7 @@ int main(int argc, char** argv) {
             std::string err;
             int n = app.db.import_lr2_scores(opt.import_lr2, &err);
             if (n < 0) std::printf("LR2のスコアを取り込めない: %s\n", err.c_str());
-            else std::printf("LR2のスコアを %d 件取り込んだ\n", n);
+            else std::printf("LR2のスコアを %d 件取り込んだ\n", n), write_lr2_files(app.db, app.cfg, false);
         }
         if (opt.keyconfig) {
             run_keyconfig(app.window, app.renderer, app.keycfg, keyconfig_path());

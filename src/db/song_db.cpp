@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value INTEGER);
 CREATE TABLE IF NOT EXISTS player(
     id INTEGER PRIMARY KEY, playcount INTEGER, clear INTEGER, fail INTEGER,
     pg INTEGER, gr INTEGER, gd INTEGER, bd INTEGER, pr INTEGER);
+CREATE TABLE IF NOT EXISTS lr2_player(name TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS lr2_course_key(key TEXT PRIMARY KEY, lr2 TEXT);
 )SQL";
 
 bool is_chart_file(const fs::path& p) {
@@ -851,13 +853,18 @@ int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* erro
             return -1;
         }
         sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
+        Stmt keys(db_, "INSERT OR REPLACE INTO lr2_course_key(key, lr2) VALUES(?,?)");
         Stmt wr(db_, "INSERT OR REPLACE INTO lr2_score(md5, clear, exscore, bp, max_combo, playcount, clearcount, "
                      "pg, gr, gd, bd, pr, op_history, rseed, op_best, ghost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
         while (rd.step()) {
             std::string md5 = rd.col_text(0);
             for (char& c : md5) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            // コースの頭は種類（11 文字目）だけを残す。作者などは BMjoy のコースのハッシュ（course.cpp）に無い
-            if (md5.size() > 32) md5 = std::string(10, '0') + md5[10] + std::string(21, '0') + md5.substr(32);
+            // コースの頭は種類（11 文字目）だけを残す。作者などは BMjoy のコースのハッシュ（course.cpp）に無い（元の鍵は書き出すときのために残す）
+            if (md5.size() > 32) {
+                const std::string lr2 = md5;
+                md5 = std::string(10, '0') + md5[10] + std::string(21, '0') + md5.substr(32);
+                keys.text(1, md5).text(2, lr2).run();
+            }
             int ex = static_cast<int>(rd.col_i64(2) * 2 + rd.col_i64(3));
             wr.text(1, md5).i64(2, lr2_clear(rd.col_i64(1), rd.col_i64(2), rd.col_i64(3), rd.col_i64(5))).i64(3, ex).i64(4, rd.col_i64(4)).i64(5, rd.col_i64(5))
                 .i64(6, rd.col_i64(6)).i64(7, rd.col_i64(7)).i64(8, rd.col_i64(2)).i64(9, rd.col_i64(3)).i64(10, rd.col_i64(8))
@@ -866,10 +873,34 @@ int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* erro
             wr.run();
             ++count;
         }
+        // プレイヤーの情報（欄の名前ごと。版によって欄が違うので、あるものを全部）
+        Stmt pl(src, "SELECT * FROM player LIMIT 1");
+        if (pl.s && pl.step()) {
+            sqlite3_exec(db_, "DELETE FROM lr2_player", nullptr, nullptr, nullptr);
+            Stmt put(db_, "INSERT OR REPLACE INTO lr2_player(name, value) VALUES(?,?)");
+            for (int i = 0; i < sqlite3_column_count(pl.s); ++i)
+                if (sqlite3_column_type(pl.s, i) != SQLITE_NULL) put.text(1, sqlite3_column_name(pl.s, i)).text(2, pl.col_text(i)).run();
+        }
         sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
     }
     sqlite3_close(src);
     return count;
+}
+
+std::map<std::string, std::string> SongDb::lr2_player_info() const {
+    std::map<std::string, std::string> out;
+    if (!db_) return out;
+    Stmt st(db_, "SELECT name, value FROM lr2_player");
+    while (st.step()) out[st.col_text(0)] = st.col_text(1);
+    return out;
+}
+
+std::unordered_map<std::string, std::string> SongDb::lr2_course_keys() const {
+    std::unordered_map<std::string, std::string> out;
+    if (!db_) return out;
+    Stmt st(db_, "SELECT key, lr2 FROM lr2_course_key");
+    while (st.step()) out[st.col_text(0)] = st.col_text(1);
+    return out;
 }
 
 void SongDb::save_score(const std::string& sha256, int clear, int exscore, int bp, int max_combo) {
@@ -878,7 +909,8 @@ void SongDb::save_score(const std::string& sha256, int clear, int exscore, int b
     save_score(sha256, r);
 }
 
-PlayerStats SongDb::player_stats() const {
+// BMjoy で遊んだ分だけの累計
+PlayerStats SongDb::own_player_stats() const {
     PlayerStats p;
     if (!db_) return p;
     Stmt st(db_, "SELECT playcount, clear, fail, pg, gr, gd, bd, pr FROM player WHERE id = 0");
@@ -886,6 +918,20 @@ PlayerStats SongDb::player_stats() const {
         p.playcount = static_cast<int>(st.col_i64(0)), p.clear = static_cast<int>(st.col_i64(1)), p.fail = static_cast<int>(st.col_i64(2));
         for (int i = 0; i < 5; ++i) p.judge[i] = st.col_i64(3 + i);
     }
+    return p;
+}
+
+PlayerStats SongDb::player_stats() const {
+    PlayerStats p = own_player_stats();
+    // LR2 から引き継いだ累計を足す
+    const std::map<std::string, std::string> lr2 = lr2_player_info();
+    auto num = [&](const char* k) -> int64_t {
+        auto it = lr2.find(k);
+        return it != lr2.end() ? std::atoll(it->second.c_str()) : 0;
+    };
+    p.playcount += static_cast<int>(num("playcount")), p.clear += static_cast<int>(num("clear")), p.fail += static_cast<int>(num("fail"));
+    static const char* judges[] = {"perfect", "great", "good", "bad", "poor"};
+    for (int i = 0; i < 5; ++i) p.judge[i] += num(judges[i]);
     return p;
 }
 
@@ -941,8 +987,8 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
         .i64(17, r.rseed).i64(18, r.op_best).text(19, r.ghost);
     st.run();
     if (play.course_stage) return;
-    // プレイヤーの累計
-    PlayerStats p = player_stats();
+    // プレイヤーの累計（BMjoy で遊んだ分。LR2 の分は別に持つ）
+    PlayerStats p = own_player_stats();
     p.playcount++;
     (clear >= 2 ? p.clear : p.fail)++;
     for (int i = 0; i < 5; ++i) p.judge[i] += play.judge[i];
@@ -1148,6 +1194,21 @@ std::vector<std::string> SongDb::lr2_table_urls(const std::string& lr2_song_db) 
     }
     sqlite3_close(src);
     return urls;
+}
+
+// #DIFFICULTY の無い譜面の難易度を補う（LR2: songmanage:468）。同じフォルダの中で、ノーツ数の少ない順に 2, 3, 4, 4, …
+void fill_difficulties(std::vector<ChartRecord>& charts) {
+    std::unordered_map<std::string, std::vector<ChartRecord*>> undefined;
+    for (ChartRecord& c : charts)
+        if (c.difficulty <= 0 || c.difficulty > 5) undefined[c.folder].push_back(&c);
+    for (auto& [folder, list] : undefined) {
+        std::stable_sort(list.begin(), list.end(), [](const ChartRecord* a, const ChartRecord* b) { return a->notes < b->notes; });
+        int d = 2;
+        for (ChartRecord* c : list) {
+            c->difficulty = d;
+            if (d < 4) ++d;
+        }
+    }
 }
 
 }  // namespace bmj

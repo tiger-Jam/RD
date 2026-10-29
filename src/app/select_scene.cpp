@@ -25,6 +25,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "app/lr2_import.h"
 #include "app/play_session.h"
 #include "audio/sound_bank.h"
 #include "chart/bms_parser.h"
@@ -686,21 +687,6 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     return root;
 }
 
-// #DIFFICULTY の無い譜面の難易度を補う（LR2: songmanage:468）。同じフォルダの中で、ノーツ数の少ない順に 2, 3, 4, 4, …
-void fill_difficulties(std::vector<ChartRecord>& charts) {
-    std::unordered_map<std::string, std::vector<ChartRecord*>> undefined;
-    for (ChartRecord& c : charts)
-        if (c.difficulty <= 0 || c.difficulty > 5) undefined[c.folder].push_back(&c);
-    for (auto& [folder, list] : undefined) {
-        std::stable_sort(list.begin(), list.end(), [](const ChartRecord* a, const ChartRecord* b) { return a->notes < b->notes; });
-        int d = 2;
-        for (ChartRecord* c : list) {
-            c->difficulty = d;
-            if (d < 4) ++d;
-        }
-    }
-}
-
 // 曲の一覧を読む（登録した曲フォルダ・譜面と、難易度の補い）
 // 選曲画面に出す譜面（DP の譜面は、持っている譜面として曲データベースに載せるが、遊べないので出さない）
 std::vector<ChartRecord> playable_charts(const SongDb& db) {
@@ -1045,7 +1031,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         std::shared_ptr<const Library> keep_from = only_under.empty() ? nullptr : std::shared_ptr<const Library>(lib);
         worker = std::thread([&, scan_songs, only_under, keep_from, dirs = app.cfg.song_dirs,
                               urls = app.cfg.tables, ln_mode = app.cfg.ln_mode, profile, mods = app.active_mods(),
-                              custom_dirs = app.cfg.custom_folder_dirs, favs_now = favs, new_since = new_song_since(app.cfg.title_flash)] {
+                              custom_dirs = app.cfg.custom_folder_dirs, favs_now = favs, new_since = new_song_since(app.cfg.title_flash),
+                              cfg_now = app.cfg] {
             // 一覧の木まで裏で作る（表で作ると数百 ms 止まる）
             auto make_root = [&](Library& l) {
                 l.build_indexes();
@@ -1075,6 +1062,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 pending_root = next_root;
                 status = buf;
             }
+            // 外部ツールのための LR2 の形の曲データベースとスコア（一覧を渡したあとで）
+            if (scan_songs) write_lr2_files(wdb, cfg_now, true);
             // LR2 から取り込んだ仮の譜面を、裏で少しずつ読んで本物の情報に置き換える。
             // 読み終えたときに一覧へ反映する
             const int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency() / 2));
@@ -1351,6 +1340,13 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     catalog.scan(app.lr2_root);
     sctx.catalog = &catalog;
     sctx.player = app.db.player_stats();
+    {
+        // プレイヤーの名前（LR2 から引き継いだ名前、無ければ ID）
+        const auto info = app.db.lr2_player_info();
+        auto it = info.find("name");
+        if (it == info.end() || it->second.empty()) it = info.find("id");
+        if (it != info.end()) sctx.player_name = it->second;
+    }
     uint64_t scene_start = SDL_GetTicksNS();
     auto scene_ms = [&] { return (SDL_GetTicksNS() - scene_start) / 1e6; };
     sctx.timers.set(0, 0);
@@ -1658,13 +1654,15 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         busy = true;
         std::shared_ptr<const Library> base = lib;
         worker = std::thread([&, base, ln_mode = app.cfg.ln_mode, profile_now = profile, mods = app.active_mods(),
-                              custom_dirs = app.cfg.custom_folder_dirs, favs_now = favs, new_since = new_song_since(app.cfg.title_flash)] {
+                              custom_dirs = app.cfg.custom_folder_dirs, favs_now = favs, new_since = new_song_since(app.cfg.title_flash),
+                              cfg_now = app.cfg] {
             const uint64_t t0 = SDL_GetTicksNS();
             auto next = std::make_shared<Library>();
             next->roots = base->roots, next->charts = base->charts, next->tables = base->tables;
             const uint64_t t1 = SDL_GetTicksNS();
             SongDb rdb;
-            if (rdb.open(song_db_path())) next->load_records(rdb, ln_mode, profile_now);
+            const bool rdb_ok = rdb.open(song_db_path());
+            if (rdb_ok) next->load_records(rdb, ln_mode, profile_now);
             next->build_indexes();
             const uint64_t t2 = SDL_GetTicksNS();
             load_custom(*next, mods, custom_dirs, favs_now);
@@ -1685,10 +1683,14 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             auto ms = [](uint64_t a, uint64_t b) { return (b - a) / 1e6; };
             std::printf("記録を裏で読み直した：%.0f ms（写す %.0f、記録 %.0f、カスタムフォルダの表 %.0f、中身 %.0f と一覧 %.0f を同時に）\n",
                         ms(t0, SDL_GetTicksNS()), ms(t0, t1), ms(t1, t2), ms(t2, t3), t_query / 1e6, t_tree / 1e6);
-            std::lock_guard<std::mutex> lock(mu);
-            pending = next;
-            pending_root = next_root;
-            busy = false;
+            {
+                std::lock_guard<std::mutex> lock(mu);
+                pending = next;
+                pending_root = next_root;
+                busy = false;
+            }
+            // 外部ツールのための LR2 の形のスコア（一覧を渡したあとで）
+            if (rdb_ok) write_lr2_files(rdb, cfg_now, false);
         });
     };
     auto reload_after_play = [&](bool refreshed, const std::vector<std::string>& played = {}) {

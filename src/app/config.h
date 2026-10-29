@@ -20,6 +20,10 @@ struct SkinCustomChoice {
 
 struct AppConfig {
     std::string lr2_root;          // LR2のフォルダ（LR2files があるところ）
+    // 外部ツールのために、LR2 の形の曲データベースとスコアを LR2files/Database に書き出すか
+    bool lr2_export = false;
+    // LR2 の形で書き出すスコアの名前（LR2files/Database/Score/<名前>.db。空なら LR2 から引き継いだ ID、それも無ければ BMjoy）
+    std::string lr2_player;
     std::string play_skin;         // プレイスキンの .lr2skin（空なら LR2 の既定）
     std::string result_skin;       // リザルトスキンの .lr2skin（空なら LR2 の既定）
     std::string courseresult_skin; // コースリザルトスキンの .lr2skin（空なら LR2 の既定）
@@ -107,8 +111,6 @@ struct AppConfig {
     // 画面（LR2: screenmode / screenexrate）。window_scale は % で、0 ならスキンに合わせる（SD は 2 倍）
     bool fullscreen = false;
     int window_scale = 0;
-    // ウインドウサイズ（LR2: windowsize_x / windowsize_y）。両方 1 以上なら、解像度や拡大率より優先する
-    int window_w = 0, window_h = 0;
     // 曲データベースを起動時に更新するか（LR2: autoreload）。0=起動時 1=手動（選曲画面の F8 で今のフォルダだけ）
     int db_update = 0;
     // LR2 の設定ツールの OPTION / JUKEBOX2 / SELECT の数値
@@ -157,6 +159,8 @@ std::string song_db_path();
 std::string table_cache_dir();
 // LR2 から引き継いだ段位・コース（LR2files/Database/lr2_courses.txt。LR2 の曲データベースの grade・expert の表を写したもの）
 std::string lr2_courses_path();
+// LR2 の形で書き出す曲データベースとスコアの置き場（LR2files/Database。外部ツールのため）
+std::string lr2_database_dir();
 // 譜面のリプレイのファイル（LR2files/Replay/<sha256>.bjr）
 std::string replay_path(const std::string& sha256);
 // 全プレーの入力の記録（LR2files/Replay/InputLog/<sha256>/<日時>.bjr）

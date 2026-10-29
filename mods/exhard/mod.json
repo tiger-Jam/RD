@@ -1,8 +1,8 @@
 {
-  // EX-HARD：HARD より減りが大きく、落ちたら終わりのゲージ（数値は beatoraja の EX-HARD）
+  // EX-HARD：HARD より減りが大きく、落ちたら終わりのゲージ（数値は IIDX の EX-HARD。30% 以下で減りが減る補正は無い）
   "id": "exhard",
   "name": "EX-HARD",
-  "version": "2",
+  "version": "3",
   "author": "BMjoy",
   "description": "GAUGE に EX-HARD を足す",
   "gauges": [
@@ -12,7 +12,7 @@
       "frame": 7,
       "initial": 100,
       "survival": true,
-      "delta": { "pgreat": 0.15, "great": 0.06, "good": 0, "bad": -8, "poor": -16, "empty_poor": -8 },
+      "delta": { "pgreat": 0.16, "great": 0.16, "good": 0, "bad": -10, "poor": -18, "empty_poor": -10 },
       "mine": 1.0,
       "colors": 1,
       "color": "#ffd800",

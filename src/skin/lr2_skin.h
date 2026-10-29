@@ -6,7 +6,9 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace bmj {
@@ -176,6 +178,38 @@ bool read_skin_header(const std::string& lr2_root, const std::string& skin_path,
 bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, const SkinHeader& header,
                    const std::array<bool, 1000>& options, Lr2Skin& out, std::string& error, const Lr2Skin* previous = nullptr,
                    bool images = true);
+
+// ほどいた画像の覚え。スキンセレクトの試し見のように、同じスキンを何度も読み直すときに使う（Use のある間、load_lr2_skin が引く）。
+// ファイルの更新日時と大きさが変わっていれば読み直す（.dxa の中のものは確かめない。clear で捨てる）。
+// limit バイトを超えたら、長く使っていないものから捨てる
+class SkinImageCache {
+public:
+    explicit SkinImageCache(size_t limit) : limit_(limit) {}
+    struct Use {
+        explicit Use(SkinImageCache& c);
+        ~Use();
+        Use(const Use&) = delete;
+        Use& operator=(const Use&) = delete;
+    };
+    // 覚えていれば img に写して true
+    bool get(const std::string& path, const uint8_t trans[3], bool use_trans, SkinImage& img);
+    void put(const std::string& path, const uint8_t trans[3], bool use_trans, const SkinImage& img);
+    void clear();
+    static SkinImageCache* active();
+
+private:
+    struct Item {
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgba;
+        int64_t mtime = 0;
+        uintmax_t size = 0;
+        uint64_t used = 0;
+    };
+    std::mutex mu_;
+    std::unordered_map<std::string, Item> items_;
+    size_t limit_, bytes_ = 0;
+    uint64_t tick_ = 0;
+};
 
 // 画像を1枚読む。use_trans なら、アルファの無い画像の trans 色を透明にする（DxLibと同じ）
 bool load_skin_image(const std::string& path, SkinImage& img, const uint8_t trans[3], bool use_trans);

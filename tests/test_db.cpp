@@ -6,8 +6,10 @@
 #include <thread>
 
 #include "db/custom_folder.h"
+#include "db/lr2_export.h"
 #include "db/song_db.h"
 #include "test.h"
+#include "sqlite3.h"
 #include "util/hash.h"
 
 using namespace bmj;
@@ -115,6 +117,11 @@ TEST(song_db_import_lr2) {
                             // フルコンボで GOOD が 0（PGREAT＋GREAT＝最大コンボ）なら PERFECT。GOOD があればフルコンボのまま
                             "('eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5, 3, 2, 1, 5, 1, 1), ('dddddddddddddddddddddddddddddddd', 5, 3, 1, 0, 5, 1, 1)";
     sqlite3_exec(db, ins.c_str(), nullptr, nullptr, nullptr);
+    // プレイヤーの情報（ID・名前・段位・累計）
+    sqlite3_exec(db, "CREATE TABLE player(id TEXT primary key,hash TEXT,name TEXT,irid INTEGER,playcount INTEGER,clear INTEGER,"
+                     "fail INTEGER,perfect INTEGER,great INTEGER,good INTEGER,bad INTEGER,poor INTEGER,playtime INTEGER,grade_7 INTEGER);"
+                     "INSERT INTO player VALUES('me','abcd','わたし',12345,100,60,40,1000,500,50,20,30,3600,9)",
+                 nullptr, nullptr, nullptr);
     sqlite3_close(db);
 
     SongDb sdb;
@@ -160,6 +167,30 @@ TEST(song_db_import_lr2) {
     CHECK(sdb.get_score("00000000002" + std::string(21, '0') + md5, sc));
     CHECK_EQ(sc.clear, 3);
     CHECK_EQ(sc.exscore, 15);
+    // プレイヤーの情報を引き継ぎ、累計は LR2 の分に BMjoy で遊んだ分（上の 1 回）を足す
+    CHECK(sdb.lr2_player_info()["name"] == "わたし" && sdb.lr2_player_info()["grade_7"] == "9");
+    CHECK_EQ(sdb.player_stats().playcount, 101);
+    CHECK_EQ(sdb.own_player_stats().playcount, 1);
+    // LR2 の形で書き出すと、ID・段位・プレイ時間はそのまま、コースは LR2 の元の鍵になる
+    std::string err;
+    CHECK(export_lr2_files(sdb, (dir / "out").string(), {(dir / "songs").string()}, "", false, &err));
+    {
+        sqlite3* rd = nullptr;
+        sqlite3_open((dir / "out" / "Score" / "me.db").string().c_str(), &rd);
+        auto one = [&](const char* sql) {
+            sqlite3_stmt* st = nullptr;
+            sqlite3_prepare_v2(rd, sql, -1, &st, nullptr);
+            std::string v = sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0)
+                                ? reinterpret_cast<const char*>(sqlite3_column_text(st, 0)) : "";
+            sqlite3_finalize(st);
+            return v;
+        };
+        CHECK(one("SELECT id || ',' || name || ',' || irid || ',' || grade_7 || ',' || playtime || ',' || playcount FROM player") ==
+              "me,わたし,12345,9,3600,101");
+        CHECK(one("SELECT typeof(grade_7) FROM player") == "integer");
+        CHECK(one(("SELECT clear FROM score WHERE hash = '0000000000200000000000000000519" + std::string("0") + md5 + "'").c_str()) == "3");
+        sqlite3_close(rd);
+    }
     sdb.close();
     fs::remove_all(dir);
 }
@@ -379,5 +410,53 @@ TEST(song_db_saved_random) {
     db.delete_saved_random(ia);
     CHECK_EQ(db.saved_randoms("aaa").size(), size_t(1));
     db.close();
+    fs::remove_all(dir);
+}
+
+// LR2 の形の書き出し：フォルダの番号は LR2 が作ったものと同じ（値は LR2 の song.db にあったもの）。文字は UTF-8
+TEST(lr2_export) {
+    CHECK(lr2_folder_crc("E:\\BMSFolder\\torrent\\") == "bb0358c0");
+    CHECK(lr2_folder_crc("E:/BMSFolder/torrent") == "bb0358c0");  // 区切りと末尾の違いは同じに
+    CHECK(lr2_folder_crc("E:\\BMSFolder\\torrent\\[SHIKI] Crystal palace\\") == "15ae94f");
+    CHECK(lr2_folder_crc("E:\\BMSFolder\\Music\\0-9\\1024 (by 風鈴奏)\\") == "4297e3f3");  // 日本語を含むパス
+    fs::path dir = fs::temp_directory_path() / "bmj_lr2_export";
+    fs::remove_all(dir);
+    std::vector<ChartRecord> charts(2);
+    charts[0].path = "E:/BMSFolder/torrent/[SHIKI] Crystal palace/a.bme", charts[0].folder = "E:/BMSFolder/torrent/[SHIKI] Crystal palace";
+    charts[0].md5 = "0123456789abcdef0123456789abcdef", charts[0].sha256 = "s1", charts[0].title = "曲名", charts[0].notes = 1000;
+    charts[1].path = "E:/BMSFolder/torrent/b/c/x.bms", charts[1].folder = "E:/BMSFolder/torrent/b/c";
+    charts[1].md5 = "fedcba9876543210fedcba9876543210", charts[1].sha256 = "s2", charts[1].title = "x";
+    std::string err;
+    CHECK(export_lr2_song_db((dir / "song.db").string(), charts, {"E:/BMSFolder/torrent"}, &err));
+    ScoreRecord sc;
+    sc.sha256 = "s1", sc.clear = 6, sc.judge = {800, 150, 30, 10, 10}, sc.playcount = 5, sc.clearcount = 2, sc.bp = 20;
+    PlayerStats ps;
+    ps.playcount = 5;
+    CHECK(export_lr2_scores((dir / "Score" / "me.db").string(), "me", charts, {sc}, ps, {}, &err));
+    CHECK(err.empty());
+    sqlite3* db = nullptr;
+    sqlite3_open((dir / "song.db").string().c_str(), &db);
+    auto one = [&](const char* sql) {
+        sqlite3_stmt* st = nullptr;
+        sqlite3_prepare_v2(db, sql, -1, &st, nullptr);
+        std::string v;
+        if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_text(st, 0))
+            v.assign(reinterpret_cast<const char*>(sqlite3_column_text(st, 0)), static_cast<size_t>(sqlite3_column_bytes(st, 0)));
+        sqlite3_finalize(st);
+        return v;
+    };
+    CHECK(one("SELECT folder || '/' || parent FROM song WHERE hash = '0123456789abcdef0123456789abcdef'") == "15ae94f/bb0358c0");
+    CHECK(one("SELECT title FROM song WHERE hash = '0123456789abcdef0123456789abcdef'") == "曲名");
+    CHECK(one("SELECT path FROM song WHERE title = 'x'") == "E:\\BMSFolder\\torrent\\b\\c\\x.bms");
+    // フォルダ：登録した曲フォルダ（親は一番上の印）、譜面のフォルダ、途中のフォルダ b
+    CHECK(one("SELECT count(*) FROM folder") == "4");
+    CHECK(one("SELECT parent FROM folder WHERE path = 'E:\\BMSFolder\\torrent\\'") == kLr2RootParent);
+    CHECK(one("SELECT parent FROM folder WHERE title = 'c'") == lr2_folder_crc("E:/BMSFolder/torrent/b"));
+    sqlite3_close(db);
+    sqlite3_open((dir / "Score" / "me.db").string().c_str(), &db);
+    // EX 1750 / 2000 = 87.5%：rate 87、rank 7（AA）。PERFECT は FULL COMBO（5）にする
+    CHECK(one("SELECT clear || ',' || rate || ',' || rank || ',' || failcount || ',' || totalnotes FROM score") == "5,87,7,3,1000");
+    CHECK(one("SELECT name || ',' || playcount FROM player") == "me,5");
+    sqlite3_close(db);
     fs::remove_all(dir);
 }

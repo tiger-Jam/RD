@@ -154,7 +154,13 @@ bool SkinCatalog::step_custom(AppConfig& cfg, int k, int dir) {
     const SkinEntry* e = current(cfg);
     if (!e) return false;
     size_t idx = static_cast<size_t>(scroll_ + k);
-    if (static_cast<int>(idx) < part_rows()) return step_part(cfg, *e, static_cast<int>(idx), dir);
+    if (idx == 0 && part_rows() > 0) {
+        // 部品の行の開け閉め（設定は変えない）
+        parts_open_ = !parts_open_;
+        set_scroll(scroll_, cfg);
+        return true;
+    }
+    if (static_cast<int>(idx) < part_rows()) return step_part(cfg, *e, static_cast<int>(idx) - 1, dir);
     idx -= static_cast<size_t>(part_rows());
     if (idx >= e->header.customs.size()) return false;
     int n = static_cast<int>(e->header.customs[idx].labels.size());
@@ -172,7 +178,7 @@ int SkinCatalog::scroll_max(const AppConfig& cfg) const {
     return e ? std::max(0, static_cast<int>(e->header.customs.size()) + part_rows() - 5) : 0;
 }
 
-int SkinCatalog::part_rows() const { return type_ == 0 ? kPlayPartSlotCount + 1 : 0; }
+int SkinCatalog::part_rows() const { return type_ != 0 ? 0 : parts_open_ ? kPlayPartSlotCount + 2 : 1; }
 
 std::string SkinCatalog::skin_label(const SkinEntry& e) const {
     // 同じ名前のスキンが多い（W-mix の 1P・2P・DP など）ので、名前が重なればファイルの名前を付ける
@@ -314,7 +320,15 @@ std::string SkinCatalog::text(int id, const AppConfig& cfg) const {
     if (id >= 100 && id <= 114) {
         // 部品の行を先に、スキンのカスタマイズの項目をその後ろに並べる（項目の多いスキンでも部品がすぐ見えるように）
         size_t idx = static_cast<size_t>(scroll_ + (id % 10));
-        if (static_cast<int>(idx) < part_rows()) return part_text(static_cast<int>(idx), id >= 110, cfg, *e);
+        if (idx == 0 && part_rows() > 0) {
+            if (id < 110) return "SKIN PARTS";
+            if (parts_open_) return "CLOSE";
+            // たたんでいるときは、ほかのスキンから持ってきている部品の数
+            auto it = cfg.skin_parts.find(e->path);
+            const size_t n = it != cfg.skin_parts.end() ? it->second.from.size() : 0;
+            return n > 0 ? "OPEN (" + std::to_string(n) + " CHANGED)" : "OPEN";
+        }
+        if (static_cast<int>(idx) < part_rows()) return part_text(static_cast<int>(idx) - 1, id >= 110, cfg, *e);
         idx -= static_cast<size_t>(part_rows());
         if (idx >= e->header.customs.size()) return {};
         const SkinCustomItem& c = e->header.customs[idx];

@@ -257,6 +257,7 @@ int SelectContext::number(int id) const {
 
 std::string SelectContext::text(int id) const {
     if (catalog && (id == 50 || id == 51 || (id >= 100 && id <= 114))) return catalog->text(id, *cfg);
+    if (id == 2) return player_name;
     if (!title_override.empty() && (id == 10 || id == 12)) return title_override;
     if (std::string v; course_text(course, id, v)) return v;
     if (course) {

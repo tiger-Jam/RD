@@ -1274,11 +1274,6 @@ int main(int, char**) {
             g.button(X + 189, Y + 72, 143, 23, "プレイヤーデータ削除", false);
             bool windowed = !cfg.fullscreen;
             if (g.check(X + 19, Y + 132, "ウインドウモード", windowed)) cfg.fullscreen = !windowed;
-            g.label(X + 152, Y + 135, "ウインドウサイズ");
-            g.label(X + 243, Y + 137, "X");
-            g.edit_int(cfg.window_w, X + 261, Y + 121, 59, 22, true, 0, 7680);
-            g.label(X + 333, Y + 137, "Y");
-            g.edit_int(cfg.window_h, X + 351, Y + 121, 59, 22, true, 0, 4320);
             g.label(X + 17, Y + 164, "データベース自動更新");
             if (g.radio(X + 136, Y + 164, "手動のみ(F8で現在選択中のフォルダの更新を行えます)", cfg.db_update == 1)) cfg.db_update = 1;
             g.radio(X + 136, Y + 184, "開いたフォルダに対して自動で行う (フォルダ読み込み時間が少し長くなります)", false, false);
@@ -1453,6 +1448,7 @@ int main(int, char**) {
             g.check(X + 20, by + 26, "選曲中に曲のプレビューを鳴らす", cfg.preview);
             g.check(X + 20, by + 48, "キー音を 16 ビットで読み込む", cfg.sound_16bit);
             g.check(X + 280, by + 48, "メモリを節約する", cfg.low_memory);
+            g.check(X + 20, by + 70, "LR2 の形でも曲とスコアを書き出す（外部ツール用）", cfg.lr2_export);
 #ifdef _WIN32
             g.check(X + 280, by + 26, "コントローラーを DirectInput でも探す", cfg.joystick_directinput);
 #endif

@@ -72,6 +72,8 @@ bool AppConfig::load(const std::string& path) {
         std::string val(trim(l.substr(eq + 1)));
         int iv = std::atoi(val.c_str());
         if (key == "lr2_root") lr2_root = from_portable(val);
+        else if (key == "lr2_player") lr2_player = val;
+        else if (key == "lr2_export") lr2_export = iv != 0;
         else if (key == "play_skin") play_skin = from_portable(val);
         else if (key == "result_skin") result_skin = from_portable(val);
         else if (key == "courseresult_skin") courseresult_skin = from_portable(val);
@@ -144,8 +146,6 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "vsync") vsync = iv != 0;
         else if (key == "fullscreen") fullscreen = iv != 0;
         else if (key == "window_scale") window_scale = iv;
-        else if (key == "window_w") window_w = iv;
-        else if (key == "window_h") window_h = iv;
         else if (key == "db_update") db_update = iv;
         else if (key == "select_speed_first") select_speed_first = iv;
         else if (key == "preview") preview = iv != 0;
@@ -214,6 +214,8 @@ bool AppConfig::save(const std::string& path) const {
     if (!f) return false;
     f << "# BMjoy の設定\n";
     f << "lr2_root = " << to_portable(lr2_root) << "\n";
+    f << "lr2_export = " << (lr2_export ? 1 : 0) << "  # 外部ツールのために LR2 の形の曲データベースとスコアを Database に書き出す\n";
+    f << "lr2_player = " << lr2_player << "  # 書き出すスコアの名前（Database/Score/<名前>.db。空なら LR2 から引き継いだ ID か BMjoy）\n";
     f << "play_skin = " << to_portable(play_skin) << "\n";
     f << "result_skin = " << to_portable(result_skin) << "\n";
     f << "courseresult_skin = " << to_portable(courseresult_skin) << "\n";
@@ -287,8 +289,6 @@ bool AppConfig::save(const std::string& path) const {
     f << "vsync = " << (vsync ? 1 : 0) << "\n";
     f << "fullscreen = " << (fullscreen ? 1 : 0) << "\n";
     f << "window_scale = " << window_scale << "  # ウィンドウの大きさ（%）。0 はスキンに合わせる\n";
-    f << "window_w = " << window_w << "\n";
-    f << "window_h = " << window_h << "  # ウインドウサイズ。両方 1 以上なら解像度・拡大率より優先\n";
     f << "db_update = " << db_update << "  # 0=起動時に曲フォルダを読み直す 1=手動（選曲画面の F8 で今のフォルダだけ）\n";
     f << "select_speed_first = " << select_speed_first << "\n";
     f << "preview = " << (preview ? 1 : 0) << "  # 選曲中に曲を鳴らす\n";
@@ -344,6 +344,8 @@ std::string mod_data_dir(const std::string& id) { return data_dir() + "Mods/ModD
 std::string mod_settings_path(const std::string& id) { return mod_data_dir(id) + "/settings.json"; }
 
 std::string lr2_courses_path() { return data_dir() + "Database/lr2_courses.txt"; }
+std::string lr2_database_dir() { return data_dir() + "Database"; }
+
 
 std::string table_cache_dir() { return data_dir() + "Database/Table"; }
 

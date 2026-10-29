@@ -54,7 +54,8 @@ public:
     const std::map<int, std::vector<SkinEntry>>& entries() const { return by_type_; }
 
 private:
-    // プレースキンの部品の行（カスタマイズの項目の前に並べる）：row は 0〜kPlayPartSlotCount（最後は大きさの合わせ方）
+    // プレースキンの部品の行（カスタマイズの項目の前に並べる）。先頭は開け閉めの行で、開いていれば部品（row は 0〜kPlayPartSlotCount。
+    // 最後は大きさの合わせ方）が続く
     int part_rows() const;
     std::string part_text(int row, bool value, const AppConfig& cfg, const SkinEntry& e) const;
     bool step_part(AppConfig& cfg, const SkinEntry& e, int row, int dir);
@@ -72,6 +73,7 @@ private:
     std::map<int, std::vector<SkinEntry>> by_type_;
     int type_ = 0;
     int scroll_ = 0;
+    bool parts_open_ = false;  // 部品の行を開いているか（ふだんはたたんで 1 行）
     // part_customs の覚え（スキンのパスとカスタマイズ → 差し込み口の鍵 → 番号）
     mutable std::map<std::string, std::map<std::string, std::vector<int>>> part_customs_;
 };

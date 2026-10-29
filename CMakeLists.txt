@@ -67,6 +67,7 @@ add_library(bmj_core STATIC
     src/net/http_server.cpp
     src/net/borrow.cpp
     src/db/song_db.cpp
+    src/db/lr2_export.cpp
     src/db/difficulty_table.cpp
     src/db/custom_folder.cpp
     src/db/folder_watch.cpp

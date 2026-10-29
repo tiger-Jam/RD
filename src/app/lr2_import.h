@@ -64,4 +64,8 @@ struct AssetCopyResult {
 AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root,
                                 const std::function<void(const std::string&)>& status = {});
 
+// 外部ツールのために、LR2 の形の曲データベース（songs が真のとき）とスコアを LR2files/Database に書き出す（db/lr2_export.h）。
+// 設定の lr2_export が偽なら何もしない
+void write_lr2_files(const SongDb& db, const AppConfig& cfg, bool songs);
+
 }  // namespace bmj

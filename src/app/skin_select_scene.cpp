@@ -32,7 +32,7 @@ public:
     }
     SDL_Texture* texture() const { return tex_; }
     // 次の select で必ず読み直す（スキンのファイルを書き換えたとき）
-    void invalidate() { path_.clear(), type_ = -1; }
+    void invalidate() { path_.clear(), type_ = -1, cache_.clear(), part_cache_.clear(); }
 
     // 選んでいるスキンが変わったら読み直す
     void select(const SkinEntry* e, int type) {
@@ -51,6 +51,7 @@ public:
             }
         if (want == path_ && type == type_) return;
         path_ = want, type_ = type;
+        const uint64_t t0 = SDL_GetTicksNS();
         skin_.reset();
         demo_judge_.reset(), demo_.reset(), demo_start_ = -1;
         ctx_.skin = nullptr, ctx_.chart = nullptr;  // 捨てたものを読み込みの条件（ctx_.load_options）で見ないように
@@ -81,12 +82,16 @@ public:
         }
         SkinHeader h = e->header;
         apply_skin_custom(app_.cfg, e->path, h);
+        SkinImageCache::Use use_cache(cache_);  // 項目を替えるたびに読み直すので、ほどいた画像を使い回す（ほかのスキンの部品も）
         auto sk = std::make_unique<Lr2Skin>();
         std::string err;
         if (!load_lr2_skin(app_.lr2_root, e->path, h, ctx_.load_options(), *sk, err)) return;
+        const uint64_t t1 = SDL_GetTicksNS();
         if (!h.has_resolution) guess_resolution(*sk);  // 本体と同じく、解像度の書いていないスキンは中身から推定する
-        if (type == 0 || type == 1) app_.apply_skin_mods(*sk, e->path, ctx_.load_options());  // ほかのスキンの部品と色（遊ぶときと同じに見せる）
+        if (type == 0 || type == 1) app_.apply_skin_mods(*sk, e->path, ctx_.load_options(), &part_cache_);  // ほかのスキンの部品と色（遊ぶときと同じに見せる）
+        const uint64_t t2 = SDL_GetTicksNS();
         renderer_.upload(*sk);
+        std::printf("試し見：読む %.0f ms／部品 %.0f ms／絵を送る %.0f ms\n", (t1 - t0) / 1e6, (t2 - t1) / 1e6, (SDL_GetTicksNS() - t2) / 1e6);
         // スキンはスキン本来の大きさの絵に描いてから、プレビューの枠の大きさに縮めて貼る
         float fw = 0, fh = 0;
         if (full_) SDL_GetTextureSize(full_, &fw, &fh);
@@ -197,6 +202,8 @@ private:
     SDL_Texture* thumb_ = nullptr;
     SDL_Texture* full_ = nullptr;  // スキン本来の大きさの描き先
     std::unique_ptr<Lr2Skin> skin_;
+    SkinImageCache cache_{size_t(1) << 30};     // ほどいた画像（1 GB まで）
+    App::PartSkinCache part_cache_;             // 部品を持ってくるスキン
     std::unique_ptr<Chart> demo_;               // 見本の譜面（7 鍵・5 鍵のプレースキン）
     std::unique_ptr<JudgeEngine> demo_judge_;   // その自動演奏
     double demo_start_ = -1;                    // 見本の譜面の頭のシーンの時刻
