@@ -18,4 +18,4 @@ SECRET=$(python3 -I -c "import json,sys; print(json.load(open(sys.argv[1]))['adm
 printf '%s' "$SECRET" | $W secret put ADMIN_SECRET >/dev/null
 umask 077
 python3 -I -c "import json,sys; json.dump({'url': sys.argv[1], 'admin_secret': sys.argv[2]}, open(sys.argv[3], 'w'))" "$URL" "$SECRET" "$CFG"
-echo "受け口：$URL（RD の既定の送り先・取りに行く先にする）"
+echo "受け口：${URL}（RD の既定の送り先・取りに行く先にする）"

@@ -10,7 +10,7 @@ namespace rd {
 struct AppConfig;
 
 // 受け口を作ったら（tools/service/cloudflare/setup.sh が出す住所）ここに入れる。空の間は送らず、更新も確かめない
-inline constexpr const char* kServiceUrl = "";
+inline constexpr const char* kServiceUrl = "https://rd-service.rd-service.workers.dev";
 
 // この PC の印（RDfiles/Config/client_id.txt。無ければ作る）。ログの送り主を分けるため
 std::string client_id();
