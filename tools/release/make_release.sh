@@ -44,7 +44,7 @@ python3 -I tools/release/strip_cites.py "$tmp/src/tests"
 
 WINHOME=$(ps '$env:USERPROFILE' | tr -d '\r')
 ROOT="$WINHOME\\BMjoy-release"
-ps "New-Item -ItemType Directory -Force '$ROOT\\$VER\\src' | Out-Null; Remove-Item -Recurse -Force '$ROOT\\$VER\\src\\*', '$ROOT\\$VER\\out' -ErrorAction SilentlyContinue"
+ps "New-Item -ItemType Directory -Force '$ROOT\\$VER\\src' | Out-Null; Remove-Item -Recurse -Force '$ROOT\\$VER\\src\\*', '$ROOT\\$VER\\out' -ErrorAction SilentlyContinue; exit 0"
 scp -q -o BatchMode=yes "$tmp/src.tar" "$HOST:BMjoy-release/$VER/src.tar"
 ps "tar -xf '$ROOT\\$VER\\src.tar' -C '$ROOT\\$VER\\src'; Remove-Item '$ROOT\\$VER\\src.tar'"
 # 素材は開発のフォルダの BMjoy の置き場から（名前を変える前なら LR2files）
