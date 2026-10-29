@@ -4,9 +4,9 @@
 #include "app/app.h"
 #include "app/skin_catalog.h"
 
-namespace bmj {
+namespace rd {
 
 // 閉じるまで動く。選曲スキン（やそのカスタマイズ）を替えたら true
 bool run_skin_select(App& app, SkinCatalog& catalog);
 
-}  // namespace bmj
+}  // namespace rd

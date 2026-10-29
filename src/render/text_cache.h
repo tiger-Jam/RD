@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 class TextCache {
 public:
@@ -48,4 +48,4 @@ private:
     Tex get_system(int size, const std::string& s);
 };
 
-}  // namespace bmj
+}  // namespace rd

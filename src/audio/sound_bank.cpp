@@ -20,7 +20,7 @@ extern "C" {
 #include "stb_vorbis.c"
 }
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -204,4 +204,4 @@ void SoundBank::scale(size_t id, float gain) {
     for (int16_t& v : s.pcm16) v = static_cast<int16_t>(std::clamp(static_cast<int>(v * gain), -32768, 32767));
 }
 
-}  // namespace bmj
+}  // namespace rd

@@ -8,7 +8,7 @@
 #include "test.h"
 #include "util/http.h"
 
-using namespace bmj;
+using namespace rd;
 namespace fs = std::filesystem;
 
 namespace {
@@ -27,7 +27,7 @@ std::string read(const fs::path& p) {
 
 // 貸す側と借りる側の往復：一覧・フォルダ・ファイル。借りるときはほかの譜面を取らず、もらうときは全部取る
 TEST(borrow_roundtrip) {
-    const fs::path dir = fs::temp_directory_path() / "bmj_test_borrow";
+    const fs::path dir = fs::temp_directory_path() / "rd_test_borrow";
     fs::remove_all(dir);
     const fs::path song = dir / "songs" / "Song A";
     write(song / "a_n.bme", "#TITLE A\n");
@@ -68,20 +68,20 @@ TEST(borrow_roundtrip) {
     BorrowSource wrong{src.url, "nope"};
     CHECK(!borrow_list(wrong, charts, err));
     std::string body;
-    const std::string base = src.url + "/bmjoy/v1/file/" + f.id + "/";
-    const HttpHeaders key = {{"X-BMjoy-Key", "pass"}};
+    const std::string base = src.url + "/rd/v1/file/" + f.id + "/";
+    const HttpHeaders key = {{"X-RD-Key", "pass"}};
     CHECK(http_get(base + "kick.wav", body, err, key));
     CHECK(!http_get(base + "..%2Fsecret.txt", body, err, key));
     CHECK(!http_get(base + "../secret.txt", body, err, key));
     CHECK(!http_get(base + "tool.exe", body, err, key));
-    CHECK(!http_get(src.url + "/bmjoy/v1/chart/ffff", body, err, key));
+    CHECK(!http_get(src.url + "/rd/v1/chart/ffff", body, err, key));
     server.stop();
     fs::remove_all(dir);
 }
 
 // 置き場は、遊んでいない順に消して上限に収める。今使うものは消さない
 TEST(borrow_trim_order) {
-    const fs::path dir = fs::temp_directory_path() / "bmj_test_borrow_trim";
+    const fs::path dir = fs::temp_directory_path() / "rd_test_borrow_trim";
     fs::remove_all(dir);
     for (const char* n : {"old", "mid", "new"}) {
         write(dir / n / "x.wav", std::string(1000, 'x'));

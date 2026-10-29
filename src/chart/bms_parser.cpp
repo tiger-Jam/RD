@@ -15,7 +15,7 @@
 #include "util/path.h"
 #include "util/text.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -557,4 +557,4 @@ BmsParseResult parse_bms_file(const std::string& path, const BmsParseOptions& op
     return r;
 }
 
-}  // namespace bmj
+}  // namespace rd

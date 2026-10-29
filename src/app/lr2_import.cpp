@@ -18,7 +18,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 std::string read_all(const fs::path& p) {
@@ -136,7 +136,7 @@ int import_lr2_settings(const std::string& xml, AppConfig& cfg) {
     num(play, "ghost", cfg.ghost, 0, 3);
     num(play, "scoregraph", cfg.score_graph, 0, 1);
     num(play, "target", cfg.target, 0, 8);
-    if (cfg.target > 5) cfg.target = 0;  // 6〜8 は IR のターゲット（BMjoy には無い）
+    if (cfg.target > 5) cfg.target = 0;  // 6〜8 は IR のターゲット（RD には無い）
     num(play, "defaulttarget", cfg.target_percent, 50, 100);
     num(play, "replaysave", cfg.replay_save, 0, 4);
     num(play, "basespeed", cfg.base_speed, 10, 1000);
@@ -161,7 +161,7 @@ int import_lr2_settings(const std::string& xml, AppConfig& cfg) {
         num(sound, ("fxp2" + n).c_str(), f.p2, -1000, 1000);
     }
     cfg.sound_fx.clamp();
-    // 選曲（<select>）。ソートと鍵盤数の絞り込みは、BMjoy では beatoraja の並びなので写さない
+    // 選曲（<select>）。ソートと鍵盤数の絞り込みは、RD では beatoraja の並びなので写さない
     num(select, "difficulty", cfg.select_difficulty, 0, 5);
     num(select, "searchmax", cfg.search_max, 0, 100000);
     num(select, "speedfirst", cfg.select_speed_first, 1, 5000);
@@ -226,7 +226,7 @@ SDL_Scancode dik_to_scancode(int dik) {
 bool import_lr2_keyconfig(const std::string& path, KeyConfig& out) {
     std::string xml = read_all(fs::u8path(path));
     if (xml.empty()) return false;
-    // LR2 の keyNN → BMjoy のボタン（1P の分。key10 / key11 は皿の 2 方向、key12 が START、key13 が SELECT）
+    // LR2 の keyNN → RD のボタン（1P の分。key10 / key11 は皿の 2 方向、key12 が START、key13 が SELECT）
     const std::pair<const char*, int> slots[] = {{"key01", kKey1},     {"key02", kKey1 + 1}, {"key03", kKey1 + 2},
                                                  {"key04", kKey1 + 3}, {"key05", kKey1 + 4}, {"key06", kKey1 + 5},
                                                  {"key07", kKey1 + 6}, {"key10", kScratchA}, {"key11", kScratchB},
@@ -306,7 +306,7 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     res.song_dirs = static_cast<int>(dirs.size());
     // 遊び方・音・選曲・画面の設定
     res.settings = import_lr2_settings(xml, cfg);
-    // キーコンフィグ（BMjoy のキーコンフィグを LR2 のものに置き換える）
+    // キーコンフィグ（RD のキーコンフィグを LR2 のものに置き換える）
     {
         KeyConfig k;
         if (!k.load(keyconfig_path())) k = KeyConfig::lr2_default();
@@ -370,9 +370,9 @@ AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, con
     const fs::path src = cfg.lr2_root;
     const fs::path dst = dst_root;
     if (cfg.lr2_root.empty() || !fs::is_directory(src / "LR2files", ec)) return res.error = "LR2 のフォルダが見つからない：" + cfg.lr2_root, res;
-    if (path_key(src) == path_key(dst)) return res.error = "すでに BMjoy のフォルダの素材を使っている", res;
+    if (path_key(src) == path_key(dst)) return res.error = "すでに RD のフォルダの素材を使っている", res;
 
-    // 写すもの：見た目と音にかかわるものだけ（曲・記録・IR のデータは BMjoy が別に持つ）
+    // 写すもの：見た目と音にかかわるものだけ（曲・記録・IR のデータは RD が別に持つ）
     static const char* kDirs[] = {"Theme", "Sound", "Bgm", "WallPaper", "Config", "Mouse", "Movie", "Help"};
     auto copy_tree = [&](const fs::path& from, const fs::path& to) {
         if (!fs::is_directory(from, ec)) return;
@@ -397,7 +397,7 @@ AssetCopyResult copy_lr2_assets(AppConfig& cfg, const std::string& dst_root, con
         }
         ec.clear();
     };
-    // 写す先は BMjoy の置き場（BMjoyfiles）。スキンの中の「LR2files/…」は、読むときにここへ読み替える
+    // 写す先は RD の置き場（RDfiles）。スキンの中の「LR2files/…」は、読むときにここへ読み替える
     const fs::path files = dst / data_dir_name();
     for (const char* d : kDirs) copy_tree(src / "LR2files" / d, files / d);
 
@@ -482,4 +482,4 @@ void write_lr2_files(const SongDb& db, const AppConfig& cfg, bool songs) {
         std::printf("LR2 の形で書き出した（%s）：%.0f ms\n", songs ? "曲とスコア" : "スコア", (SDL_GetTicksNS() - t0) / 1e6);
 }
 
-}  // namespace bmj
+}  // namespace rd

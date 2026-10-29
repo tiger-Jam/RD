@@ -9,7 +9,7 @@
 #include "audio/dsp.h"
 #include "skin/skin_adjust.h"
 
-namespace bmj {
+namespace rd {
 
 // スキンのカスタマイズの 1 項目の選択（LR2: LR2files/SkinCustomize の xml）。
 // #CUSTOMOPTION は選択肢の番号、#CUSTOMFILE は LR2 と同じく選んだ名前で持つ（ファイルが増減しても選択がずれない）
@@ -20,11 +20,11 @@ struct SkinCustomChoice {
 };
 
 struct AppConfig {
-    std::string player;            // 今のプレイヤーの ID（BMjoyfiles/Player/<ID>。共通の設定に書く）
+    std::string player;            // 今のプレイヤーの ID（RDfiles/Player/<ID>。共通の設定に書く）
     std::string lr2_root;          // LR2のフォルダ（LR2files があるところ）
     // 外部ツールのために、LR2 の形の曲データベースとスコアを LR2files/Database に書き出すか
     bool lr2_export = false;
-    // LR2 の形で書き出すスコアの名前（LR2files/Database/Score/<名前>.db。空なら LR2 から引き継いだ ID、それも無ければ BMjoy）
+    // LR2 の形で書き出すスコアの名前（LR2files/Database/Score/<名前>.db。空なら LR2 から引き継いだ ID、それも無ければ RD）
     std::string lr2_player;
     bool log_upload = true;        // ログを作者へ送る（app/service.h）
     bool auto_update = true;       // 起動するときに新しい版を確かめて入れ替える
@@ -32,7 +32,7 @@ struct AppConfig {
     std::string play_skin;         // プレイスキンの .lr2skin（空なら LR2 の既定）
     std::string result_skin;       // リザルトスキンの .lr2skin（空なら LR2 の既定）
     std::string courseresult_skin; // コースリザルトスキンの .lr2skin（空なら LR2 の既定）
-    std::string select_skin;       // 選曲スキンの .lr2skin（空なら LR2 の既定。"none" なら BMjoy の仮の画面）
+    std::string select_skin;       // 選曲スキンの .lr2skin（空なら LR2 の既定。"none" なら RD の仮の画面）
     std::string decide_skin;       // 決定画面のスキン（空なら LR2 の既定。"none" なら決定画面を出さない）
     std::string keyconfig_skin;    // キーコンフィグのスキン（空なら LR2 の既定。"none" ならスキンを使わない画面）
     std::string skinselect_skin;   // スキンセレクトのスキン（空なら LR2 の既定）
@@ -106,7 +106,7 @@ struct AppConfig {
     // MOD（仕様書14章）。使う MOD の id と、カスタムゲージで遊ぶならその鍵（「MOD の id/ゲージの id」。空なら gauge の LR2 のゲージ）
     std::vector<std::string> enabled_mods;
     std::string custom_gauge;
-    bool watch_folders = true;  // 曲フォルダを見張って、変わったフォルダを選曲画面のまま読み直す（BMjoy の拡張）
+    bool watch_folders = true;  // 曲フォルダを見張って、変わったフォルダを選曲画面のまま読み直す（RD の拡張）
     std::map<std::string, SkinAdjust> skin_adjust;  // プレイスキンのパス → 位置の調整（LR2: SkinCustomize の shift など）
     int title_flash = 24;  // この時間（時間）より後に見つけた譜面を新曲にする（LR2: titleflash）  // フォルダのバーにランプを付ける（LR2: folderlamp）  // 演奏中の右クリックで曲を終えない（LR2: disableleftclickexit）
     // fps：0 はモニタのリフレッシュレート、-1 は上限なし。垂直同期は既定で使わない
@@ -152,7 +152,7 @@ struct AppConfig {
     void write(std::ostream& f) const;
 };
 
-// 全員で共通の設定ファイル（BMjoyfiles/Config/config.txt）
+// 全員で共通の設定ファイル（RDfiles/Config/config.txt）
 std::string config_path();
 // 設定を読む：共通の設定（config.txt）から今のプレイヤーを決め（util/data_dir.h の set_player_id）、プレイヤーの設定を重ねる。
 // プレイヤーがまだいなければ最初のプレイヤーを作り、前の置き場のキーコンフィグ・リプレイ・MOD のファイルを移す。共通の設定があれば true
@@ -163,7 +163,7 @@ bool save_config(const AppConfig& cfg);
 // プレイヤーを作る（copy_from のプレイヤーの設定とキーコンフィグを写す。空なら写さない）・消す
 bool create_player(const std::string& id, const std::string& copy_from, std::string* error = nullptr);
 bool delete_player(const std::string& id, std::string* error = nullptr);
-// プレイヤーごとの設定と記録（BMjoyfiles/Player/<ID>/config.txt・score.db）
+// プレイヤーごとの設定と記録（RDfiles/Player/<ID>/config.txt・score.db）
 std::string player_config_path();
 std::string player_score_db_path();
 
@@ -171,27 +171,27 @@ std::string player_score_db_path();
 std::vector<SkinCustomChoice> parse_skin_custom(const std::string& val);
 std::string format_skin_custom(const std::vector<SkinCustomChoice>& sel);
 
-// 置き場は実行ファイルの横の BMjoyfiles の中（util/data_dir.h）。
-// 設定（BMjoyfiles/Config/config.txt）は config_path()
-// 曲データベースと記録（BMjoyfiles/Database/songs.db）
+// 置き場は実行ファイルの横の RDfiles の中（util/data_dir.h）。
+// 設定（RDfiles/Config/config.txt）は config_path()
+// 曲データベースと記録（RDfiles/Database/songs.db）
 std::string song_db_path();
-// 難易度表を手元に保存しておくフォルダ（BMjoyfiles/Database/Table）
+// 難易度表を手元に保存しておくフォルダ（RDfiles/Database/Table）
 std::string table_cache_dir();
-// LR2 から引き継いだ段位・コース（BMjoyfiles/Database/lr2_courses.txt。LR2 の曲データベースの grade・expert の表を写したもの）
+// LR2 から引き継いだ段位・コース（RDfiles/Database/lr2_courses.txt。LR2 の曲データベースの grade・expert の表を写したもの）
 std::string lr2_courses_path();
 // LR2 の形で書き出す曲データベースとスコアの置き場（実行ファイルの横の LR2files/Database。外部ツールのため）
 std::string lr2_database_dir();
-// 譜面のリプレイのファイル（BMjoyfiles/Replay/<sha256>.bjr）
+// 譜面のリプレイのファイル（RDfiles/Replay/<sha256>.rdr。前の名前のときの .bjr しか無ければそれ）
 std::string replay_path(const std::string& sha256);
-// 全プレーの入力の記録（BMjoyfiles/Replay/InputLog/<sha256>/<日時>.bjr）
+// 全プレーの入力の記録（RDfiles/Replay/InputLog/<sha256>/<日時>.rdr）
 std::string input_log_path(const std::string& sha256, int64_t played_at);
 // MOD の置き場所：公式（実行ファイルの横の mods/）。自分で入れる MOD は今は読まない。
-// MOD が書いてよいのは BMjoyfiles/Player/<ID>/ModData/<MOD の id>/ だけ
+// MOD が書いてよいのは RDfiles/Player/<ID>/ModData/<MOD の id>/ だけ
 std::string official_mods_dir();
 std::string mod_data_dir(const std::string& id);
-// MOD の詳細の設定（BMjoyfiles/Player/<ID>/ModData/<MOD の id>/settings.json）
+// MOD の詳細の設定（RDfiles/Player/<ID>/ModData/<MOD の id>/settings.json）
 std::string mod_settings_path(const std::string& id);
 // ゲージで「GAS」を選んだときの custom_gauge の値（カスタムゲージの鍵は「MOD/ゲージ」なので重ならない）
 inline constexpr const char* kGasKey = "gas";
 
-}  // namespace bmj
+}  // namespace rd

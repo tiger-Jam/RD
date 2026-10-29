@@ -3,7 +3,7 @@
 #include <cstring>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -115,4 +115,4 @@ std::string sha256_hex(const void* data, size_t len) {
     return to_hex(out, 32);
 }
 
-}  // namespace bmj
+}  // namespace rd

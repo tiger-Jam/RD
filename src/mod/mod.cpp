@@ -12,7 +12,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -679,4 +679,4 @@ std::string play_mod_key(const std::vector<const ModManifest*>& mods) {
 
 std::string seven_key_record_key(const std::string& mod_key) { return mod_key.empty() ? "7k" : "7k," + mod_key; }
 
-}  // namespace bmj
+}  // namespace rd

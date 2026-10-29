@@ -5,7 +5,7 @@
   "id": "metronome",
   "name": "メトロノーム",
   "version": "1",
-  "author": "BMjoy",
+  "author": "RD",
   "description": "譜面の BPM に合わせてメトロノームの音を鳴らす",
   "settings": [{ "type": "metronome", "name": "音量" }],
   "metronome": { "accent": "accent.wav", "beat": "beat.wav", "volume": 400 }

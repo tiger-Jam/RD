@@ -11,7 +11,7 @@
 #include <windows.h>
 #endif
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -253,4 +253,4 @@ TextCache::Tex TextCache::get(int size, int thick, const std::string& s) {
     return out;
 }
 
-}  // namespace bmj
+}  // namespace rd

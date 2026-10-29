@@ -8,7 +8,7 @@
 
 #include "skin/lr2_skin.h"
 
-namespace bmj {
+namespace rd {
 
 // 差し込み口（設定の鍵と、スキン選択に出す名前）
 struct PlayPartSlot {
@@ -35,4 +35,4 @@ int compose_play_part(Lr2Skin& sk, const Lr2Skin& from, const std::string& part,
 // from の part の絵を選んでいる #CUSTOMFILE（ヘッダの customs の番号、小さい順）。画像を読まずに読んだスキンでよい
 std::vector<int> play_part_customs(const Lr2Skin& from, const std::string& part);
 
-}  // namespace bmj
+}  // namespace rd

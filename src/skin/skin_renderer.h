@@ -21,7 +21,7 @@
 #include "skin/skin_adjust.h"
 #include "video/video_decoder.h"
 
-namespace bmj {
+namespace rd {
 
 // スキンのタイマー（LR2: Timer の clock[]）。開始時刻をmsで持ち、-1 は停止中
 class SkinTimers {
@@ -230,4 +230,4 @@ private:
     uint32_t flicker_ = 12345;  // ゲージのちらつきの乱数
 };
 
-}  // namespace bmj
+}  // namespace rd

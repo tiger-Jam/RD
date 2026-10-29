@@ -1,14 +1,14 @@
-﻿# 難易度表の、持っていない譜面を取ってくる（BMjoy の曲データベースと難易度表の手元の版で探し、bms-get で 1 譜面ずつ取る）。
-#   -Table         難易度表の名前（一部でよい）・記号・URL。省くと BMjoy に登録した表を全部
+﻿# 難易度表の、持っていない譜面を取ってくる（RD の曲データベースと難易度表の手元の版で探し、bms-get で 1 譜面ずつ取る）。
+#   -Table         難易度表の名前（一部でよい）・記号・URL。省くと RD に登録した表を全部
 #   -Level         レベル（何度でも。例 -Level 5,6）。省くと全部のレベル
 #   -Limit         取る数の上限（0 なら全部）
 #   -Out           置き場（既定 E:\BMSFolder\Download。bms-get は <置き場>\packages\<md5>\ に置く）
 #   -DryRun        取らずに、持っていない譜面の一覧だけを出す
 #   -UpdateTables  先に難易度表を取り直す（毎日の自動の収集で使う）
-#   -Rescan        取り終わったら、BMjoy が閉じるのを待って曲データベースを読み直す
+#   -Rescan        取り終わったら、RD が閉じるのを待って曲データベースを読み直す
 #   -RetryDays     取れなかった譜面は、この日数のあいだ取りに行かない（既定 7。0 なら毎回）
 #   -TableList     難易度表の一覧（JSON。各要素の url）。毎回取り直し、登録した表に足して使う（選曲画面には出さない）。空なら登録した表だけ
-# BMjoy が開いているあいだは取らない（始める前は閉じるまで待ち、途中で開いたら取っている分も一時停止して、閉じたら続ける）
+# RD が開いているあいだは取らない（始める前は閉じるまで待ち、途中で開いたら取っている分も一時停止して、閉じたら続ける）
 #   -Jobs          同時に取る数（既定 4。配布元は譜面ごとにばらばらなので並べて取る。同じ曲の譜面は 1 つずつ）
 # 同じ曲の別の譜面を持っていれば（BMS SEARCH の曲ごとの譜面の一覧で調べる）、その曲のフォルダを本体として bms-get に渡す。
 # 差分の音源が本体にそろうなら、差分だけを本体のフォルダに入れ、本体は取らない（本体を二重に持たない）
@@ -19,7 +19,7 @@ $ErrorActionPreference = "Stop"
 # PowerShell 5 は JSON の配列を 1 個のまとまりで返すことがあるので、入れ子をほどいて 1 件ずつにする
 function Items($x) { foreach ($a in $x) { if ($a -is [array]) { Items $a } else { $a } } }
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-$bmjoy = "C:\Users\mmzkq\BMjoy-beta20261022\build\RelWithDebInfo\BMjoybody.exe"
+$rd = "C:\Users\mmzkq\BMjoy-beta20261022\build\RelWithDebInfo\RDbody.exe"
 # 改造版の bms-get（repo の tools/windows/bms-get-src を Tools\bms-get-new でビルドしてここへ写す）
 $bmsget = "C:\Users\mmzkq\Tools\bms-get-bin\bms-get.exe"
 $work = Join-Path $env:TEMP "bms-fetch"
@@ -31,8 +31,8 @@ try { $lock = [IO.File]::Open((Join-Path $work "fetch.lock"), "OpenOrCreate", "R
 catch { Write-Output "RESULT ほかの収集が動いているので止めた"; exit 0 }
 
 # 遊んでいるか（設定アプリか本体が開いている）。譜面の配信（--serve）と曲データベースの読み直し（--rescan）は遊んでいないものとする
-function BMjoy-Open {
-    [bool](Get-CimInstance Win32_Process -Filter "Name='bmjoy.exe' OR Name='BMjoybody.exe'" -ErrorAction SilentlyContinue |
+function RD-Open {
+    [bool](Get-CimInstance Win32_Process -Filter "Name='rd.exe' OR Name='RDbody.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -notmatch '--serve|--rescan' })
 }
 # 取っている途中のプロセス（cmd とその下の bms-get）を一時停止・再開する（遊んでいるあいだ HDD とネットを使わないように）
@@ -53,9 +53,9 @@ $logDir = "C:\Users\mmzkq\Tools\fetch-log"
 New-Item -ItemType Directory -Force $logDir | Out-Null
 $log = Join-Path $logDir ("fetch-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".log")
 function Say([string]$s) { Write-Output $s; [IO.File]::AppendAllText($log, (Get-Date -Format "HH:mm:ss ") + "$s`r`n", $utf8) }
-if (BMjoy-Open) {
-    Say "BMjoy が開いているので、閉じるまで待つ"
-    while (BMjoy-Open) { Start-Sleep -Seconds 60 }
+if (RD-Open) {
+    Say "RD が開いているので、閉じるまで待つ"
+    while (RD-Open) { Start-Sleep -Seconds 60 }
 }
 
 # 難易度表の一覧から、集める表の URL を作る（取れなければ前の回の一覧を使う）
@@ -70,7 +70,7 @@ if ($TableList) {
 }
 
 if ($UpdateTables) {
-    cmd /c "`"$bmjoy`" --update-tables $tablesArg > `"$work\tables.txt`" 2>&1"
+    cmd /c "`"$rd`" --update-tables $tablesArg > `"$work\tables.txt`" 2>&1"
     Get-Content -Encoding UTF8 "$work\tables.txt" | ForEach-Object { Say $_ }
 }
 
@@ -79,7 +79,7 @@ $levelArgs = ($Level | ForEach-Object { "--level `"$_`"" }) -join " "
 $list = Join-Path $work "missing.tsv"
 $which = if ($Table) { $Table } else { "*" }
 # 持っている譜面も含めて出す（行の 8 つ目が 1 なら持っている）。全部の表のときは、表ごとの譜面の一覧（Excel の表）も作り直す
-cmd /c "`"$bmjoy`" --list-charts `"$which`" $levelArgs $tablesArg > `"$list`" 2> `"$work\list.err`""
+cmd /c "`"$rd`" --list-charts `"$which`" $levelArgs $tablesArg > `"$list`" 2> `"$work\list.err`""
 Get-Content -Encoding UTF8 "$work\list.err" | ForEach-Object { Say $_ }
 if (-not $Table -and -not $DryRun -and $Level.Count -eq 0) {
     $sheet = Join-Path ([Environment]::GetFolderPath("Desktop")) "BMS譜面一覧.xlsx"
@@ -154,7 +154,7 @@ if (-not (Test-Path $threads) -or ((Get-Date) - (Get-Item $threads).LastWriteTim
 
 # 持っている譜面の md5 → フォルダ（本体のフォルダを探すのに使う）
 $ownedFile = Join-Path $work "owned.tsv"
-cmd /c "`"$bmjoy`" --list-owned > `"$ownedFile`""
+cmd /c "`"$rd`" --list-owned > `"$ownedFile`""
 $owned = @{}
 foreach ($line in [IO.File]::ReadLines($ownedFile, [Text.Encoding]::UTF8)) {
     $t = $line.IndexOf("`t")
@@ -208,11 +208,11 @@ function Finish($j) {
     } else { $script:ng++; $how = "取れない"; $failed[$r.md5] = $today }
     Say ("[{0}/{1}] {2} {3} {4}（{5}）" -f $script:done, $rows.Count, $r.level, $r.title, $how, $r.table)
     if ($script:done % 20 -eq 0) { Save-Failed }
-    # 長い回でも途中で遊べるように、1000 譜面ごとに曲データベースを読み直す（BMjoy が開いていれば今回は飛ばす）
-    if ($Rescan -and $script:done % 1000 -eq 0 -and -not (BMjoy-Open)) { Rescan-Now }
+    # 長い回でも途中で遊べるように、1000 譜面ごとに曲データベースを読み直す（RD が開いていれば今回は飛ばす）
+    if ($Rescan -and $script:done % 1000 -eq 0 -and -not (RD-Open)) { Rescan-Now }
 }
 function Rescan-Now {
-    cmd /c "`"$bmjoy`" --rescan > `"$work\rescan.txt`" 2>&1"
+    cmd /c "`"$rd`" --rescan > `"$work\rescan.txt`" 2>&1"
     Get-Content -Encoding UTF8 "$work\rescan.txt" | ForEach-Object { Say $_ }
 }
 
@@ -227,10 +227,10 @@ while ($next -lt $rows.Count -or $deferred.Count -gt 0 -or $running.Count -gt 0)
         if ($j.proc.HasExited) { $running.RemoveAt($k); $freeSlots.Enqueue($j.slot); Finish $j }
     }
     # 空いた分だけ始める。同じ曲の譜面が取っている最中なら、後に回す
-    # BMjoy が開いたら、取っている分も一時停止して、閉じるまで新しく取り始めない
-    if (BMjoy-Open) {
+    # RD が開いたら、取っている分も一時停止して、閉じるまで新しく取り始めない
+    if (RD-Open) {
         if (-not $paused) {
-            Say "BMjoy が開いたので、取っている $($running.Count) 件を止めて、閉じるまで待つ"
+            Say "RD が開いたので、取っている $($running.Count) 件を止めて、閉じるまで待つ"
             foreach ($j in $running) { Set-JobPaused $j $true; $j.wasPaused = $true }
             $pausedAt = Get-Date
             $paused = $true
@@ -240,7 +240,7 @@ while ($next -lt $rows.Count -or $deferred.Count -gt 0 -or $running.Count -gt 0)
     } elseif ($paused) {
         $m = ((Get-Date) - $pausedAt).TotalMinutes
         foreach ($j in $running) { $j.pausedMin += $m; Set-JobPaused $j $false }
-        Say "BMjoy が閉じたので続ける"
+        Say "RD が閉じたので続ける"
         $paused = $false
     }
     while ($freeSlots.Count -gt 0) {
@@ -278,8 +278,8 @@ Save-Failed
 Say "RESULT 取れた $ok 件（うち本体のフォルダへ差分だけ入れた $intoBody 件）、取れなかった $ng 件、前に取れず日を置いている $waiting 件（ログ：$log）"
 
 if ($Rescan -and $ok -gt 0) {
-    # BMjoy が開いているあいだは曲データベースを書かない（閉じるまで待つ）
-    while (BMjoy-Open) { Start-Sleep -Seconds 60 }
+    # RD が開いているあいだは曲データベースを書かない（閉じるまで待つ）
+    while (RD-Open) { Start-Sleep -Seconds 60 }
     Rescan-Now
 }
 $lock.Close()

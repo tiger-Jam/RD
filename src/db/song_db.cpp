@@ -23,7 +23,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -827,7 +827,7 @@ bool SongDb::find_by_md5(const std::string& md5, ChartRecord& out) const {
 
 namespace {
 
-// BMjoyの記録とLR2から取り込んだ記録を合わせる（ランプ・EX・コンボは高いほう、BPは低いほう、回数は足す。
+// RDの記録とLR2から取り込んだ記録を合わせる（ランプ・EX・コンボは高いほう、BPは低いほう、回数は足す。
 // 判定の内訳は EX の高いほうのもの、オプションの履歴は両方）
 // with_ghost なら、jcol + 8 の欄のゴーストも読む
 void merge_score(ScoreRecord& r, int clear, int ex, int bp, int combo, int play, int clr, const Stmt& st, int jcol,
@@ -947,7 +947,7 @@ int SongDb::import_lr2_favorites(const std::string& lr2_song_db) {
     return static_cast<int>(favs.size());
 }
 
-// LR2 のランプを BMjoy のランプにする。LR2 に PERFECT は無いので、フルコンボで GOOD が 0（PGREAT と GREAT だけで
+// LR2 のランプを RD のランプにする。LR2 に PERFECT は無いので、フルコンボで GOOD が 0（PGREAT と GREAT だけで
 // 最大コンボになる。空 POOR は見ない）なら PERFECT にする。GOOD の数を持たない版の LR2 でも分かるように、最大コンボで比べる
 static int64_t lr2_clear(int64_t clear, int64_t pg, int64_t gr, int64_t max_combo) {
     return clear == 5 && max_combo > 0 && pg + gr == max_combo ? 6 : clear;
@@ -984,7 +984,7 @@ int SongDb::import_lr2_scores(const std::string& lr2_score_db, std::string* erro
         while (rd.step()) {
             std::string md5 = rd.col_text(0);
             for (char& c : md5) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            // コースの頭は種類（11 文字目）だけを残す。作者などは BMjoy のコースのハッシュ（course.cpp）に無い（元の鍵は書き出すときのために残す）
+            // コースの頭は種類（11 文字目）だけを残す。作者などは RD のコースのハッシュ（course.cpp）に無い（元の鍵は書き出すときのために残す）
             if (md5.size() > 32) {
                 const std::string lr2 = md5;
                 md5 = std::string(10, '0') + md5[10] + std::string(21, '0') + md5.substr(32);
@@ -1034,7 +1034,7 @@ void SongDb::save_score(const std::string& sha256, int clear, int exscore, int b
     save_score(sha256, r);
 }
 
-// BMjoy で遊んだ分だけの累計
+// RD で遊んだ分だけの累計
 PlayerStats SongDb::own_player_stats() const {
     PlayerStats p;
     if (!db_) return p;
@@ -1112,7 +1112,7 @@ void SongDb::save_score(const std::string& sha256, const PlayRecord& play) {
         .i64(17, r.rseed).i64(18, r.op_best).text(19, r.ghost);
     st.run();
     if (play.course_stage) return;
-    // プレイヤーの累計（BMjoy で遊んだ分。LR2 の分は別に持つ）
+    // プレイヤーの累計（RD で遊んだ分。LR2 の分は別に持つ）
     PlayerStats p = own_player_stats();
     p.playcount++;
     (clear >= 2 ? p.clear : p.fail)++;
@@ -1227,11 +1227,11 @@ int SongDb::import_lr2_songs(const std::string& lr2_song_db, std::string* error,
         for (const Row& w : rows) {
             if (!w.exists) continue;
             if (w.mode != 7 && w.mode != 5) {
-                // 7 鍵・5 鍵以外（BMjoy では遊べない譜面）は、読み直さないように覚えておく
+                // 7 鍵・5 鍵以外（RD では遊べない譜面）は、読み直さないように覚えておく
                 skip.text(1, w.r.path).i64(2, w.r.mtime).i64(3, w.r.size).run();
                 continue;
             }
-            // すでに BMjoy が読んだ譜面は、そのまま残す
+            // すでに RD が読んだ譜面は、そのまま残す
             has.text(1, w.r.path);
             bool already = has.step();
             has.reset();
@@ -1333,12 +1333,12 @@ int SongDb::fill_chart_attrs(int limit, int threads) {
     return static_cast<int>(todo.size());
 }
 
-// 傾向のファイル：1 行目は「# BMjoy chart_attr <分析の版>」。2 行目から「sha256 ok 傾向 二番目 副分類 複合 練習 ノーツ数 数の欄…」（タブ区切り）
+// 傾向のファイル：1 行目は「# RD chart_attr <分析の版>」。2 行目から「sha256 ok 傾向 二番目 副分類 複合 練習 ノーツ数 数の欄…」（タブ区切り）
 int SongDb::export_chart_attrs(const std::string& path) const {
     if (!db_) return -1;
     std::ofstream f(fs::u8path(path), std::ios::binary | std::ios::trunc);
     if (!f) return -1;
-    f << "# BMjoy chart_attr " << kChartAttrVersion << "\n";
+    f << "# RD chart_attr " << kChartAttrVersion << "\n";
     std::string sql = "SELECT sha256, ok, attr, attr2, sub, mask, practice_low, total_notes";
     for (const AttrColumn& c : kAttrColumns) sql += std::string(", ") + c.name;
     sql += " FROM chart_attr WHERE version = ? ORDER BY sha256";
@@ -1363,7 +1363,7 @@ int SongDb::import_chart_attrs(const std::string& path) {
     if (!db_) return -1;
     std::ifstream f(fs::u8path(path), std::ios::binary);
     std::string line;
-    if (!f || !std::getline(f, line) || line != "# BMjoy chart_attr " + std::to_string(kChartAttrVersion)) return -1;  // 版が違うものは使わない
+    if (!f || !std::getline(f, line) || line != "# RD chart_attr " + std::to_string(kChartAttrVersion)) return -1;  // 版が違うものは使わない
     sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
     int n = 0;
     {
@@ -1467,4 +1467,4 @@ void fill_difficulties(std::vector<ChartRecord>& charts) {
     }
 }
 
-}  // namespace bmj
+}  // namespace rd

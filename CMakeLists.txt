@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(BMjoy LANGUAGES C CXX)
+project(RD LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-option(BMJ_ASAN "AddressSanitizer付きでビルドする" OFF)
+option(RD_ASAN "AddressSanitizer付きでビルドする" OFF)
 
 # SDL3：入っていればそれを使い、無ければソースを取ってきて一緒にビルドする（Windowsで vcpkg が無くても通るように）
 find_package(SDL3 CONFIG QUIET)
@@ -24,27 +24,27 @@ endif()
 find_package(Threads REQUIRED)
 
 # 単一ヘッダのライブラリは実装を1つの翻訳単位にまとめる
-add_library(bmj_third_party STATIC third_party/third_party_impl.c third_party/stb_vorbis_impl.c
+add_library(rd_third_party STATIC third_party/third_party_impl.c third_party/stb_vorbis_impl.c
     third_party/sqlite/sqlite3.c third_party/yyjson/yyjson.c)
 # Lua（MOD のスクリプト。仕様書14章）
-file(GLOB BMJ_LUA_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/third_party/lua/*.c)
+file(GLOB RD_LUA_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/third_party/lua/*.c)
 # C++ として組む（スクリプトの失敗を longjmp ではなく例外で戻し、本体の C++ のデストラクタを飛ばさない）
-set_source_files_properties(${BMJ_LUA_SOURCES} PROPERTIES LANGUAGE CXX)
-target_sources(bmj_third_party PRIVATE ${BMJ_LUA_SOURCES})
-target_include_directories(bmj_third_party SYSTEM PUBLIC third_party third_party/sqlite third_party/yyjson third_party/lua)
-target_compile_definitions(bmj_third_party PUBLIC SQLITE_THREADSAFE=2 SQLITE_DEFAULT_WAL_SYNCHRONOUS=1 SQLITE_OMIT_LOAD_EXTENSION)
+set_source_files_properties(${RD_LUA_SOURCES} PROPERTIES LANGUAGE CXX)
+target_sources(rd_third_party PRIVATE ${RD_LUA_SOURCES})
+target_include_directories(rd_third_party SYSTEM PUBLIC third_party third_party/sqlite third_party/yyjson third_party/lua)
+target_compile_definitions(rd_third_party PUBLIC SQLITE_THREADSAFE=2 SQLITE_DEFAULT_WAL_SYNCHRONOUS=1 SQLITE_OMIT_LOAD_EXTENSION)
 if(NOT WIN32)
     find_package(CURL REQUIRED)  # Windows は WinHTTP を使う
 endif()
 if(APPLE)
-    target_link_libraries(bmj_third_party PUBLIC "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation")
+    target_link_libraries(rd_third_party PUBLIC "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation")
 elseif(UNIX)
-    target_link_libraries(bmj_third_party PUBLIC ${CMAKE_DL_LIBS} m)
+    target_link_libraries(rd_third_party PUBLIC ${CMAKE_DL_LIBS} m)
 endif()
-target_link_libraries(bmj_third_party PUBLIC Threads::Threads)
+target_link_libraries(rd_third_party PUBLIC Threads::Threads)
 
 # ゲームの中身（SDLに依存しない部分）。テストからも使う
-add_library(bmj_core STATIC
+add_library(rd_core STATIC
     src/chart/chart.cpp
     src/chart/bms_parser.cpp
     src/chart/chart_attr.cpp
@@ -75,27 +75,27 @@ add_library(bmj_core STATIC
     src/mod/mod.cpp src/mod/script.cpp
     src/audio/dsp.cpp
 )
-target_include_directories(bmj_core PUBLIC src)
-# 開発用の口（BMJ_ で始まる環境変数で画面を撮る・操作や入力を流す）。配る版は -DBMJ_DEV=OFF でビルドする
-option(BMJ_DEV "開発用の環境変数を読む" ON)
+target_include_directories(rd_core PUBLIC src)
+# 開発用の口（RD_ で始まる環境変数で画面を撮る・操作や入力を流す）。配る版は -DRD_DEV=OFF でビルドする
+option(RD_DEV "開発用の環境変数を読む" ON)
 # 版（配る版は 年.月.日.番号 を入れる。開発中は dev で、自動の更新をしない）
-set(BMJ_VERSION "dev" CACHE STRING "BMjoy の版")
-target_compile_definitions(bmj_core PUBLIC BMJ_VERSION="${BMJ_VERSION}")
-if(BMJ_DEV)
-    target_compile_definitions(bmj_core PUBLIC BMJ_DEV)
+set(RD_VERSION "dev" CACHE STRING "RD の版")
+target_compile_definitions(rd_core PUBLIC RD_VERSION="${RD_VERSION}")
+if(RD_DEV)
+    target_compile_definitions(rd_core PUBLIC RD_DEV)
 endif()
-target_link_libraries(bmj_core PUBLIC bmj_third_party)
+target_link_libraries(rd_core PUBLIC rd_third_party)
 if(WIN32)
-    target_link_libraries(bmj_core PUBLIC winhttp ws2_32 hid shell32 dbghelp)
+    target_link_libraries(rd_core PUBLIC winhttp ws2_32 hid shell32 dbghelp)
 else()
-    target_link_libraries(bmj_core PUBLIC CURL::libcurl)
+    target_link_libraries(rd_core PUBLIC CURL::libcurl)
 endif()
 if(APPLE)
-    target_link_libraries(bmj_core PUBLIC iconv "-framework CoreServices")
+    target_link_libraries(rd_core PUBLIC iconv "-framework CoreServices")
 endif()
 
 # 本体（LR2 の LR2body.exe に相当）。LR2 と同じくコンソールは出さない（ログはコマンドプロンプトから動かしたときだけ見える）
-add_executable(BMjoybody WIN32
+add_executable(RDbody WIN32
     src/main.cpp
     src/app/app.cpp
     src/app/config.cpp
@@ -135,33 +135,33 @@ add_executable(BMjoybody WIN32
 # 構造体が版ごとに違うので、8 系と 9 系のヘッダーでそれぞれビルドし、見つかった版を使う
 set_source_files_properties(src/video/ffmpeg9.cpp PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/ffmpeg/9)
 set_source_files_properties(src/video/ffmpeg8.cpp PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_SOURCE_DIR}/third_party/ffmpeg/8)
-target_link_libraries(BMjoybody PRIVATE bmj_core SDL3::SDL3)
+target_link_libraries(RDbody PRIVATE rd_core SDL3::SDL3)
 if(WIN32)
     # 日本語のファイル名を扱えるように、プロセスのコードページを UTF-8 にする（OpenLR2 と同じ）
-    target_sources(BMjoybody PRIVATE src/app/bmjoy.manifest)
-    target_compile_definitions(bmj_core PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    target_sources(RDbody PRIVATE src/app/rd.manifest)
+    target_compile_definitions(rd_core PUBLIC NOMINMAX _CRT_SECURE_NO_WARNINGS)
 endif()
 
-# 起動前の設定アプリ（LR2 の LR2.exe に相当）。「起動」で BMjoybody を黒い画面つきで立ち上げる
-add_executable(BMjoy WIN32 src/launcher/launcher.cpp src/app/config.cpp src/util/data_dir.cpp src/util/log.cpp src/app/service.cpp src/input/keyconfig.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/bgm_set.cpp
+# 起動前の設定アプリ（LR2 の LR2.exe に相当）。「起動」で RDbody を黒い画面つきで立ち上げる
+add_executable(RD WIN32 src/launcher/launcher.cpp src/app/config.cpp src/util/data_dir.cpp src/util/log.cpp src/app/service.cpp src/input/keyconfig.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/bgm_set.cpp
     src/audio/system_sound.cpp src/audio/sound_bank.cpp
     src/render/text_cache.cpp)
-target_link_libraries(BMjoy PRIVATE bmj_core SDL3::SDL3)
+target_link_libraries(RD PRIVATE rd_core SDL3::SDL3)
 if(WIN32)
-    target_sources(BMjoy PRIVATE src/app/bmjoy.manifest)
+    target_sources(RD PRIVATE src/app/rd.manifest)
 endif()
 
-add_executable(bmj_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
+add_executable(rd_tests tests/test_main.cpp tests/test_bms_parser.cpp tests/test_judge.cpp tests/test_skin.cpp
     tests/test_input.cpp tests/test_db.cpp tests/test_table.cpp tests/test_lane.cpp tests/test_import.cpp tests/test_dsp.cpp tests/test_mod.cpp tests/test_mod_script.cpp tests/test_borrow.cpp src/input/input.cpp src/input/keyconfig.cpp src/input/midi.cpp
     src/app/config.cpp src/util/data_dir.cpp src/util/log.cpp src/app/service.cpp src/app/course.cpp src/app/lr2_import.cpp src/app/skin_catalog.cpp src/app/keyconfig_editor.cpp src/audio/sound_bank.cpp src/audio/system_sound.cpp)
-target_link_libraries(bmj_tests PRIVATE bmj_core SDL3::SDL3)
-target_compile_definitions(bmj_tests PRIVATE BMJ_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(rd_tests PRIVATE rd_core SDL3::SDL3)
+target_compile_definitions(rd_tests PRIVATE RD_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 if(WIN32)
-    target_sources(bmj_tests PRIVATE src/app/bmjoy.manifest)
+    target_sources(rd_tests PRIVATE src/app/rd.manifest)
 endif()
 
 # MIDI の入力（src/input/midi.cpp）。macOS は CoreMIDI、Windows は winmm
-foreach(t BMjoybody bmj_tests)
+foreach(t RDbody rd_tests)
     if(APPLE)
         target_link_libraries(${t} PRIVATE "-framework CoreMIDI")
     elseif(WIN32)
@@ -169,22 +169,22 @@ foreach(t BMjoybody bmj_tests)
     endif()
 endforeach()
 
-foreach(t bmj_core BMjoybody BMjoy bmj_tests)
+foreach(t rd_core RDbody RD rd_tests)
     if(MSVC)
         target_compile_options(${t} PRIVATE /W4 /utf-8)
     else()
         target_compile_options(${t} PRIVATE -Wall -Wextra -Wno-unused-parameter)
     endif()
-    if(BMJ_ASAN AND NOT MSVC)
+    if(RD_ASAN AND NOT MSVC)
         target_compile_options(${t} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
         target_link_options(${t} PRIVATE -fsanitize=address,undefined)
     endif()
 endforeach()
 
 enable_testing()
-add_test(NAME bmj_tests COMMAND bmj_tests)
+add_test(NAME rd_tests COMMAND rd_tests)
 
 # 公式の MOD を実行ファイルの横の mods/ に置く
-add_custom_command(TARGET BMjoybody POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_FILE_DIR:BMjoybody>/mods
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/mods $<TARGET_FILE_DIR:BMjoybody>/mods)
+add_custom_command(TARGET RDbody POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_FILE_DIR:RDbody>/mods
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/mods $<TARGET_FILE_DIR:RDbody>/mods)

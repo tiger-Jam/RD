@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 struct ReplayEvent {
     int64_t time_us = 0;  // 曲の時刻
@@ -34,4 +34,4 @@ struct Replay {
 bool save_replay(const std::string& path, const Replay& r);
 bool load_replay(const std::string& path, Replay& r);
 
-}  // namespace bmj
+}  // namespace rd

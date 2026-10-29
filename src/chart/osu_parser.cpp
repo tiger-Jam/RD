@@ -8,7 +8,7 @@
 #include <sstream>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -254,4 +254,4 @@ BmsParseResult parse_osu_text(std::string_view text, const OsuParseOptions& opts
     return res.ok = true, res;
 }
 
-}  // namespace bmj
+}  // namespace rd

@@ -8,7 +8,7 @@
 
 #include "chart/chart.h"
 
-namespace bmj {
+namespace rd {
 
 // 分析の版。特徴量や分類を変えたら上げる（古い版の結果は読み直す）
 constexpr int kChartAttrVersion = 1;
@@ -42,4 +42,4 @@ struct ChartAttr {
 // 譜面を分析する（SP の譜面だけ。DP は分析しない）
 ChartAttr analyze_chart_attr(const Chart& chart);
 
-}  // namespace bmj
+}  // namespace rd

@@ -13,13 +13,13 @@
 #include "render/text_cache.h"
 #include "util/dev.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
 constexpr const char* kDefaultSkin = "LR2files/Theme/LR2/KeyConfig/keyconfig.lr2skin";
 
-// 開発用：BMJ_KEYCONFIG_SKIN_KEYS の文字で操作する（数字 1-7 / s / S / t / l = 1〜7 鍵・皿の 2 方向・START・SELECT を選ぶ、
+// 開発用：RD_KEYCONFIG_SKIN_KEYS の文字で操作する（数字 1-7 / s / S / t / l = 1〜7 鍵・皿の 2 方向・START・SELECT を選ぶ、
 // a-h = スロット 1〜8 を選ぶ、z = Z キーを割り当てる、x = Delete、r = F2（既定に戻す）、C = F1（全部空ける）、_ = 少し待つ）
 void dev_step(char k, KeyconfigEditor& ed, const std::function<void(const Binding&)>& assign, const std::function<void()>& erase,
               const std::function<void()>& reset, const std::function<void()>& clear) {
@@ -75,7 +75,7 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
         if (!ed.option(a, v)) v = base.option(a);
         return neg ? !v : v;
     };
-    const char* dev_keys = dev_env("BMJ_KEYCONFIG_SKIN_KEYS");
+    const char* dev_keys = dev_env("RD_KEYCONFIG_SKIN_KEYS");
     size_t dev_pos = 0;
     double dev_next = 600;
     KeyconfigExit result = KeyconfigExit::Back;
@@ -163,7 +163,7 @@ KeyconfigExit run_with_skin(App& app, Lr2Skin& skin, SkinRenderer& renderer) {
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         renderer.draw_select(skin, st);
-        if (const char* shot = dev_env("BMJ_KEYCONFIG_SKIN_SHOT");
+        if (const char* shot = dev_env("RD_KEYCONFIG_SKIN_SHOT");
             shot && t > 800 && (!dev_keys || (!dev_keys[dev_pos] && t > dev_next + 100))) {
             // 開発用：1 枚保存して閉じる
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
@@ -243,4 +243,4 @@ bool open_keyconfig_from_select(App& app, TextCache& text, SelectContext& sctx, 
     return true;
 }
 
-}  // namespace bmj
+}  // namespace rd

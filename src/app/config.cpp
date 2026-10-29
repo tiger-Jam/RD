@@ -16,7 +16,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 // skin_custom の値：項目ごとにカンマで区切る。#CUSTOMOPTION は番号、#CUSTOMFILE は "名前"（中の " は "" と書く）。
 // 古い形式（#CUSTOMFILE も番号）もそのまま読める
@@ -231,8 +231,8 @@ bool AppConfig::save(const std::string& path) const {
 }
 
 void AppConfig::write(std::ostream& f) const {
-    f << "# BMjoy の設定\n";
-    f << "# 今のプレイヤー（BMjoyfiles/Player/<ID>）\n";
+    f << "# RD の設定\n";
+    f << "# 今のプレイヤー（RDfiles/Player/<ID>）\n";
     f << "player = " << player << "\n";
     f << "lr2_root = " << to_portable(lr2_root) << "\n";
     f << "lr2_export = " << (lr2_export ? 1 : 0) << "  # 外部ツールのために LR2 の形の曲データベースとスコアを Database に書き出す\n";
@@ -432,7 +432,7 @@ bool load_config(AppConfig& cfg, const std::string& player) {
 bool save_config(const AppConfig& cfg) {
     std::ostringstream all;
     cfg.write(all);
-    std::string common, mine = "# BMjoy のプレイヤー " + cfg.player + " の設定\n";
+    std::string common, mine = "# RD のプレイヤー " + cfg.player + " の設定\n";
     std::istringstream in(all.str());
     for (std::string line; std::getline(in, line);) {
         const size_t eq = line.find('=');
@@ -486,10 +486,15 @@ std::string replay_dir() { return player_id().empty() ? data_dir() + "Replay/" :
 std::string player_config_path() { return player_dir() + "config.txt"; }
 std::string player_score_db_path() { return player_dir() + "score.db"; }
 
-std::string replay_path(const std::string& sha256) { return replay_dir() + sha256 + ".bjr"; }
+std::string replay_path(const std::string& sha256) {
+    // 前の名前（BMjoy）のときの .bjr しか無ければ、それを使う
+    const std::string now = replay_dir() + sha256 + ".rdr", old = replay_dir() + sha256 + ".bjr";
+    std::error_code ec;
+    return !fs::exists(fs::u8path(now), ec) && fs::exists(fs::u8path(old), ec) ? old : now;
+}
 
 std::string input_log_path(const std::string& sha256, int64_t played_at) {
-    return replay_dir() + "InputLog/" + sha256 + "/" + std::to_string(played_at) + ".bjr";
+    return replay_dir() + "InputLog/" + sha256 + "/" + std::to_string(played_at) + ".rdr";
 }
 
 std::string official_mods_dir() { return base_dir() + "mods"; }
@@ -500,7 +505,7 @@ std::string mod_data_dir(const std::string& id) {
 std::string mod_settings_path(const std::string& id) { return mod_data_dir(id) + "/settings.json"; }
 
 std::string lr2_courses_path() { return data_dir() + "Database/lr2_courses.txt"; }
-// BMjoy の置き場（BMjoyfiles）とは分け、実行ファイルの横の LR2files に LR2 と同じ形で置く（外部ツールが LR2 のフォルダとして読む）
+// RD の置き場（RDfiles）とは分け、実行ファイルの横の LR2files に LR2 と同じ形で置く（外部ツールが LR2 のフォルダとして読む）
 std::string lr2_database_dir() { return base_dir() + "LR2files/Database"; }
 
 
@@ -508,4 +513,4 @@ std::string table_cache_dir() { return data_dir() + "Database/Table"; }
 
 std::string song_db_path() { return data_dir() + "Database/songs.db"; }
 
-}  // namespace bmj
+}  // namespace rd

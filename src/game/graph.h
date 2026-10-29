@@ -6,7 +6,7 @@
 
 #include "game/gauge.h"
 
-namespace bmj {
+namespace rd {
 
 struct PlayGraph {
     static constexpr int kPoints = 1000;
@@ -50,4 +50,4 @@ struct PlayGraph {
     }
 };
 
-}  // namespace bmj
+}  // namespace rd

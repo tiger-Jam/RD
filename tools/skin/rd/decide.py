@@ -1,22 +1,22 @@
-# BMjoy の標準スキン：決定画面（1920×1080）。黒地に曲名だけ
-#   python3 tools/skin/bmjoy/decide.py <出力先の LR2 のフォルダ>
+# RD の標準スキン：決定画面（1920×1080）。黒地に曲名だけ
+#   python3 tools/skin/rd/decide.py <出力先の LR2 のフォルダ>
 import os
 import sys
 
 from common import Csv, Sheet
 
 W, H = 1920, 1080
-THEME = 'LR2files\\Theme\\BMjoy\\Decide\\'
+THEME = 'LR2files\\Theme\\RD\\Decide\\'
 
 
 def build(out):
-    root = os.path.join(out, 'LR2files', 'Theme', 'BMjoy', 'Decide')
+    root = os.path.join(out, 'LR2files', 'Theme', 'RD', 'Decide')
     csv = Csv()
     ui = Sheet('ui', 64)
     white = ui.add(8, 8, '<div style="width:100%;height:100%;background:#fff"></div>')
     ui.render(os.path.join(root, 'ui.png'))
 
-    csv.raw('#INFORMATION,6,BMjoy,BMjoy,' + THEME + 'thumb.png')
+    csv.raw('#INFORMATION,6,RD,RD,' + THEME + 'thumb.png')
     csv.raw('#RESOLUTION,2')
     csv.raw('#ENDOFHEADER')
     csv.raw('#IMAGE,' + THEME + 'ui.png')

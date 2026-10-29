@@ -1,5 +1,5 @@
-# BMjoy の標準スキン：リザルト画面とコースのリザルト画面（1920×1080）。黒地に白とグレーの文字、細い線だけ
-#   python3 tools/skin/bmjoy/result.py <出力先の LR2 のフォルダ>
+# RD の標準スキン：リザルト画面とコースのリザルト画面（1920×1080）。黒地に白とグレーの文字、細い線だけ
+#   python3 tools/skin/rd/result.py <出力先の LR2 のフォルダ>
 import os
 import sys
 
@@ -19,8 +19,8 @@ RANKS = ['AAA', 'AA', 'A', 'B', 'C', 'D', 'E', 'F']
 
 def build(out, course=False):
     folder = 'CourseResult' if course else 'Result'
-    THEME = 'LR2files\\Theme\\BMjoy\\' + folder + '\\'
-    root = os.path.join(out, 'LR2files', 'Theme', 'BMjoy', folder)
+    THEME = 'LR2files\\Theme\\RD\\' + folder + '\\'
+    root = os.path.join(out, 'LR2files', 'Theme', 'RD', folder)
     csv = Csv()
     images = []
 
@@ -68,7 +68,7 @@ def build(out, course=False):
     gr_ui = image('ui.png')
 
     # ---- CSV ----
-    csv.raw(f'#INFORMATION,{15 if course else 7},BMjoy,BMjoy,' + THEME + 'thumb.png')
+    csv.raw(f'#INFORMATION,{15 if course else 7},RD,RD,' + THEME + 'thumb.png')
     csv.raw('#RESOLUTION,2')
     csv.raw('#ENDOFHEADER')
     csv.lines += ['#IMAGE,' + THEME + n for n in images]

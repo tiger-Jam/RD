@@ -9,7 +9,7 @@
 #include "chart/chart.h"
 #include "game/judge.h"
 
-namespace bmj {
+namespace rd {
 
 struct PlayViewState {
     double song_ms = 0.0;    // 判定に使う時刻
@@ -32,4 +32,4 @@ void draw_play(SDL_Renderer* r, const Chart& chart, const JudgeEngine& judge, co
 void draw_loading(SDL_Renderer* r, const Chart& chart, int done, int total);
 void draw_result(SDL_Renderer* r, const Chart& chart, const JudgeEngine& judge);
 
-}  // namespace bmj
+}  // namespace rd

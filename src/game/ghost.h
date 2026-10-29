@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 // 判定の列を LR2 のゴーストの文字列にする（LR2: score.ghost）。値は 0=空POOR 1=POOR … 5=PGREAT
 std::string encode_ghost(const std::vector<int8_t>& judges);
@@ -42,4 +42,4 @@ private:
     std::string name_;
 };
 
-}  // namespace bmj
+}  // namespace rd

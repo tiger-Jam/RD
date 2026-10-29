@@ -1,4 +1,4 @@
-#include "skin/bmjoy_buttons.h"
+#include "skin/rd_buttons.h"
 #include "app/play_session.h"
 
 #include <algorithm>
@@ -40,7 +40,7 @@
 #include "video/video_decoder.h"
 #include "util/dev.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -120,10 +120,10 @@ void set_gauge_tint(PlaySkinState& st, const JudgeEngine& j, const App& app) {
     }
 }
 
-// 開発用：BMJ_PLAY_FRAMES のフォルダに、曲の始まりの絵を 1 フレームずつ残す（読み込み中の絵から、始まって 3 秒まで）
+// 開発用：RD_PLAY_FRAMES のフォルダに、曲の始まりの絵を 1 フレームずつ残す（読み込み中の絵から、始まって 3 秒まで）
 void dev_save_frame(SDL_Renderer* r, double ms_from_start) {
     static int no = 0;
-    const char* dir = dev_env("BMJ_PLAY_FRAMES");
+    const char* dir = dev_env("RD_PLAY_FRAMES");
     if (!dir || ms_from_start > 3000 || no >= 400) return;
     char name[512];
     std::snprintf(name, sizeof(name), "%s/p%04d_%05d.bmp", dir, no++, static_cast<int>(ms_from_start));
@@ -220,7 +220,7 @@ namespace {
 
 // 譜面のファイルを読んで、原本の SHA-256 と、#RANDOM を評価した譜面を作る
 std::pair<std::string, BmsParseResult> read_chart(const std::string& path, uint32_t seed) {
-    if (const char* d = dev_env("BMJ_CHART_DELAY")) SDL_Delay(static_cast<Uint32>(std::atoi(d)));  // 開発用：冷えた HDD のまね
+    if (const char* d = dev_env("RD_CHART_DELAY")) SDL_Delay(static_cast<Uint32>(std::atoi(d)));  // 開発用：冷えた HDD のまね
     std::string sha256;
     {
         std::ifstream f(path, std::ios::binary);
@@ -301,7 +301,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     if (app.metronome()) opt.save_score = false;
     const uint64_t prelude_ns = SDL_GetTicksNS();
     // 譜面のファイルは裏で読み始める（リプレイの再生と開発用の入力は、記録の乱数の種で読むので、この下で読む）
-    const bool read_early = opt.record && !opt.replay && !dev_env("BMJ_INPUT_REPLAY");
+    const bool read_early = opt.record && !opt.replay && !dev_env("RD_INPUT_REPLAY");
     std::future<std::pair<std::string, BmsParseResult>> early;
     uint32_t chart_seed = opt.seed ? opt.seed : static_cast<uint32_t>(SDL_GetTicksNS() % 0x7fff);  // #RANDOM の乱数の種
     if (read_early) early = std::async(std::launch::async, read_chart, chart_path, chart_seed);
@@ -396,9 +396,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         if (opt.layout_random >= 0) cfg.random = saved_cfg.random;
     }};
     if (opt.layout_random >= 0 && !opt.replay) cfg.random = opt.layout_random;
-    // 開発用：BMJ_INPUT_REPLAY のファイルの入力を、手で押したものとして流す（記録・ゴースト・リプレイの保存はふだんどおり）
+    // 開発用：RD_INPUT_REPLAY のファイルの入力を、手で押したものとして流す（記録・ゴースト・リプレイの保存はふだんどおり）
     bool feed_input = false;
-    if (const char* f = dev_env("BMJ_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) {
+    if (const char* f = dev_env("RD_INPUT_REPLAY"); f && !opt.replay && !opt.autoplay) {
         feed_input = load_replay(f, replay);
         std::printf("開発用：入力を流す %s（%zu 件）\n", feed_input ? "" : "読めない", replay.events.size());
     }
@@ -432,7 +432,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     if (seven_key) parsed.chart.drop_scratch();
     // 配置のオプション（LR2: bmsload:3354）。#RANDOM を評価した乱数の続きで並べ替える
     apply_random_option(parsed.chart, cfg.random, parsed.rng, !seven_key);
-    if (dev_env("BMJ_PRINT_LAYOUT")) {
+    if (dev_env("RD_PRINT_LAYOUT")) {
         // 開発用：配置のオプション・種と、並べ替えたあとの最初の 40 個のノーツのレーン
         std::string lanes;
         for (const Note& n : parsed.chart.notes)
@@ -477,7 +477,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     const bool floating = cfg.hs_mode == 1;
     const double speed_multiplier = floating ? 1.0 : hs_fix_multiplier(chart, cfg.hs_fix);
     // ピッチの FREQ・SPEED で曲を速くしても遅くしても、ノーツが画面を流れる速さ（緑数字）は普段と同じにする。
-    // 拍は曲の速さで進むので、1 拍の長さを曲の速さで割る（LR2 は曲と一緒に流れも速くなる。BMjoy の変更）
+    // 拍は曲の速さで進むので、1 拍の長さを曲の速さで割る（LR2 は曲と一緒に流れも速くなる。RD の変更）
     const double scroll_multiplier = speed_multiplier / cfg.sound_fx.play_rate();
     const double fhs_bpm = constant ? 150.0 : floating_base_bpm(chart, cfg.fhs_base);
     int fhs = 100;  // フローティングのハイスピ（100 = 1.00）
@@ -491,7 +491,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     bool has_best = app.db.get_score(sha256, best_score, score_ln_mode, profile);
     Mixer& mixer = app.mixer;
 
-    // 決定の音（LR2では決定画面で鳴る。BMjoyには決定画面が無いので、読み込みの間に鳴らす）
+    // 決定の音（LR2では決定画面で鳴る。RDには決定画面が無いので、読み込みの間に鳴らす）
     if (opt.decide_sound) mixer.play_system(kSysDecide);
     // 演奏中はマウスカーソルを出さない（LR2 と同じ。選曲画面に戻れば選曲画面が決め直す）
     SDL_HideCursor();
@@ -714,7 +714,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         const int total_notes = judge.stats().total_notes;
         ctx.best = Ghost{};
         if (has_best && !best_score.ghost.empty()) ctx.best.set_from_judges(decode_ghost(best_score.ghost));
-        // 判定の列が無い記録（列を残す前に BMjoy で遊んだもの）は、EX スコアから作る
+        // 判定の列が無い記録（列を残す前に RD で遊んだもの）は、EX スコアから作る
         else if (has_best && best_score.exscore > 0) ctx.best.set_from_exscore(best_score.exscore, total_notes);
         ctx.best_clear = has_best ? best_score.clear : 0;
         ctx.best_exscore = has_best ? best_score.exscore : 0;
@@ -804,11 +804,11 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             print_result(chart, judge);
             const PlayStats& ps = judge.stats();
             // LR2（Main.cpp:1697）：オートプレイ・1 ノーツも判定していない・GOOD 以上が 1 つも無いときは、
-            // リザルトを出さず、記録もせずに選曲画面へ戻る。リプレイを途中でやめたときも同じ（BMjoy の決め。落ちたように見せない）
+            // リザルトを出さず、記録もせずに選曲画面へ戻る。リプレイを途中でやめたときも同じ（RD の決め。落ちたように見せない）
             ctx.quit_early = quit_early;
-            // 開発用：BMJ_COURSE_STAGE_RESULT なら、オートでもコースの各ステージのリザルトを出す（記録はしない）
-            // 開発用：BMJ_AUTO_RESULT なら、オートの単曲でもリザルトを出す（記録はしない）
-            const bool dev_stage_result = opt.autoplay && ((course && dev_env("BMJ_COURSE_STAGE_RESULT")) || (!course && dev_env("BMJ_AUTO_RESULT")));
+            // 開発用：RD_COURSE_STAGE_RESULT なら、オートでもコースの各ステージのリザルトを出す（記録はしない）
+            // 開発用：RD_AUTO_RESULT なら、オートの単曲でもリザルトを出す（記録はしない）
+            const bool dev_stage_result = opt.autoplay && ((course && dev_env("RD_COURSE_STAGE_RESULT")) || (!course && dev_env("RD_AUTO_RESULT")));
             if ((opt.autoplay && !dev_stage_result) || (opt.replay && quit_early) || ps.note_current == 0 ||
                 ps.judge_count[kGood] + ps.judge_count[kGreat] + ps.judge_count[kPGreat] == 0) {
                 // コースでは、オートプレイなら次のステージへ進み、それ以外はコースをやめて選曲へ戻る
@@ -817,13 +817,13 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 return;
             }
             phase = Phase::Result;
-            if (dev_env("BMJ_RESULT_KEEP")) {
+            if (dev_env("RD_RESULT_KEEP")) {
                 // 開発用：リザルトに入ったら F10（借りた譜面をもらう）を押したことにする
                 SDL_Event ev{};
                 ev.type = SDL_EVENT_KEY_DOWN, ev.key.down = true, ev.key.key = SDLK_F10;
                 SDL_PushEvent(&ev);
             }
-            if (dev_env("BMJ_RESULT_SAVE_LAYOUT")) {
+            if (dev_env("RD_RESULT_SAVE_LAYOUT")) {
                 // 開発用：リザルトに入ったら F9（この配置を保存）を押したことにする
                 SDL_Event ev{};
                 ev.type = SDL_EVENT_KEY_DOWN, ev.key.down = true, ev.key.key = SDLK_F9;
@@ -1085,7 +1085,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             }
             if (now_ms - wheel_ms < 500) steps = 0;
             if (steps != 0) {
-                if (dev_env("BMJ_DEBUG_INPUT")) std::printf("カバー・LIFT を %+d（%.1f ms）\n", steps, now_ms), std::fflush(stdout);
+                if (dev_env("RD_DEBUG_INPUT")) std::printf("カバー・LIFT を %+d（%.1f ms）\n", steps, now_ms), std::fflush(stdout);
                 if (cover_active) {
                     if (floating && cover_movable()) {
                         cfg.lane_cover_v = std::clamp(cfg.lane_cover_v + steps, 0, 100);
@@ -1164,9 +1164,9 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     // 動く」のはこれ。LIFT はカバーと逆向きに動かす
                     const int w = static_cast<int>(std::lround(e.wheel.y));
                     wheel_ms = (SDL_GetTicksNS() - scene_start) / 1e6;
-                    if (dev_env("BMJ_DEBUG_INPUT")) std::printf("ホイール %+d（%.1f ms）\n", w, wheel_ms), std::fflush(stdout);
+                    if (dev_env("RD_DEBUG_INPUT")) std::printf("ホイール %+d（%.1f ms）\n", w, wheel_ms), std::fflush(stdout);
                     if (adjust_key() > 0 && skin) {
-                        // 数字キーを押しながらのホイールは、矢印の上下と同じ（BMjoy の拡張。矢印が押しにくいキーボード向け）。
+                        // 数字キーを押しながらのホイールは、矢印の上下と同じ（RD の拡張。矢印が押しにくいキーボード向け）。
                         // Shift を押していれば左右
                         const int steps = w != 0 ? w : static_cast<int>(std::lround(e.wheel.x));
                         const bool side = w == 0 || (SDL_GetModState() & SDL_KMOD_SHIFT);
@@ -1205,7 +1205,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         toast = msg, toast_ns = SDL_GetTicksNS();
                         app.mixer.play_system(kSysOptionChange);
                     } else if (e.key.key == SDLK_F9 && phase == Phase::Result && !course) {
-                        // この配置を保存する（BMjoy。仕様書6章「ランダム配置の保存」）
+                        // この配置を保存する（RD。仕様書6章「ランダム配置の保存」）
                         SavedRandom sr;
                         sr.sha256 = sha256, sr.random = cfg.random, sr.seed = chart_seed;
                         sr.version = kRandomAlgorithmVersion, sr.saved_at = static_cast<int64_t>(std::time(nullptr));
@@ -1221,7 +1221,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                         adjust_skin(e.key.key == SDLK_RIGHT ? 1 : e.key.key == SDLK_LEFT ? -1 : 0,
                                     e.key.key == SDLK_DOWN ? 1 : e.key.key == SDLK_UP ? -1 : 0);
                     } else if ((e.key.key == SDLK_RIGHT || e.key.key == SDLK_LEFT) && (e.key.mod & SDL_KMOD_SHIFT)) {
-                        // 判定タイミング（BMjoy の拡張。LR2 はオプション画面でしか変えられない）
+                        // 判定タイミング（RD の拡張。LR2 はオプション画面でしか変えられない）
                         int d = e.key.key == SDLK_RIGHT ? 1 : -1;
                         cfg.judge_timing = std::clamp(cfg.judge_timing + d, -199, 199);
                     } else if ((e.key.key == SDLK_UP || e.key.key == SDLK_DOWN) && !speed_locked) {
@@ -1267,8 +1267,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                                      input.button_held(kKey1 + 6);
                         bool black = input.button_held(kKey1 + 1) || input.button_held(kKey1 + 3) || input.button_held(kKey1 + 5);
                         if (white && black && !course && !opt.replay) retry = true;
-                        // 開発用：BMJ_RETRY_ONCE があれば、1 回目のリザルトを抜けるときにクイックリトライしたことにする
-                        if (!retried && dev_env("BMJ_RETRY_ONCE") && !course && !opt.replay) retry = true;
+                        // 開発用：RD_RETRY_ONCE があれば、1 回目のリザルトを抜けるときにクイックリトライしたことにする
+                        if (!retried && dev_env("RD_RETRY_ONCE") && !course && !opt.replay) retry = true;
                         done = true;
                     }
                 }
@@ -1558,7 +1558,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 enter_result(false);
             }
 
-            if (dev_env("BMJ_DEBUG_LOOP")) {
+            if (dev_env("RD_DEBUG_LOOP")) {
                 // 開発用：1秒あたりの入力処理の回数、描画の回数、描画1回にかかった時間、フレームの間隔の最大
                 static uint64_t t = now_ns, last_frame = now_ns;
                 static int loops = 0;
@@ -1945,7 +1945,7 @@ PlayExit run_course_result(App& app, const CourseRun& cr, const PlayOptions& opt
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         app.result_renderer->draw_result(*rskin, st);
-        if (const char* shot = dev_env("BMJ_COURSE_SHOT"); shot && t > 3000 && !rtimers.on(2)) {
+        if (const char* shot = dev_env("RD_COURSE_SHOT"); shot && t > 3000 && !rtimers.on(2)) {
             // 開発用：3 秒たったら 1 枚保存して抜ける
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             rtimers.set(2, t);
@@ -1966,7 +1966,7 @@ PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
     if (app.metronome()) opt.save_score = false;  // メトロノームを鳴らして遊んだコースは記録しない
     // 段位認定はオプションを書き換える（LR2: Main.cpp:1546）。配置は正規だけ（難易度表の指定で MIRROR などを許す）、
     // EASY と G-ATTACK は GROOVE に、
-    // HIDDEN/SUDDEN は切る。LR2 は終わっても戻さないが、BMjoy はコースが終わったら元に戻す。
+    // HIDDEN/SUDDEN は切る。LR2 は終わっても戻さないが、RD はコースが終わったら元に戻す。
     // ハイスピード固定（ノースピ）のコースは、ハイスピ 1.00・HS-FIX なし・カバーと LIFT なし・基本スクロールスピード 100% で遊ぶ
     const AppConfig saved = cfg;
     struct Restore {
@@ -2011,4 +2011,4 @@ PlayExit run_course(App& app, const Course& course, PlayOptions opt) {
     return run_course_result(app, cr, opt);
 }
 
-}  // namespace bmj
+}  // namespace rd

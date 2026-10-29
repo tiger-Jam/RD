@@ -1,5 +1,5 @@
-# BMjoy の標準スキン：キーコンフィグ（1920×1080）。黒地に白とグレーの文字、細い線だけ
-#   python3 tools/skin/bmjoy/keyconfig.py <出力先の LR2 のフォルダ>
+# RD の標準スキン：キーコンフィグ（1920×1080）。黒地に白とグレーの文字、細い線だけ
+#   python3 tools/skin/rd/keyconfig.py <出力先の LR2 のフォルダ>
 import os
 import sys
 
@@ -8,7 +8,7 @@ from common import Csv, Sheet, label, page, render_html
 W, H = 1920, 1080
 GRAY = '#8a8a8a'
 LINE = '#333333'
-THEME = 'LR2files\\Theme\\BMjoy\\KeyConfig\\'
+THEME = 'LR2files\\Theme\\RD\\KeyConfig\\'
 # 項目のボタン（番号 - 100 が LR2 の項目）：皿の 2 方向、鍵盤 1〜7、START、SELECT
 ITEMS = [(110, 'SC A'), (111, 'SC B'), (101, '1'), (102, '2'), (103, '3'), (104, '4'), (105, '5'), (106, '6'), (107, '7'),
          (112, 'START'), (113, 'SELECT')]
@@ -17,7 +17,7 @@ SLOT_X, SLOT_Y, SLOT_W, SLOT_H = 80, 440, 820, 60  # スロット（2 列 × 4 �
 
 
 def build(out):
-    root = os.path.join(out, 'LR2files', 'Theme', 'BMjoy', 'KeyConfig')
+    root = os.path.join(out, 'LR2files', 'Theme', 'RD', 'KeyConfig')
     csv = Csv()
 
     def at(x, y, w, h, html):
@@ -41,7 +41,7 @@ def build(out):
     white = ui.add(8, 8, '<div style="width:100%;height:100%;background:#fff"></div>')
     ui.render(os.path.join(root, 'ui.png'))
 
-    csv.raw('#INFORMATION,8,BMjoy,BMjoy,' + THEME + 'thumb.png')
+    csv.raw('#INFORMATION,8,RD,RD,' + THEME + 'thumb.png')
     csv.raw('#RESOLUTION,2')
     csv.raw('#ENDOFHEADER')
     csv.raw('#IMAGE,' + THEME + 'bg.png')

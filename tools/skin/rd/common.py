@@ -1,4 +1,4 @@
-# BMjoy の標準スキンを作る道具の共通部分。
+# RD の標準スキンを作る道具の共通部分。
 # 絵は HTML で描いて Chrome で透明な PNG にし、切り出す位置を覚えておいて LR2 形式の CSV に書く。
 import os
 import shutil

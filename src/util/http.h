@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 using HttpHeaders = std::vector<std::pair<std::string, std::string>>;
 
@@ -20,4 +20,4 @@ bool http_get_stream(const std::string& url, const std::function<bool(const char
 bool http_post(const std::string& url, const std::string& data, std::string& reply, std::string& error,
                const HttpHeaders& headers = {});
 
-}  // namespace bmj
+}  // namespace rd

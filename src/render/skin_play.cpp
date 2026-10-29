@@ -1,10 +1,10 @@
-#include "skin/bmjoy_buttons.h"
+#include "skin/rd_buttons.h"
 #include "render/skin_play.h"
 
 #include <algorithm>
 #include <cstdlib>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 // フリップ中の番号の読み替え：1P 側 lo1..hi1 と 2P 側（+d）を入れ替える
@@ -73,7 +73,7 @@ bool PlayContext::option_value(int option) const {
     case 50: return true;              // オフライン
     case 80: return in_result || !timers.on(40);  // 読み込み中（リザルトではタイマー40が立たないので真）
     case 81: return !in_result && timers.on(40);
-    case 54: return true;  // 皿の自動演奏 OFF / ON（BMjoy には無い）
+    case 54: return true;  // 皿の自動演奏 OFF / ON（RD には無い）
     case 55: return false;
     case 308: return st && st->exscore() == 0;  // このプレイの EX スコアが 0
     case 318: {  // 2P 側の EX が 0（ターゲット無しを含む）
@@ -430,4 +430,4 @@ std::array<bool, 1000> PlayContext::load_options() const {
     return o;
 }
 
-}  // namespace bmj
+}  // namespace rd

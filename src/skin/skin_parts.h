@@ -6,10 +6,10 @@
 
 #include "skin/lr2_skin.h"
 
-namespace bmj {
+namespace rd {
 
 // out_dir に、部品ごとのフォルダの PNG（アニメーションはコマごと）と、それを並べて見る index.html を書く。
 // 書けなければ false
 bool export_skin_parts(const Lr2Skin& skin, const std::string& out_dir, std::string& error);
 
-}  // namespace bmj
+}  // namespace rd

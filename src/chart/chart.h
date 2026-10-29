@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 constexpr int kLaneCount = 8;  // 0=皿, 1..7=鍵盤
 
@@ -129,4 +129,4 @@ struct Chart {
     void make_constant_speed();
 };
 
-}  // namespace bmj
+}  // namespace rd

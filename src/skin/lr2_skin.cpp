@@ -20,7 +20,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -731,8 +731,9 @@ struct Loader {
             std::vector<std::string> parts = split_path(lr2path);
             fs::path p = root;
             for (size_t i = 0; i < parts.size(); ++i) {
-                // 素材の置き場が BMjoyfiles なら、先頭の LR2files はそこに読み替える（resolve_lr2_path と同じ）
-                std::string files = i == 0 && lower(parts[i]) == "lr2files" ? find_in_dir(p, "BMjoyfiles") : std::string();
+                // 素材の置き場が RDfiles なら、先頭の LR2files はそこに読み替える（resolve_lr2_path と同じ）
+                std::string files = i == 0 && lower(parts[i]) == "lr2files" ? find_in_dir(p, "RDfiles") : std::string();
+                if (files.empty() && i == 0 && lower(parts[i]) == "lr2files") files = find_in_dir(p, "BMjoyfiles");
                 p /= files.empty() ? parts[i] : files;
             }
             resolved = p.string();
@@ -891,9 +892,10 @@ std::string resolve_lr2_path(const std::string& lr2_root, const std::string& pat
             std::uniform_int_distribution<size_t> pick(0, hits.size() - 1);
             return (cur / hits[pick(rng())]).string();
         }
-        // スキンが書く「LR2files/…」は、BMjoy の素材の置き場（BMjoyfiles）があればそこを読む
-        // （BMjoy のフォルダの LR2files は、外部ツールのための LR2 の形の書き出しの置き場）
-        std::string found = i == 0 && lower(part) == "lr2files" ? find_in_dir(cur, "BMjoyfiles") : std::string();
+        // スキンが書く「LR2files/…」は、RD の素材の置き場（RDfiles）があればそこを読む
+        // （RD のフォルダの LR2files は、外部ツールのための LR2 の形の書き出しの置き場）
+        std::string found = i == 0 && lower(part) == "lr2files" ? find_in_dir(cur, "RDfiles") : std::string();
+        if (found.empty() && i == 0 && lower(part) == "lr2files") found = find_in_dir(cur, "BMjoyfiles");  // 前の名前のまま（名前を変えられなかった）
         if (found.empty()) found = find_in_dir(cur, part);
         if (found.empty()) return {};
         cur /= found;
@@ -1023,7 +1025,7 @@ bool load_lr2_skin(const std::string& lr2_root, const std::string& skin_path, co
         for (std::thread& t : pool) t.join();
         for (size_t i = 0; i < ld.jobs.size(); ++i)
             if (!ok[i]) out.warnings.push_back(ld.jobs[i].warning);
-        if (dev_env("BMJ_TIMING"))
+        if (dev_env("RD_TIMING"))
             std::printf("    スキン：読む %lld ms、画像 %zu 枚をほどく %lld ms\n",
                         (long long)std::chrono::duration_cast<std::chrono::milliseconds>(tp1 - tp0).count(), ld.jobs.size(),
                         (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - tp1).count());
@@ -1112,4 +1114,4 @@ int src_frame(const SkinSrc& src, double time) {
     return frame >= 0 && frame < frames ? frame : 0;
 }
 
-}  // namespace bmj
+}  // namespace rd

@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 class DxaArchive {
 public:
@@ -41,4 +41,4 @@ private:
 // 例: .../font/title/font.lr2font → .../font/title.dxa の font.lr2font
 bool read_file_or_dxa(const std::string& path, std::vector<uint8_t>& out);
 
-}  // namespace bmj
+}  // namespace rd

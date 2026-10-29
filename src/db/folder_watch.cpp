@@ -13,7 +13,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -140,7 +140,7 @@ void FolderWatcher::start(const std::vector<std::string>& roots) {
                                         kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer);
     CFRelease(arr);
     if (!impl_->stream) return;
-    impl_->queue = dispatch_queue_create("bmjoy.folderwatch", DISPATCH_QUEUE_SERIAL);
+    impl_->queue = dispatch_queue_create("rd.folderwatch", DISPATCH_QUEUE_SERIAL);
     FSEventStreamSetDispatchQueue(impl_->stream, impl_->queue);
     FSEventStreamStart(impl_->stream);
 }
@@ -192,4 +192,4 @@ std::vector<std::string> FolderWatcher::take_changed(std::chrono::milliseconds q
     return out;
 }
 
-}  // namespace bmj
+}  // namespace rd

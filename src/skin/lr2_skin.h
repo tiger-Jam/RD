@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 struct SkinImage {
     int w = 0, h = 0;
@@ -29,7 +29,7 @@ struct SkinSrc {
     int x = 0, y = 0, w = 0, h = 0, div_x = 1, div_y = 1;
     int cycle = 0, timer = 0;
     int op[5] = {};
-    int draw_h = 0;  // ノーツを描く高さ（px。0 ならレーンの DST の高さ）。ほかのスキンから持ってきたノーツの太さ（BMjoy の MOD）
+    int draw_h = 0;  // ノーツを描く高さ（px。0 ならレーンの DST の高さ）。ほかのスキンから持ってきたノーツの太さ（RD の MOD）
     int graphcount() const { return div_x * div_y; }
 };
 
@@ -166,7 +166,7 @@ struct Lr2Skin {
 
 // LR2のフォルダ（LR2files の親）を基準にしたパスを、実在するファイルに解決する。
 // 区切りは '\\' でも '/' でもよく、大文字小文字は区別しない。ファイル名の '*' はランダムに1つ選ぶ。
-// 先頭の LR2files は、BMjoyfiles（BMjoy の素材の置き場）があればそれに読み替える
+// 先頭の LR2files は、RDfiles（RD の素材の置き場）があればそれに読み替える
 std::string resolve_lr2_path(const std::string& lr2_root, const std::string& path, bool allow_wildcard = true);
 
 // .lr2skin のヘッダ（#INFORMATION と カスタマイズ項目）だけを読む
@@ -224,4 +224,4 @@ SkinDraw eval_dst(const SkinDst& dst, double time);
 // アニメーションのコマ番号（LR2: GetSRCcycleNow）
 int src_frame(const SkinSrc& src, double time);
 
-}  // namespace bmj
+}  // namespace rd

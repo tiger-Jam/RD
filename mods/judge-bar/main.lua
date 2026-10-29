@@ -32,22 +32,22 @@ function on_draw(s)
   local range = math.max(win.good[1], win.good[2])
   local function px(ms) return cx + ms / range * (w / 2) end
   -- 帯：GOOD・GREAT・PGREAT の幅
-  bmj.draw_rect(px(-win.good[1]), cy - h / 2, px(win.good[2]) - px(-win.good[1]), h, 0x40c040, 110)
-  bmj.draw_rect(px(-win.great[1]), cy - h / 2, px(win.great[2]) - px(-win.great[1]), h, 0xc0a020, 140)
-  bmj.draw_rect(px(-win.pgreat[1]), cy - h / 2, px(win.pgreat[2]) - px(-win.pgreat[1]), h, 0x30a0d0, 170)
-  bmj.draw_rect(cx - 1, cy - h, 2, h * 2, 0xffffff, 230)
+  rd.draw_rect(px(-win.good[1]), cy - h / 2, px(win.good[2]) - px(-win.good[1]), h, 0x40c040, 110)
+  rd.draw_rect(px(-win.great[1]), cy - h / 2, px(win.great[2]) - px(-win.great[1]), h, 0xc0a020, 140)
+  rd.draw_rect(px(-win.pgreat[1]), cy - h / 2, px(win.pgreat[2]) - px(-win.pgreat[1]), h, 0x30a0d0, 170)
+  rd.draw_rect(cx - 1, cy - h, 2, h * 2, 0xffffff, 230)
   -- 印（新しいほど濃い）
   for _, m in ipairs(marks) do
     local age = s.song_ms - m.at
     if age < LIFE then
       local x = px(math.max(-range, math.min(range, m.offset)))
       local a = math.floor(255 * (1 - age / LIFE))
-      bmj.draw_rect(x - 1, cy - h * 1.6, 2, h * 3.2, COLORS[m.judge] or 0xffffff, a)
+      rd.draw_rect(x - 1, cy - h * 1.6, 2, h * 3.2, COLORS[m.judge] or 0xffffff, a)
     end
   end
   -- 平均
   if avg then
     local x = px(math.max(-range, math.min(range, avg)))
-    for i = 0, 4 do bmj.draw_rect(x - (5 - i), cy - h * 2.4 - i, (5 - i) * 2, 1, 0xffffff, 230) end
+    for i = 0, 4 do rd.draw_rect(x - (5 - i), cy - h * 2.4 - i, (5 - i) * 2, 1, 0xffffff, 230) end
   end
 end

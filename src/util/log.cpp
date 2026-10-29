@@ -28,7 +28,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -169,6 +169,10 @@ bool output_is_redirected() {
 #endif
 }
 
+void stop_log() {
+    if (g_file) finish_log();
+}
+
 std::string log_dir() { return data_dir() + "Log/"; }
 
 const std::string& current_log_name() { return g_name; }
@@ -249,7 +253,7 @@ void start_log(const char* who) {
     g_pipe_read = fds[0];
     g_reader = std::thread(read_loop);
     std::atexit(finish_log);
-    std::printf("BMjoy %s（%s）を起動 %s\n", kBmjVersion, who, stamp("%Y-%m-%d %H:%M:%S").c_str());
+    std::printf("RD %s（%s）を起動 %s\n", kRdVersion, who, stamp("%Y-%m-%d %H:%M:%S").c_str());
 }
 
-}  // namespace bmj
+}  // namespace rd

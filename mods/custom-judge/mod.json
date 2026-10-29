@@ -4,7 +4,7 @@
   "id": "custom-judge",
   "name": "カスタム判定",
   "version": "1",
-  "author": "BMjoy",
+  "author": "RD",
   "description": "自分で判定の幅を作って遊ぶ。記録は判定ごとに分かれる",
   "touches": ["judge"],
   "settings": [{ "type": "judges", "name": "判定" }],

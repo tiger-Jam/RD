@@ -8,7 +8,7 @@
 
 #include "skin/skin_color.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -217,4 +217,4 @@ std::vector<int> play_part_customs(const Lr2Skin& from, const std::string& part)
     return out;
 }
 
-}  // namespace bmj
+}  // namespace rd

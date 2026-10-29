@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace bmj {
+namespace rd {
 
 bool Course::playable() const {
     if (stages.empty()) return false;
@@ -113,4 +113,4 @@ bool course_text(const Course* c, int id, std::string& out) {
     return false;
 }
 
-}  // namespace bmj
+}  // namespace rd

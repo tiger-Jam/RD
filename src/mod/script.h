@@ -3,12 +3,12 @@
 //   on_play_start(info)   曲が始まる前（譜面の情報）
 //   on_judge(e)           判定が出たとき・地雷を踏んだとき
 //   on_play_end(result)   リザルトに入るとき（結果と全部のゲージ）
-//   on_draw(state)        プレー中、毎フレーム（「見た目」を宣言した MOD だけ。bmj.draw_rect / bmj.draw_text で描く）
+//   on_draw(state)        プレー中、毎フレーム（「見た目」を宣言した MOD だけ。rd.draw_rect / rd.draw_text で描く）
 //   build_folders(charts) 選曲の一覧を作るとき（「操作」を宣言した MOD だけ。フォルダの表を返す。譜面は sha256 か { sha256, label }）
 //   folder_bars(folder)   フォルダを開いたとき（「操作」を宣言した MOD だけ。フォルダの名前の下に出すバーを返す）
 //   pick_chart(req)       folder_bars のバーを決定したとき（遊ぶ譜面の sha256 を返す）
-// 使えるのは Lua の base（ファイルを読む関数を除く）・table・string・math・utf8・coroutine と bmj の表だけ。
-// ファイルに書けるのは BMjoyfiles/Player/<ID>/ModData/<MOD の id>/ の下だけ
+// 使えるのは Lua の base（ファイルを読む関数を除く）・table・string・math・utf8・coroutine と rd の表だけ。
+// ファイルに書けるのは RDfiles/Player/<ID>/ModData/<MOD の id>/ の下だけ
 #pragma once
 
 #include <array>
@@ -21,7 +21,7 @@
 #include "db/song_db.h"
 #include "mod/mod.h"
 
-namespace bmj {
+namespace rd {
 
 // スクリプトが描いたもの（スキンの座標。プレー画面のスキンの上に重ねる）
 struct ModDrawCmd {
@@ -88,7 +88,7 @@ public:
     ModScripts();
     ~ModScripts();
     // スクリプトを持つ MOD を読む。読めなかったものは errors に入り、使わない。
-    // data_root は MOD が書いてよい場所の親（BMjoyfiles/Player/<ID>/ModData。MOD ごとに <id>/ を切る）
+    // data_root は MOD が書いてよい場所の親（RDfiles/Player/<ID>/ModData。MOD ごとに <id>/ を切る）
     void load(const std::vector<const ModManifest*>& mods, const std::string& data_root);
     bool empty() const { return scripts_.empty(); }
     void play_start(const ModPlayInfo& info);
@@ -142,4 +142,4 @@ std::string mod_pick_chart(const ModManifest& m, const ModBar& bar, const std::s
 // MOD がファイルに書いてよい名前か（相対で、.. や絶対パスを含まない）
 bool mod_file_name_ok(const std::string& name);
 
-}  // namespace bmj
+}  // namespace rd

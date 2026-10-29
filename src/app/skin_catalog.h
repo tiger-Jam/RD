@@ -9,7 +9,7 @@
 #include "app/config.h"
 #include "skin/lr2_skin.h"
 
-namespace bmj {
+namespace rd {
 
 // 設定に書かれたカスタマイズの選択を、スキンのヘッダ（各項目の selected）に当てはめる。
 // #CUSTOMFILE は名前で探し、候補に無ければ既定のまま。古い形式（番号）なら番号で選ぶ
@@ -46,7 +46,7 @@ public:
     std::string text(int id, const AppConfig& cfg) const;
     int button(int type) const;
 
-    // 種類ごとに、BMjoy の設定のどこにスキンのパスを持つか（BMjoy で替えられない種類は nullptr）
+    // 種類ごとに、RD の設定のどこにスキンのパスを持つか（RD で替えられない種類は nullptr）
     static std::string* config_slot(AppConfig& cfg, int type);
     static const std::string* config_slot(const AppConfig& cfg, int type);
 
@@ -78,4 +78,4 @@ private:
     mutable std::map<std::string, std::map<std::string, std::vector<int>>> part_customs_;
 };
 
-}  // namespace bmj
+}  // namespace rd

@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -41,7 +41,7 @@ fs::path shot_path() {
     localtime_r(&t, &tm);
 #endif
     char name[64];
-    std::snprintf(name, sizeof(name), "BMjoy %04d-%02d-%02d %02d-%02d-%02d.png", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+    std::snprintf(name, sizeof(name), "RD %04d-%02d-%02d %02d-%02d-%02d.png", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                   tm.tm_hour, tm.tm_min, tm.tm_sec);
     return dir / name;
 }
@@ -154,4 +154,4 @@ void frame_present(SDL_Renderer* r) {
     SDL_RenderPresent(r);
 }
 
-}  // namespace bmj
+}  // namespace rd

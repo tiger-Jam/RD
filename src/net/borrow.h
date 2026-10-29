@@ -1,9 +1,9 @@
 // 譜面を借りる（仕様書10章「取得とキャッシュ（借りて返す）」）。自分の PC（母艦）が曲データベースの譜面を貸し、
 // ほかの PC が持っていない譜面を、遊ぶときだけ取ってくる。
-//   GET /bmjoy/v1/charts               貸せる譜面の一覧（1 行に「md5<TAB>sha256」）
-//   GET /bmjoy/v1/chart/<md5|sha256>   その譜面のフォルダ（「id」「name」「chart」の行と、「file<TAB>大きさ<TAB>相対パス」の行）
-//   GET /bmjoy/v1/file/<id>/<相対パス>  ファイル
-// どれも X-BMjoy-Key の頭に合言葉が要る。返すのは曲フォルダの中の、譜面・音・画像・動画・テキストだけ
+//   GET /rd/v1/charts               貸せる譜面の一覧（1 行に「md5<TAB>sha256」）
+//   GET /rd/v1/chart/<md5|sha256>   その譜面のフォルダ（「id」「name」「chart」の行と、「file<TAB>大きさ<TAB>相対パス」の行）
+//   GET /rd/v1/file/<id>/<相対パス>  ファイル
+// どれも X-RD-Key の頭に合言葉が要る。返すのは曲フォルダの中の、譜面・音・画像・動画・テキストだけ
 #pragma once
 
 #include <cstdint>
@@ -16,7 +16,7 @@
 #include "db/song_db.h"
 #include "net/http_server.h"
 
-namespace bmj {
+namespace rd {
 
 // 合言葉の長さの下限（インターネットからも借りられるようにするので、短いものは使わせない）
 inline constexpr int kMinServeKey = 8;
@@ -64,4 +64,4 @@ void borrow_trim(const std::string& root, int64_t limit, const std::string& keep
 // フォルダを使ったしるし（borrow_trim の順番に使う）
 void borrow_touch(const std::string& dir);
 
-}  // namespace bmj
+}  // namespace rd

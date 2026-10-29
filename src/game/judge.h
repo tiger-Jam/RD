@@ -11,7 +11,7 @@
 #include "game/gauge.h"
 #include "mod/mod.h"
 
-namespace bmj {
+namespace rd {
 
 // 地雷が爆発したが #WAV00 が無いとき、sounds_to_play() に入れる番号（呼び出し側がシステム音を鳴らす）
 constexpr uint16_t kMineSystemSound = 0xFFFF;
@@ -214,4 +214,4 @@ inline int to_ms(int64_t t_us) {
     return static_cast<int>(t_us >= 0 ? t_us / 1000 : -((-t_us + 999) / 1000));
 }
 
-}  // namespace bmj
+}  // namespace rd

@@ -10,7 +10,7 @@
 
 #include "skin/skin_color.h"
 
-namespace bmj {
+namespace rd {
 
 // MOD が触れる場所の分類（仕様書14章「触れる場所の分類」）
 enum class ModTouch : uint32_t {
@@ -208,4 +208,4 @@ std::string play_mod_key(const std::vector<const ModManifest*>& mods);
 // 7k モード（皿を除いて遊ぶ）の記録の鍵：play_mod_key の前に「7k」を付ける（MOD の部分には @ があるので重ならない）
 std::string seven_key_record_key(const std::string& mod_key);
 
-}  // namespace bmj
+}  // namespace rd

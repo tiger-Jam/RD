@@ -8,9 +8,9 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
-// 書き方：1 行目が "BMJREPLAY <版>"、続いて "キー = 値" のヘッダ、"EVENTS" の後に「時刻(us) レーン 押した(1)/離した(0)」
+// 書き方：1 行目が "RDREPLAY <版>"、続いて "キー = 値" のヘッダ、"EVENTS" の後に「時刻(us) レーン 押した(1)/離した(0)」
 bool save_replay(const std::string& path, const Replay& r) {
     std::error_code ec;
     fs::create_directories(fs::path(path).parent_path(), ec);
@@ -19,7 +19,7 @@ bool save_replay(const std::string& path, const Replay& r) {
     {
         std::ofstream f(tmp, std::ios::binary);
         if (!f) return false;
-        f << "BMJREPLAY " << Replay::kVersion << "\n";
+        f << "RDREPLAY " << Replay::kVersion << "\n";
         f << "sha256 = " << r.sha256 << "\n";
         f << "seed = " << r.seed << "\n";
         f << "random_version = " << r.random_version << "\n";
@@ -49,7 +49,8 @@ bool load_replay(const std::string& path, Replay& r) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
     std::string line;
-    if (!std::getline(f, line) || line.rfind("BMJREPLAY ", 0) != 0) return false;
+    // 前の名前（BMjoy）のときに書いたものは BMJREPLAY で始まる
+    if (!std::getline(f, line) || (line.rfind("RDREPLAY ", 0) != 0 && line.rfind("BMJREPLAY ", 0) != 0)) return false;
     r = Replay{};
     bool events = false;
     while (std::getline(f, line)) {
@@ -91,4 +92,4 @@ bool load_replay(const std::string& path, Replay& r) {
     return events;
 }
 
-}  // namespace bmj
+}  // namespace rd

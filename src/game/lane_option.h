@@ -4,7 +4,7 @@
 #include "chart/chart.h"
 #include "util/lr2_random.h"
 
-namespace bmj {
+namespace rd {
 
 // LR2 の番号と同じ（optionstr.csv の #RANDOM の並び）
 enum RandomOption : int { kRandomOff = 0, kMirror = 1, kRandom = 2, kSRandom = 3, kScatter = 4, kConverge = 5 };
@@ -24,4 +24,4 @@ int key_count(const Chart& chart);
 void apply_random_option(Chart& chart, int option, Lr2Random& rng, bool scratch = true);
 
 
-}  // namespace bmj
+}  // namespace rd

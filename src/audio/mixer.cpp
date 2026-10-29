@@ -16,7 +16,7 @@
 #include <xmmintrin.h>
 #endif
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -398,4 +398,4 @@ void Mixer::render_chunk(float* out, uint32_t n, bool running) {
     shifter_.process(out, n);
 }
 
-}  // namespace bmj
+}  // namespace rd

@@ -5,7 +5,7 @@
 #include <array>
 #include <cstdint>
 
-namespace bmj {
+namespace rd {
 
 class Lr2Random {
 public:
@@ -62,4 +62,4 @@ private:
     int mti_ = kN;
 };
 
-}  // namespace bmj
+}  // namespace rd

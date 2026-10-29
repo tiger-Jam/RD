@@ -8,7 +8,7 @@
 #include "game/gauge.h"
 #include "util/text.h"
 
-namespace bmj {
+namespace rd {
 
 void OptionNames::load(const std::string& lr2_root) {
     std::string path = resolve_lr2_path(lr2_root, "LR2files/Config/optionstr.csv", false);
@@ -82,7 +82,7 @@ bool SelectContext::option(int op) const {
     case 46: return true;   // 難易度フィルタ有効
     case 50: return true;   // オフライン
     case 52: return true;   // EXTRA モード OFF
-    case 54: return true;   // 皿の自動演奏 OFF（BMjoy には無い）
+    case 54: return true;   // 皿の自動演奏 OFF（RD には無い）
     case 55: return false;
     case 56: return true;  // 2P のアシスト OFF
     // スコアが残るか（LR2: CheckScoreSaveConditon）。CONSTANT・SCATTER・CONVERGE はランプだけ
@@ -106,7 +106,7 @@ bool SelectContext::option(int op) const {
     }
     case 150: return song && (chart->difficulty <= 0 || chart->difficulty > 5);
     case 151: case 152: case 153: case 154: case 155: return song && chart->difficulty == op - 150;
-    case 160: return song;  // BMjoy は 7 鍵だけ
+    case 160: return song;  // RD は 7 鍵だけ
     case 170: return true;  // BGA の有無は選曲では見ない
     case 172: return song && chart->ln == 0;
     case 173: return song && chart->ln > 0;
@@ -284,7 +284,7 @@ std::string SelectContext::text(int id) const {
     case 15: return song ? chart->subartist : "";
     case 17: return song ? std::to_string(chart->playlevel) : "";
     case 18: return song ? std::to_string(chart->difficulty) : "";
-    // タグエディター（パネル 4）の欄。入力している欄は入力中の文字。タグと EX レベルは BMjoy に無い
+    // タグエディター（パネル 4）の欄。入力している欄は入力中の文字。タグと EX レベルは RD に無い
     case 20: case 21: case 23: case 24: case 25: case 27: case 28: {
         if (edit_text == id) return edit_value + "|";
         if (!song) return "";
@@ -312,7 +312,7 @@ std::string SelectContext::text(int id) const {
     case 70: return opt("FLIP", 0);
     case 71: return opt("SCOREGRAPH", cfg->score_graph ? 1 : 0);
     case 72: return opt("GHOST", cfg->ghost);
-    // LANE COVER の欄は LIFT も合わせて出す（BMjoy では、この欄で SUDDEN+ と LIFT を順に切り替える）
+    // LANE COVER の欄は LIFT も合わせて出す（RD では、この欄で SUDDEN+ と LIFT を順に切り替える）
     case 73: {
         const std::string sud = opt("LANECOVER", 1).empty() ? "ON" : opt("LANECOVER", 1);
         if (cfg->lift) return cfg->lane_cover ? sud + " + LIFT" : "LIFT";
@@ -337,7 +337,7 @@ int SelectContext::button(int t) const {
     case 1: case 2: case 3: case 4: case 5: case 6: case 7: case 8: return panel == t ? 1 : 0;
     case 10: return difficulty_filter;
     case 11: {
-        // スキンの絵は LR2 の並び（ALL KEYS, SINGLE, 7KEYS, 5KEYS, DOUBLE, 14KEYS, 10KEYS, 9KEYS）なので、BMjoy の並びから読み替える
+        // スキンの絵は LR2 の並び（ALL KEYS, SINGLE, 7KEYS, 5KEYS, DOUBLE, 14KEYS, 10KEYS, 9KEYS）なので、RD の並びから読み替える
         static const int lr2[] = {0, 2, 5, 7, 3, 6, 1, 4};
         return mode_filter >= 0 && mode_filter < 8 ? lr2[mode_filter] : 0;
     }
@@ -418,4 +418,4 @@ bool SelectContext::bargraph(int t, double& val, double& max) const {
     }
 }
 
-}  // namespace bmj
+}  // namespace rd

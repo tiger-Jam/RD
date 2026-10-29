@@ -10,7 +10,7 @@
 #include <iconv.h>
 #endif
 
-namespace bmj {
+namespace rd {
 
 bool is_valid_utf8(std::string_view s) {
     size_t i = 0;
@@ -123,4 +123,4 @@ std::string_view trim(std::string_view s) {
     return s.substr(b, e - b);
 }
 
-}  // namespace bmj
+}  // namespace rd

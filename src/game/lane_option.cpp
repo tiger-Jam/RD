@@ -5,7 +5,7 @@
 #include <numeric>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -115,4 +115,4 @@ void apply_random_option(Chart& chart, int option, Lr2Random& rng, bool scratch)
     drop_overlaps(notes);
 }
 
-}  // namespace bmj
+}  // namespace rd

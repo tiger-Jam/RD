@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace bmj {
+namespace rd {
 
 // 16進の小文字で返す
 std::string md5_hex(const void* data, size_t len);
@@ -14,4 +14,4 @@ std::string sha256_hex(const void* data, size_t len);
 inline std::string md5_hex(std::string_view s) { return md5_hex(s.data(), s.size()); }
 inline std::string sha256_hex(std::string_view s) { return sha256_hex(s.data(), s.size()); }
 
-}  // namespace bmj
+}  // namespace rd

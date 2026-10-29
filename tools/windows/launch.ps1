@@ -1,6 +1,6 @@
 ﻿param([string]$Exe, [string]$ArgLine = "", [string]$WorkDir, [string]$EnvList = "")
 # ログイン中のユーザーのデスクトップ（対話セッション）で起動する。SSHのセッションから直接起動すると画面が出ないため
-$name = "BMjoyRun"
+$name = "RDRun"
 $envset = ""
 foreach ($kv in ($EnvList -split ";")) { if ($kv) { $envset += "set `"$kv`"&& " } }
 $arg = "/c ${envset}cd /d `"$WorkDir`" && `"$Exe`" $ArgLine > `"$WorkDir\last_run.log`" 2>&1"

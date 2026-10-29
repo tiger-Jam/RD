@@ -1,4 +1,4 @@
-// FFmpeg を使う動画のデコード。BMJ_FF_NS（ff9 など）を決めてから読み込み、その版のヘッダーでビルドする。
+// FFmpeg を使う動画のデコード。RD_FF_NS（ff9 など）を決めてから読み込み、その版のヘッダーでビルドする。
 // ライブラリはヘッダーと同じ版（メジャー番号）のものを実行時に読み込む
 #include <SDL3/SDL.h>
 
@@ -15,8 +15,8 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-namespace bmj {
-namespace BMJ_FF_NS {
+namespace rd {
+namespace RD_FF_NS {
 
 namespace {
 
@@ -50,8 +50,8 @@ struct Api {
     void (*sws_free)(SwsContext*);
 };
 
-#define BMJ_STR2(x) #x
-#define BMJ_STR(x) BMJ_STR2(x)
+#define RD_STR2(x) #x
+#define RD_STR(x) RD_STR2(x)
 
 // ライブラリの名前の候補（実行ファイルの隣を先に探す）
 SDL_SharedObject* load_lib(const char* base, const char* major) {
@@ -75,10 +75,10 @@ SDL_SharedObject* load_lib(const char* base, const char* major) {
 const Api& api() {
     static Api a = [] {
         Api r{};
-        SDL_SharedObject* util = load_lib("avutil", BMJ_STR(LIBAVUTIL_VERSION_MAJOR));
-        SDL_SharedObject* codec = util ? load_lib("avcodec", BMJ_STR(LIBAVCODEC_VERSION_MAJOR)) : nullptr;
-        SDL_SharedObject* format = codec ? load_lib("avformat", BMJ_STR(LIBAVFORMAT_VERSION_MAJOR)) : nullptr;
-        SDL_SharedObject* sws = format ? load_lib("swscale", BMJ_STR(LIBSWSCALE_VERSION_MAJOR)) : nullptr;
+        SDL_SharedObject* util = load_lib("avutil", RD_STR(LIBAVUTIL_VERSION_MAJOR));
+        SDL_SharedObject* codec = util ? load_lib("avcodec", RD_STR(LIBAVCODEC_VERSION_MAJOR)) : nullptr;
+        SDL_SharedObject* format = codec ? load_lib("avformat", RD_STR(LIBAVFORMAT_VERSION_MAJOR)) : nullptr;
+        SDL_SharedObject* sws = format ? load_lib("swscale", RD_STR(LIBSWSCALE_VERSION_MAJOR)) : nullptr;
         if (!sws) return r;
         bool all = true;
         auto get = [&](SDL_SharedObject* so, const char* name, auto& fn) {
@@ -216,5 +216,5 @@ bool load() { return api().ok; }
 
 std::unique_ptr<VideoBackend> create() { return std::make_unique<Backend>(); }
 
-}  // namespace BMJ_FF_NS
-}  // namespace bmj
+}  // namespace RD_FF_NS
+}  // namespace rd

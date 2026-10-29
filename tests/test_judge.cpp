@@ -2,7 +2,7 @@
 #include "game/judge.h"
 #include "test.h"
 
-using namespace bmj;
+using namespace rd;
 
 static Chart chart_of(const std::string& s) {
     BmsParseOptions o;

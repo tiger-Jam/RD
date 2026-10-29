@@ -5,7 +5,7 @@
 #include <chrono>
 #include <cstdio>
 
-namespace bmj {
+namespace rd {
 
 inline std::chrono::steady_clock::time_point& startup_clock_origin() {
     static std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
@@ -20,4 +20,4 @@ inline void startup_mark(const char* what) {
     std::printf("[起動 %lld ms] %s\n", static_cast<long long>(ms), what);
 }
 
-}  // namespace bmj
+}  // namespace rd

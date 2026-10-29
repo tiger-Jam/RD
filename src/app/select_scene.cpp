@@ -51,15 +51,15 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
-// beatoraja と同じ並びのソートと鍵盤数（BMjoy の拡張）
+// beatoraja と同じ並びのソートと鍵盤数（RD の拡張）
 constexpr int kSortCount = 9, kModeCount = 8;
 const char* const kSortNames[kSortCount] = {"OFF", "TITLE", "ARTIST", "BPM", "LENGTH", "LEVEL", "CLEAR", "SCORE", "MISSCOUNT"};
 const char* const kModeNames[kModeCount] = {"ALL", "7KEY", "14KEY", "9KEY", "5KEY", "10KEY", "SINGLE", "DOUBLE"};
-// 鍵盤数の絞り込みで、その譜面を出すか。BMjoy の譜面は 7 鍵と 5 鍵だけ（持っていない譜面は 7 鍵として扱う）
+// 鍵盤数の絞り込みで、その譜面を出すか。RD の譜面は 7 鍵と 5 鍵だけ（持っていない譜面は 7 鍵として扱う）
 bool mode_shows(int mode, int keys) {
     switch (mode) {
     case 0: case 6: return true;  // ALL・SINGLE
@@ -398,10 +398,10 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
     };
     std::unordered_map<std::string, const ChartRecord*> by_md5, by_sha256;
     for (const ChartRecord& c : lib.charts) by_md5.emplace(c.md5, &c), by_sha256.emplace(c.sha256, &c);
-    // 開発用：BMJ_TIMING があれば、一覧づくりの内訳を出す
+    // 開発用：RD_TIMING があれば、一覧づくりの内訳を出す
     uint64_t lap_ns = SDL_GetTicksNS();
     auto lap = [&](const char* what) {
-        if (!dev_env("BMJ_TIMING")) return;
+        if (!dev_env("RD_TIMING")) return;
         uint64_t now = SDL_GetTicksNS();
         std::printf("    一覧：%s %.0f ms\n", what, (now - lap_ns) / 1e6);
         lap_ns = now;
@@ -770,7 +770,7 @@ void load_charts(Library& lib, const SongDb& db, const AppConfig& cfg) {
 
 // プレイオプションのパネルを開いている間の鍵盤（LR2: Songselect.cpp:1350 SetPlayOption）。
 //   1=鍵盤数の絞り込み 2=RANDOM 3=BATTLE 4=GAUGE 5=HS- 7=HS+ 6=7k モード（LR2 は ASSIST） 6+7=HIDDEN/SUDDEN 5+7=HS-FIX
-// BMjoy にまだ無いもの（BATTLE）は何もしない。変えたら true
+// RD にまだ無いもの（BATTLE）は何もしない。変えたら true
 bool play_option_keys(App& app, const InputMapper& input, const std::vector<ButtonInput>& buttons) {
     AppConfig& cfg = app.cfg;
     bool pressed[8] = {};
@@ -905,10 +905,10 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     if (!prep) prep = prepare_select(app);
 
     // 手元にあるものですぐに一覧を出し、曲フォルダの読み直しと難易度表の更新は裏で行う
-    // 開発用：BMJ_TIMING があれば、最初の絵までの内訳を出す
+    // 開発用：RD_TIMING があれば、最初の絵までの内訳を出す
     uint64_t lap_ns = SDL_GetTicksNS();
     auto lap = [&](const char* what) {
-        if (!dev_env("BMJ_TIMING")) return;
+        if (!dev_env("RD_TIMING")) return;
         uint64_t now = SDL_GetTicksNS();
         std::printf("  選曲画面の準備：%s %.0f ms\n", what, (now - lap_ns) / 1e6);
         lap_ns = now;
@@ -921,7 +921,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     std::vector<Entry> root = prep ? std::move(prep->root) : std::vector<Entry>{};
     prep.reset();
     lap("一覧");
-    if (dev_env("BMJ_MEMSTAT")) {
+    if (dev_env("RD_MEMSTAT")) {
         // 開発用：一覧のメモリの見積もり（要素の数と、文字列が持つ分）
         size_t entries = 0, charts_e = 0, missing = 0, folders = 0, str_bytes = 0;
         auto sbytes = [](const std::string& x) { return x.capacity() > 15 ? x.capacity() + 1 : 0; };
@@ -1151,7 +1151,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             busy = false;
         });
     };
-    // 曲フォルダの監視（BMjoy の拡張）。変わったフォルダを覚え、変化が落ち着いてから 1 つずつ読み直す
+    // 曲フォルダの監視（RD の拡張）。変わったフォルダを覚え、変化が落ち着いてから 1 つずつ読み直す
     FolderWatcher& watcher = app.watcher;
     std::deque<std::string> watched_dirs;
     // 起動時に曲フォルダと難易度表を読み直す（設定で「手動」なら読み直さない。F8 で今のフォルダだけ）
@@ -1161,8 +1161,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     // 絞り込みとソートは設定に残し、次に起動しても同じにする（LR2 と同じ）。
     // 難易度の絞り込み（LR2: select.difficulty。0=ALL 1..5=BEGINNER..INSANE）。譜面の並ぶ一覧だけに効く
     int& difficulty_filter = app.cfg.select_difficulty;
-    // 鍵盤数の絞り込みとソートは、LR2 ではなく beatoraja の項目と並びに合わせる（BMjoy の拡張。LR2 のソートは実用にならないため）。
-    // 鍵盤数：kModeNames の順。BMjoy の譜面は 7 鍵と 5 鍵だけなので、14KEY などでは譜面が出ない（出る項目まで進める）
+    // 鍵盤数の絞り込みとソートは、LR2 ではなく beatoraja の項目と並びに合わせる（RD の拡張。LR2 のソートは実用にならないため）。
+    // 鍵盤数：kModeNames の順。RD の譜面は 7 鍵と 5 鍵だけなので、14KEY などでは譜面が出ない（出る項目まで進める）
     int& mode_filter = app.cfg.select_mode;
     // ソート：kSortNames の順。0 の OFF は並べ替えない（難易度表やフォルダの順のまま）
     int& sort_mode = app.cfg.select_sort;
@@ -1355,7 +1355,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         }
         return lv;
     };
-    std::vector<Level> stack{make_level(&root, 0, "BMjoy")};
+    std::vector<Level> stack{make_level(&root, 0, "RD")};
     // いまの階層までのフォルダの名前（folder_lamp_key に使う）
     auto level_path = [&] {
         std::string p;
@@ -1379,7 +1379,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     int prev_hold_dir = 0;
     bool quit = false;
 
-    // 選曲スキン（docs/lr2_select_spec.md）。読めなければ BMjoy の仮の画面
+    // 選曲スキン（docs/lr2_select_spec.md）。読めなければ RD の仮の画面
     OptionNames opt_names;
     lap("そのほか");
     std::array<bool, 1000> load_ops = select_load_options(app, opt_names);
@@ -1402,7 +1402,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         const auto info = app.db.lr2_player_info();
         auto it = info.find("name");
         if (it == info.end() || it->second.empty()) it = info.find("id");
-        sctx.player_name = it != info.end() ? it->second : player_id();  // 引き継いでいなければ BMjoy のプレイヤーの ID
+        sctx.player_name = it != info.end() ? it->second : player_id();  // 引き継いでいなければ RD のプレイヤーの ID
     }
     uint64_t scene_start = SDL_GetTicksNS();
     auto scene_ms = [&] { return (SDL_GetTicksNS() - scene_start) / 1e6; };
@@ -1474,7 +1474,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         sctx.timers.reset(15);
         sctx.timers.set(16, scene_ms());
     };
-    // 保存したランダムの配置の一覧（F9。BMjoy。仕様書6章「ランダム配置の保存」）。0 行目は「使わない」、1 行目から新しい順
+    // 保存したランダムの配置の一覧（F9。RD。仕様書6章「ランダム配置の保存」）。0 行目は「使わない」、1 行目から新しい順
     bool layout_open = false;
     std::vector<SavedRandom> layouts;
     std::string layout_sha;
@@ -1664,7 +1664,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             int n = static_cast<int>(list.size());
             lv.cursor = n ? std::clamp(cursors[i], 0, n - 1) : 0;
         };
-        stack = {make_level(&root, cursors[0], "BMjoy")};
+        stack = {make_level(&root, cursors[0], "RD")};
         place(stack.back(), 0);
         for (size_t i = 0; i < path.size(); ++i) {
             const std::vector<Entry>& list = *stack.back().list;
@@ -1887,10 +1887,10 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         // 借りた分は置き場から写し、残り（ほかの譜面など）を取る
         fs::copy(fs::u8path(data_dir() + "Borrowed/" + borrowed_folder.id), dest,
                  fs::copy_options::recursive | fs::copy_options::skip_existing, ec);
-        fs::remove(dest / ".bmjoy-used", ec);
+        fs::remove(dest / ".rd-used", ec);
         std::string err;
         if (!borrow_fetch(borrow_src, borrowed_folder, dest.string(), true, nullptr, err)) return msg = "もらえない：" + err, false;
-        fs::remove(dest / ".bmjoy-used", ec);
+        fs::remove(dest / ".rd-used", ec);
         const int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
         ScanStats s = app.db.scan(app.cfg.song_dirs, threads, nullptr, dest.string());
         std::printf("もらった：%s（%d 譜面）\n", dest.string().c_str(), s.added + s.updated);
@@ -1991,7 +1991,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                                 sr.version == kRandomAlgorithmVersion)
                 po.seed = sr.seed, po.layout_random = sr.random;
             if (borrowing) po.keep = keep_borrowed;  // 借りた譜面：リザルトで「もらう」
-            if (const char* cap = dev_env("BMJ_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
+            if (const char* cap = dev_env("RD_PLAY_CAPTURE")) po.capture_dir = cap;  // 開発用
             std::string path = e->chart ? e->chart->path : "";
             std::shared_ptr<Course> course = e->course;
             stop_preview(false);
@@ -2294,22 +2294,22 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         edit_text = 30;
     };
     // 遅かったフレーム（80 ms 以上）は、内訳をログに残す（カクつき・固まりの原因を、遊んだあとに見られるように）。
-    // 開発用：BMJ_TIMING があれば 50 ms 以上を出す
-    const uint64_t slow_ns = dev_env("BMJ_TIMING") ? 50'000'000 : 80'000'000;
+    // 開発用：RD_TIMING があれば 50 ms 以上を出す
+    const uint64_t slow_ns = dev_env("RD_TIMING") ? 50'000'000 : 80'000'000;
     uint64_t ft0 = 0, ft_banner = 0, ft_text = 0, ft_events = 0, ft_draw0 = 0, ft_draw = 0;
     int slow_logged = 0;
     uint64_t ft_swap = 0, ft_preview = 0;  // 一覧の差し替え・プレビューにかかった時間
     uint64_t lamp_ns = 0;  // このフレームでフォルダのランプを数えるのにかかった時間と、見た要素の数
     size_t lamp_nodes = 0;
-    // 開発用：BMJ_SCROLL_TEST があれば、決まった操作（長押し・1 つずつ・フォルダを開く・戻る）を流し、
+    // 開発用：RD_SCROLL_TEST があれば、決まった操作（長押し・1 つずつ・フォルダを開く・戻る）を流し、
     // 1 フレームにかかった時間をまとめて出して終わる
-    const bool scroll_test = dev_env("BMJ_SCROLL_TEST") != nullptr;
+    const bool scroll_test = dev_env("RD_SCROLL_TEST") != nullptr;
     std::vector<float> frame_ms;
     double test_t0 = -1, test_next = 0;
     int test_step = 0, test_count = 0;
-    // 開発用：BMJ_OPEN_TEST があれば、一番上のフォルダを順に開き（中のフォルダも 8 つまで）、開くのにかかった時間と、
+    // 開発用：RD_OPEN_TEST があれば、一番上のフォルダを順に開き（中のフォルダも 8 つまで）、開くのにかかった時間と、
     // 開いてから 1 秒のうちの一番遅いフレームを出して終わる
-    const bool open_test = dev_env("BMJ_OPEN_TEST") != nullptr;
+    const bool open_test = dev_env("RD_OPEN_TEST") != nullptr;
     std::vector<int> open_pos{0};      // 階層ごとに、次に見る位置
     std::vector<int> open_done{0};     // 階層ごとに、開いた数
     bool open_measuring = false;
@@ -2331,7 +2331,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 }
             }
             if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED) std::printf("ウィンドウにフォーカスが来た\n");
-            if (dev_env("BMJ_DEBUG_INPUT") && e.type >= SDL_EVENT_JOYSTICK_AXIS_MOTION && e.type <= SDL_EVENT_JOYSTICK_UPDATE_COMPLETE) {
+            if (dev_env("RD_DEBUG_INPUT") && e.type >= SDL_EVENT_JOYSTICK_AXIS_MOTION && e.type <= SDL_EVENT_JOYSTICK_UPDATE_COMPLETE) {
                 static int logged = 0;
                 if (logged++ < 30) std::printf("選曲画面: ジョイスティックのイベント %u を受け取った\n", e.type);
             }
@@ -3120,7 +3120,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 sctx.course = cur->course.get();
                 auto it = lib->scores.find(cur->course->hash);
                 if (it != lib->scores.end()) sctx.score = &it->second;
-                if (dev_env("BMJ_DEBUG_COURSE")) {
+                if (dev_env("RD_DEBUG_COURSE")) {
                     static std::string last;
                     if (last != cur->course->hash) {
                         last = cur->course->hash;
@@ -3524,7 +3524,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
         text.draw(px, 600, 14, joystick_init().ready() ? dim : accent, joy_text, 0, 420);
         text.draw(24, 690, 14, dim,
                   "↑↓ 選ぶ　Enter/→ 決定　← 戻る　Esc 終了　START/Space オプション　F1 キーの説明　（コントローラ：白鍵 決定／黒鍵 戻る／皿 選ぶ）");
-        if (dev_env("BMJ_DEBUG_LOOP")) {
+        if (dev_env("RD_DEBUG_LOOP")) {
             // 開発用：選曲画面の1秒あたりの描画回数と、1回にかかった時間
             static uint64_t t = SDL_GetTicksNS();
             static int frames = 0;
@@ -3585,7 +3585,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 if (!opt.empty()) text.draw(x + w - 24 * k, ry + 6 * k, fs, dim, opt, 2);
             }
         }
-        // F1 を押している間は F キーの説明（LR2 と同じ）。BMjoy に無い操作は灰色
+        // F1 を押している間は F キーの説明（LR2 と同じ）。RD に無い操作は灰色
         if (SDL_GetKeyboardState(nullptr)[SDL_SCANCODE_F1]) {
             const SDL_Color on{255, 255, 255, 255}, off{110, 110, 110, 255};
             const Entry* cur = current();
@@ -3674,8 +3674,8 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     break;
                 case 2:
                     // フォルダを開き、中の最初のフォルダ（難易度表なら「全曲」）も開いて、曲が並ぶ一覧にする。
-                    // BMJ_SCROLL_TEST に名前を書けば、一番上のその名前を含むフォルダを開く
-                    if (const char* want = dev_env("BMJ_SCROLL_TEST"); want && std::string(want) != "1") {
+                    // RD_SCROLL_TEST に名前を書けば、一番上のその名前を含むフォルダを開く
+                    if (const char* want = dev_env("RD_SCROLL_TEST"); want && std::string(want) != "1") {
                         const std::vector<Entry>& top = *stack.back().list;
                         for (size_t i = 0; i < top.size(); ++i)
                             if (top[i].kind == Entry::Kind::Folder && top[i].label.find(want) != std::string::npos) {
@@ -3713,13 +3713,13 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 ++test_step;
             }
         }
-        if (const char* shot = dev_env("BMJ_SELECT_SHOT"); shot && settled) {
-            // 開発用：更新が終わってから1枚保存して終わる。BMJ_SELECT_KEYS の文字で操作してから撮る（d=下 e=決定）
+        if (const char* shot = dev_env("RD_SELECT_SHOT"); shot && settled) {
+            // 開発用：更新が終わってから1枚保存して終わる。RD_SELECT_KEYS の文字で操作してから撮る（d=下 e=決定）
             static size_t step = 0;
-            const char* keys = dev_env("BMJ_SELECT_KEYS");
+            const char* keys = dev_env("RD_SELECT_KEYS");
             if (keys && keys[step]) {
-                // 開発用：BMJ_SELECT_FRAMES を指定すると、操作している間の毎フレームを保存する
-                if (const char* dir = dev_env("BMJ_SELECT_FRAMES")) {
+                // 開発用：RD_SELECT_FRAMES を指定すると、操作している間の毎フレームを保存する
+                if (const char* dir = dev_env("RD_SELECT_FRAMES")) {
                     static int frame_no = 0;
                     char name[512];
                     std::snprintf(name, sizeof(name), "%s/f%04d.bmp", dir, frame_no++);
@@ -3739,9 +3739,9 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                     to_keyconfig = true;
                 }
                 else if (k == 'f') {
-                    // BMJ_SELECT_FIND の名前を含むコース・譜面を探し、そこまでフォルダを開いてカーソルを置く
+                    // RD_SELECT_FIND の名前を含むコース・譜面を探し、そこまでフォルダを開いてカーソルを置く
                     // 「@ファイル」なら、ファイルに書いた名前（UTF-8）。日本語は環境変数で渡すと化けることがある
-                    std::string want = dev_env("BMJ_SELECT_FIND") ? dev_env("BMJ_SELECT_FIND") : "";
+                    std::string want = dev_env("RD_SELECT_FIND") ? dev_env("RD_SELECT_FIND") : "";
                     if (!want.empty() && want[0] == '@') {
                         std::ifstream f(fs::u8path(want.substr(1)), std::ios::binary);
                         std::getline(f, want);
@@ -3885,4 +3885,4 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     std::printf("選曲画面を出る：裏の読み込みを待った %.0f ms\n", (SDL_GetTicksNS() - exit_t0) / 1e6);
 }
 
-}  // namespace bmj
+}  // namespace rd

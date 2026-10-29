@@ -12,7 +12,7 @@
 
 struct ma_device;
 
-namespace bmj {
+namespace rd {
 
 struct ScheduledSound {
     int64_t frame = 0;  // 譜面の時刻0からのフレーム位置
@@ -200,4 +200,4 @@ private:
     std::atomic<double> clock_rate_{1.0};
 };
 
-}  // namespace bmj
+}  // namespace rd

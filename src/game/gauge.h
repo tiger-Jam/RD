@@ -3,7 +3,7 @@
 
 #include <array>
 
-namespace bmj {
+namespace rd {
 
 // 判定の番号はLR2と同じ（0=空POOR, 1=POOR, 2=BAD, 3=GOOD, 4=GREAT, 5=PGREAT）
 enum Judge : int { kEmptyPoor = 0, kPoor = 1, kBad = 2, kGood = 3, kGreat = 4, kPGreat = 5 };
@@ -48,4 +48,4 @@ int clear_type(const GaugeSet& g, int gauge_type, int total_notes, int note_curr
 // スキンに渡すランプ（LR2 のスキンは 5 までしか知らないので、PERFECT は FULL COMBO として見せる）
 inline int skin_lamp(int lamp) { return lamp > 5 ? 5 : lamp; }
 
-}  // namespace bmj
+}  // namespace rd

@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 // エフェクタの種類（LR2: fxtype。スキンのボタン 20〜22 のコマもこの並び）
 enum FxType { kFxOff = 0, kFxReverb, kFxEcho, kFxLowPass, kFxHighPass, kFxFlanger, kFxChorus, kFxDistortion, kFxTypeCount };
@@ -140,4 +140,4 @@ bool mix_resampled(const float* pcm, int64_t frames, double& pos, double step, b
 // rate は再生の速さ（FREQ・SPEED）、latency_us は出力の遅れ（実時間）
 int64_t song_time_at(int64_t base_us, int64_t dt_us, int64_t latency_us, double rate);
 
-}  // namespace bmj
+}  // namespace rd

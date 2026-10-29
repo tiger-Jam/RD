@@ -11,7 +11,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -20,7 +20,7 @@ std::string read_file(const fs::path& p) {
     return f ? std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>()) : std::string();
 }
 
-// ファイルの更新日時（BMjoy の曲データベースの値）を UNIX 秒にする（LR2 の song.date）
+// ファイルの更新日時（RD の曲データベースの値）を UNIX 秒にする（LR2 の song.date）
 int64_t to_unix(int64_t file_ticks) {
 #if defined(_MSC_VER) || (defined(__cpp_lib_chrono) && __cpp_lib_chrono >= 201907L && !defined(__APPLE__))
     auto ft = std::chrono::file_clock::time_point(std::chrono::file_clock::duration(file_ticks));
@@ -250,4 +250,4 @@ std::vector<std::string> CustomFolderQuery::run(const CustomFolderDef& def, std:
     return out;
 }
 
-}  // namespace bmj
+}  // namespace rd

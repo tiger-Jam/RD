@@ -1,6 +1,6 @@
-# BMjoy の標準スキン：プレー画面（7 鍵、1P 側、1920×1080）
-#   python3 tools/skin/bmjoy/play.py <出力先の LR2 のフォルダ>
-# 出力先の LR2files/Theme/BMjoy/Play/ に、絵（PNG）と play_7.lr2skin を書く
+# RD の標準スキン：プレー画面（7 鍵、1P 側、1920×1080）
+#   python3 tools/skin/rd/play.py <出力先の LR2 のフォルダ>
+# 出力先の LR2files/Theme/RD/Play/ に、絵（PNG）と play_7.lr2skin を書く
 import os
 import shutil
 import sys
@@ -27,7 +27,7 @@ GRAY = '#8a8a8a'
 LINE = '#333333'
 # ---------------------------------------------------------------------------
 
-THEME = 'LR2files\\Theme\\BMjoy\\Play\\'
+THEME = 'LR2files\\Theme\\RD\\Play\\'
 
 lane_x, x = [], LANE_X
 for t in LANES:
@@ -48,7 +48,7 @@ def text(s, size, color, stroke=None, italic=False, weight=700, align='center', 
 
 
 def build(out):
-    root = os.path.join(out, 'LR2files', 'Theme', 'BMjoy', 'Play')
+    root = os.path.join(out, 'LR2files', 'Theme', 'RD', 'Play')
     csv = Csv()
     images = []  # #IMAGE の順（番号はこの並び）
 
@@ -170,7 +170,7 @@ def build(out):
     gr_ui = image('ui.png')
 
     # ---- CSV ----
-    csv.raw('#INFORMATION,0,BMjoy,BMjoy,' + THEME + 'thumb.png')
+    csv.raw('#INFORMATION,0,RD,RD,' + THEME + 'thumb.png')
     csv.raw('#RESOLUTION,2')
     csv.raw('#ENDOFHEADER')
     image_at = len(csv.lines)  # #IMAGE の行は、絵を全部作ってからここに入れる

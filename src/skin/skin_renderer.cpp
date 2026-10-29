@@ -11,7 +11,7 @@
 
 #include "stb_truetype.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -484,7 +484,7 @@ void SkinRenderer::add_judge_combo(const Lr2Skin& skin, const PlaySkinState& st)
     const SkinObject* jp = &skin.nowjudge[0][judge];
     const SkinObject* cp = &skin.nowcombo[0][judge];
     if (jp->dst.empty()) return;
-    // 判定の表示の大きさ（BMjoy）：判定の文字は真ん中を中心に、コンボの数字は判定の文字からの位置ごと大きくする
+    // 判定の表示の大きさ（RD）：判定の文字は真ん中を中心に、コンボの数字は判定の文字からの位置ごと大きくする
     SkinObject js, cs;
     if (st.adjust.judge_scale != 100) {
         const float s = st.adjust.judge_scale / 100.0f;
@@ -906,8 +906,8 @@ void SkinRenderer::add_common(const Lr2Skin& skin, const PlaySkinState& st) {
         if (dark == 2 || !dst_on(o.dst, st)) continue;
         add_numbers(o.src, o.dst, st, st.number ? st.number(o.src.op[0]) : -1, 0, 0);
         if (o.src.op[0] == 14) {
-            // 開発用：レーンカバーの数字を描いた値が変わったら書き出す（BMJ_DEBUG_INPUT）
-            static const bool debug = dev_env("BMJ_DEBUG_INPUT") != nullptr;
+            // 開発用：レーンカバーの数字を描いた値が変わったら書き出す（RD_DEBUG_INPUT）
+            static const bool debug = dev_env("RD_DEBUG_INPUT") != nullptr;
             static int last = -1000;
             const int v = st.number ? st.number(14) : -1;
             if (debug && v != last) std::printf("カバーの数字を %d で描いた（%.1f ms）\n", v, st.now_ms), std::fflush(stdout), last = v;
@@ -1140,4 +1140,4 @@ void SkinRenderer::draw_text(const Lr2Skin& skin, Item& it) {
     SDL_RenderTexture(r_, tt.tex, nullptr, &dst);
 }
 
-}  // namespace bmj
+}  // namespace rd

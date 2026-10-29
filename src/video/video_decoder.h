@@ -13,7 +13,7 @@
 
 #include "video/video_backend.h"
 
-namespace bmj {
+namespace rd {
 
 class VideoDecoder {
 public:
@@ -54,4 +54,4 @@ private:
     int key_ = -1;
 };
 
-}  // namespace bmj
+}  // namespace rd

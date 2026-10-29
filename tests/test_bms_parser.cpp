@@ -10,7 +10,7 @@
 #include "util/lr2_random.h"
 #include "util/path.h"
 
-using namespace bmj;
+using namespace rd;
 
 static BmsParseResult parse(const std::string& s, uint32_t seed = 1) {
     BmsParseOptions o;
@@ -332,7 +332,7 @@ void touch(const std::filesystem::path& p) {
 
 TEST(find_alt_sound_and_image) {
     namespace fs = std::filesystem;
-    fs::path root = fs::temp_directory_path() / "bmj_test_altsound";
+    fs::path root = fs::temp_directory_path() / "rd_test_altsound";
     fs::remove_all(root);
     fs::path song = root / "song";
     touch(song / "a.flac");
@@ -387,7 +387,7 @@ TEST(decode_flac) {
         0xb8
     };
     namespace fs = std::filesystem;
-    fs::path p = fs::temp_directory_path() / "bmj_test.flac";
+    fs::path p = fs::temp_directory_path() / "rd_test.flac";
     std::ofstream(p, std::ios::binary).write(reinterpret_cast<const char*>(kFlac), sizeof(kFlac));
     Sample s;
     std::string err;

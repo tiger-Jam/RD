@@ -5,10 +5,10 @@
 #   tools/release/make_release.sh <版> [--publish] [--notes "変わったこと"]
 #
 #   版は 年.月.日.番号（例 2026.10.30.1）
-#   --publish を付けると、受け取り口（~/bmjoy-service/update）に置き、配った BMjoy が次の起動で入れ替えるようにする
+#   --publish を付けると、受け取り口（~/rd-service/update）に置き、配った RD が次の起動で入れ替えるようにする
 #
-# 出来たもの：~/bmjoy-service/releases/<版>/（BMjoy-<版>.zip・BMjoy-<版>-update.zip・.pdb）
-# Windows では C:\Users\<ユーザー>\BMjoy-release\<版> で作業する（開発のフォルダとは分ける）。INFINITAS が動いていたら止まる
+# 出来たもの：~/rd-service/releases/<版>/（RD-<版>.zip・RD-<版>-update.zip・.pdb）
+# Windows では C:\Users\<ユーザー>\RD-release\<版> で作業する（開発のフォルダとは分ける）。INFINITAS が動いていたら止まる
 set -euo pipefail
 VER=${1:?版を指定してください（例 2026.10.30.1）}
 shift
@@ -23,9 +23,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "版は 年.月.日.番号 の形で"; exit 2; }
-HOST=${BMJ_WIN_HOST:-win}
-DEV_DIR=${BMJ_WIN_DIR:-BMjoy-beta20261022}
-SERVICE=${BMJOY_SERVICE_ROOT:-$HOME/bmjoy-service}
+HOST=${RD_WIN_HOST:-win}
+DEV_DIR=${RD_WIN_DIR:-BMjoy-beta20261022}
+SERVICE=${RD_SERVICE_ROOT:-$HOME/rd-service}
 cd "$(dirname "$0")/../.."
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then echo "コミットしていない変更がある（公開版は HEAD から作る）"; exit 1; fi
 
@@ -43,33 +43,33 @@ python3 -I tools/release/strip_cites.py "$tmp/src/tests"
 (cd "$tmp/src" && COPYFILE_DISABLE=1 tar --no-xattrs -cf "$tmp/src.tar" .)
 
 WINHOME=$(ps '$env:USERPROFILE' | tr -d '\r')
-ROOT="$WINHOME\\BMjoy-release"
+ROOT="$WINHOME\\RD-release"
 ps "New-Item -ItemType Directory -Force '$ROOT\\$VER\\src' | Out-Null; Remove-Item -Recurse -Force '$ROOT\\$VER\\src\\*', '$ROOT\\$VER\\out' -ErrorAction SilentlyContinue; exit 0"
-scp -q -o BatchMode=yes "$tmp/src.tar" "$HOST:BMjoy-release/$VER/src.tar"
+scp -q -o BatchMode=yes "$tmp/src.tar" "$HOST:RD-release/$VER/src.tar"
 ps "tar -xf '$ROOT\\$VER\\src.tar' -C '$ROOT\\$VER\\src'; Remove-Item '$ROOT\\$VER\\src.tar'"
-# 素材は開発のフォルダの BMjoy の置き場から（名前を変える前なら LR2files）
-ASSETS="$WINHOME\\$DEV_DIR\\build\\RelWithDebInfo\\BMjoyfiles"
+# 素材は開発のフォルダの RD の置き場から（名前を変える前なら LR2files）
+ASSETS="$WINHOME\\$DEV_DIR\\build\\RelWithDebInfo\\RDfiles"
 ps "if (-not (Test-Path '$ASSETS')) { exit 1 }" || ASSETS="$WINHOME\\$DEV_DIR\\build\\RelWithDebInfo\\LR2files"
 ps "powershell -ExecutionPolicy Bypass -File '$ROOT\\$VER\\src\\tools\\windows\\release.ps1' -Ver $VER -Root '$ROOT' -Assets '$ASSETS'" | tee "$tmp/release.log"
 grep -q RELEASE_OK "$tmp/release.log" || { echo "Windows で作れなかった"; exit 1; }
 
 OUT="$SERVICE/releases/$VER"
 mkdir -p "$OUT"
-for f in "BMjoy-$VER.zip" "BMjoy-$VER-update.zip" BMjoybody.pdb bmjoy.pdb; do
-    scp -q -o BatchMode=yes "$HOST:BMjoy-release/$VER/out/$f" "$OUT/$f"
+for f in "RD-$VER.zip" "RD-$VER-update.zip" RDbody.pdb rd.pdb; do
+    scp -q -o BatchMode=yes "$HOST:RD-release/$VER/out/$f" "$OUT/$f"
 done
-SHA=$(shasum -a 256 "$OUT/BMjoy-$VER-update.zip" | cut -d' ' -f1)
+SHA=$(shasum -a 256 "$OUT/RD-$VER-update.zip" | cut -d' ' -f1)
 echo "作った：$OUT"
 ls -lh "$OUT"
 
 if [ "$PUBLISH" = 1 ]; then
     mkdir -p "$SERVICE/update"
-    cp "$OUT/BMjoy-$VER-update.zip" "$OUT/BMjoy-$VER.zip" "$SERVICE/update/"
-    python3 -I - "$SERVICE/update/latest.json" "$VER" "BMjoy-$VER-update.zip" "$SHA" "$NOTES" <<'EOF'
+    cp "$OUT/RD-$VER-update.zip" "$OUT/RD-$VER.zip" "$SERVICE/update/"
+    python3 -I - "$SERVICE/update/latest.json" "$VER" "RD-$VER-update.zip" "$SHA" "$NOTES" <<'EOF'
 import json, sys
 path, ver, url, sha, notes = sys.argv[1:6]
 with open(path + ".tmp", "w", encoding="utf-8") as f:
-    json.dump({"version": ver, "url": url, "sha256": sha, "notes": notes, "full": f"BMjoy-{ver}.zip"}, f, ensure_ascii=False)
+    json.dump({"version": ver, "url": url, "sha256": sha, "notes": notes, "full": f"RD-{ver}.zip"}, f, ensure_ascii=False)
 import os
 os.replace(path + ".tmp", path)
 EOF

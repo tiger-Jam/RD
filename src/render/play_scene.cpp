@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -219,4 +219,4 @@ void draw_result(SDL_Renderer* r, const Chart& chart, const JudgeEngine& judge) 
     text(r, 40, 440, {150, 150, 150, 255}, "ENTER / ESC: QUIT   F5: RETRY");
 }
 
-}  // namespace bmj
+}  // namespace rd

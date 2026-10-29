@@ -8,7 +8,7 @@
 #include "db/difficulty_table.h"
 #include "db/song_db.h"
 
-namespace bmj {
+namespace rd {
 
 struct CourseStage {
     std::string md5, sha256;
@@ -41,4 +41,4 @@ bool course_option(const Course* course, int op, bool& out);
 bool course_number(const Course* course, int id, int& out);
 bool course_text(const Course* course, int id, std::string& out);
 
-}  // namespace bmj
+}  // namespace rd

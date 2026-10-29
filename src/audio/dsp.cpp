@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
@@ -402,4 +402,4 @@ int64_t song_time_at(int64_t base_us, int64_t dt_us, int64_t latency_us, double 
     return base_us + static_cast<int64_t>(std::llround(static_cast<double>(dt_us - latency_us) * rate));
 }
 
-}  // namespace bmj
+}  // namespace rd

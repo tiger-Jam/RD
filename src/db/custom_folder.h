@@ -1,5 +1,5 @@
 // LR2 のカスタムフォルダ（.lr2folder と folderinfo.txt）。#COMMAND は LR2 の曲データベースへの SQL の WHERE 句なので、
-// BMjoy の譜面と記録から LR2 と同じ形の表（song・score）をメモリ上に作り、そこで動かす（LR2: songmanage:725 LoadFolderDataFromDB）
+// RD の譜面と記録から LR2 と同じ形の表（song・score）をメモリ上に作り、そこで動かす（LR2: songmanage:725 LoadFolderDataFromDB）
 #pragma once
 
 #include <mutex>
@@ -14,7 +14,7 @@
 struct sqlite3;
 struct sqlite3_stmt;
 
-namespace bmj {
+namespace rd {
 
 struct CustomFolderDef {
     std::string title, category, command;
@@ -29,7 +29,7 @@ struct CustomFolderNode {
 };
 
 bool parse_lr2folder(const std::string& path, CustomFolderDef& out);
-// 置き場を読む。難易度表の管理ツールが作ったもの（playlist_entry を見るもの）と、BMjoy が自分で持つもの
+// 置き場を読む。難易度表の管理ツールが作ったもの（playlist_entry を見るもの）と、RD が自分で持つもの
 // （NEW SONG・コースなど __ で囲んだ特別な語のもの）は読まない
 std::vector<CustomFolderNode> load_custom_folders(const std::string& dir);
 
@@ -58,4 +58,4 @@ private:
     mutable std::unordered_map<std::string, std::vector<std::string>> cache_;  // 鍵は #COMMAND と #MAXTRACKS
 };
 
-}  // namespace bmj
+}  // namespace rd

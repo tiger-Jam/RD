@@ -1,6 +1,6 @@
 #include "app/keyconfig_editor.h"
 
-namespace bmj {
+namespace rd {
 
 int keyconfig_item_button(int item) {
     if (item >= 1 && item <= 7) return kKey1 + item - 1;
@@ -35,7 +35,7 @@ int order_index(int item) {
 
 bool KeyconfigEditor::click(int type, int dir) {
     if (type >= 101 && type <= 139) {
-        // 項目を選ぶ。BMjoy に無い項目（2P）は押せない
+        // 項目を選ぶ。RD に無い項目（2P）は押せない
         if (keyconfig_item_button(type - 100) < 0) return false;
         item_ = type - 100;
         return true;
@@ -77,7 +77,7 @@ void KeyconfigEditor::reset_default() {
 void KeyconfigEditor::clear_all() { clear_bindings(cfg_); }
 
 bool KeyconfigEditor::option(int op, bool& v) const {
-    // 400 / 401 / 402 = 鍵盤モードが 7 鍵 / 9 ボタン / 5 鍵。BMjoy は 7 鍵だけ
+    // 400 / 401 / 402 = 鍵盤モードが 7 鍵 / 9 ボタン / 5 鍵。RD は 7 鍵だけ
     if (op < 400 || op > 402) return false;
     v = op == 400;
     return true;
@@ -102,4 +102,4 @@ bool KeyconfigEditor::button(int type, int& v) const {
     return true;
 }
 
-}  // namespace bmj
+}  // namespace rd

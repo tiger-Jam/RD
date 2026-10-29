@@ -3,7 +3,7 @@
   "id": "exhard",
   "name": "EX-HARD",
   "version": "3",
-  "author": "BMjoy",
+  "author": "RD",
   "description": "GAUGE に EX-HARD を足す",
   "gauges": [
     {

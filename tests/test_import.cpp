@@ -7,6 +7,7 @@
 #include "app/config.h"
 #include "app/lr2_import.h"
 #include "app/service.h"
+#include "game/replay.h"
 #include "chart/bmson_parser.h"
 #include "chart/osu_parser.h"
 #include "audio/system_sound.h"
@@ -14,7 +15,7 @@
 #include "util/data_dir.h"
 #include "util/hash.h"
 
-using namespace bmj;
+using namespace rd;
 
 static const char* kOsu7 = R"(osu file format v14
 
@@ -159,7 +160,7 @@ TEST(bmson_old_and_reject) {
 // LR2 のスキンのカスタマイズ（LR2files/SkinCustomize/<スキンのパスの MD5>.xml）を引き継ぐ
 TEST(lr2_skin_customize) {
     namespace fs = std::filesystem;
-    fs::path root = fs::temp_directory_path() / "bmj_test_skincustom";
+    fs::path root = fs::temp_directory_path() / "rd_test_skincustom";
     fs::remove_all(root);
     fs::create_directories(root / "LR2files" / "Theme" / "T" / "parts");
     fs::create_directories(root / "LR2files" / "SkinCustomize");
@@ -185,7 +186,7 @@ TEST(lr2_skin_customize) {
 // LR2 のスキンの位置の調整（SkinCustomize の shift・size など）も引き継ぐ
 TEST(lr2_skin_adjust) {
     namespace fs = std::filesystem;
-    fs::path root = fs::temp_directory_path() / "bmj_test_skinadjust";
+    fs::path root = fs::temp_directory_path() / "rd_test_skinadjust";
     fs::remove_all(root);
     fs::create_directories(root / "LR2files" / "Theme" / "P");
     fs::create_directories(root / "LR2files" / "SkinCustomize");
@@ -207,12 +208,12 @@ TEST(lr2_skin_adjust) {
     fs::remove_all(root);
 }
 
-// LR2 の素材を BMjoy のフォルダに写し、設定の中の素材の場所を写した先に直す
+// LR2 の素材を RD のフォルダに写し、設定の中の素材の場所を写した先に直す
 TEST(import_copy_lr2_assets) {
     namespace fs = std::filesystem;
-    fs::path root = fs::temp_directory_path() / "bmj_asset_test";
+    fs::path root = fs::temp_directory_path() / "rd_asset_test";
     fs::remove_all(root);
-    fs::path lr2 = root / "LR2", other = root / "LR2b", dst = root / "BMjoy";
+    fs::path lr2 = root / "LR2", other = root / "LR2b", dst = root / "RD";
     auto put = [](const fs::path& p) {
         fs::create_directories(p.parent_path());
         std::ofstream(p, std::ios::binary) << "x";
@@ -231,15 +232,15 @@ TEST(import_copy_lr2_assets) {
     AssetCopyResult r = copy_lr2_assets(cfg, dst.string());
     CHECK(r.ok);
     CHECK_EQ(r.files, 4);
-    CHECK(fs::exists(dst / "BMjoyfiles/Theme/WMIX/select/select.lr2skin"));
-    CHECK(fs::exists(dst / "BMjoyfiles/Bgm/a/select.wav"));
-    CHECK(fs::exists(dst / "BMjoyfiles/CustomFolder/clear.lr2folder"));
-    CHECK(!fs::exists(dst / "BMjoyfiles/Database"));  // 曲・記録のデータは写さない
+    CHECK(fs::exists(dst / "RDfiles/Theme/WMIX/select/select.lr2skin"));
+    CHECK(fs::exists(dst / "RDfiles/Bgm/a/select.wav"));
+    CHECK(fs::exists(dst / "RDfiles/CustomFolder/clear.lr2folder"));
+    CHECK(!fs::exists(dst / "RDfiles/Database"));  // 曲・記録のデータは写さない
     CHECK(fs::path(cfg.lr2_root) == dst);
-    CHECK(fs::path(cfg.select_skin) == dst / "BMjoyfiles/Theme/WMIX/select/select.lr2skin");
-    CHECK(fs::path(cfg.sound_set) == dst / "BMjoyfiles/Sound/lr2.lr2ss");
+    CHECK(fs::path(cfg.select_skin) == dst / "RDfiles/Theme/WMIX/select/select.lr2skin");
+    CHECK(fs::path(cfg.sound_set) == dst / "RDfiles/Sound/lr2.lr2ss");
     CHECK(cfg.skin_custom.count(cfg.select_skin) == 1 && cfg.skin_custom.size() == 1);
-    CHECK(fs::path(cfg.custom_folder_dirs[0]) == dst / "BMjoyfiles/CustomFolder");
+    CHECK(fs::path(cfg.custom_folder_dirs[0]) == dst / "RDfiles/CustomFolder");
     CHECK(fs::exists(lr2 / "LR2files/Database/song.db"));  // 元はそのまま
     // 2 回目は写すものが無い
     AppConfig again;
@@ -262,12 +263,13 @@ TEST(portable_paths) {
     namespace fs = std::filesystem;
     const std::string base = base_dir();
     CHECK(!base.empty());
-    const std::string skin = (fs::u8path(base) / "BMjoyfiles" / "Theme" / "x" / "play.lr2skin").string();
+    const std::string skin = (fs::u8path(base) / "RDfiles" / "Theme" / "x" / "play.lr2skin").string();
     const std::string rel = to_portable(skin);
-    CHECK(rel == (fs::path("BMjoyfiles") / "Theme" / "x" / "play.lr2skin").string());
+    CHECK(rel == (fs::path("RDfiles") / "Theme" / "x" / "play.lr2skin").string());
     CHECK(from_portable(rel) == fs::path(skin).lexically_normal().string());
-    // 前の名前（LR2files）で書いたパスは、今の置き場に読み替える
+    // 前の名前（LR2files・BMjoyfiles）で書いたパスは、今の置き場に読み替える
     CHECK(from_portable((fs::path("LR2files") / "Theme" / "x" / "play.lr2skin").string()) == fs::path(skin).lexically_normal().string());
+    CHECK(from_portable((fs::path("BMjoyfiles") / "Theme" / "x" / "play.lr2skin").string()) == fs::path(skin).lexically_normal().string());
     CHECK(to_portable(base) == ".");
     CHECK(fs::path(from_portable(".")).lexically_normal() == fs::path(base).lexically_normal());
     // 実行ファイルのフォルダの外は絶対パスのまま
@@ -296,15 +298,15 @@ TEST(lr2_settings_and_keyconfig) {
     CHECK_EQ(cfg.gauge, 1);
     CHECK_EQ(cfg.random, 2);
     CHECK_EQ(cfg.judge_timing, 53);
-    CHECK_EQ(cfg.target, 0);  // 8 は IR のターゲット（BMjoy には無い）
+    CHECK_EQ(cfg.target, 0);  // 8 は IR のターゲット（RD には無い）
     CHECK(cfg.score_graph && cfg.vsync && cfg.folder_lamp);
     CHECK_EQ(cfg.vol_master, 80);
     CHECK_EQ(cfg.sound_fx.eq[3], -5);
     CHECK_EQ(cfg.select_difficulty, 2);
-    CHECK_EQ(cfg.select_sort, 1);  // ソートは写さない（BMjoy は beatoraja の並び）
+    CHECK_EQ(cfg.select_sort, 1);  // ソートは写さない（RD は beatoraja の並び）
     CHECK_EQ(cfg.input_interval, 20);
 
-    fs::path dir = fs::temp_directory_path() / "bmj_test_lr2_keyconfig";
+    fs::path dir = fs::temp_directory_path() / "rd_test_lr2_keyconfig";
     fs::create_directories(dir);
     {
         std::ofstream f(dir / "keyconfig.xml");
@@ -335,7 +337,7 @@ TEST(lr2_settings_and_keyconfig) {
 
 // サウンドセットの音を選んでいる #CUSTOMFILE の項目（BGM のセットで、選曲と決定を別々に選ぶのに使う）
 TEST(sound_set_custom_item) {
-    const std::filesystem::path f = std::filesystem::temp_directory_path() / "bmj_ss_item.lr2ss";
+    const std::filesystem::path f = std::filesystem::temp_directory_path() / "rd_ss_item.lr2ss";
     std::ofstream(f) << "#CUSTOMFILE,SE,LR2files/Sound/se/*,default\n"
                         "#CUSTOMFILE,BGM,LR2files/Sound/bgm/*,default\n"
                         "#SELECT,LR2files/Sound/bgm/*/select.wav\n"
@@ -349,7 +351,7 @@ TEST(sound_set_custom_item) {
 
 // 設定の文字の値（プレイヤーの ID など）は、書いて読めば同じ。前の版が値の後ろに書いた説明は値に入れない
 TEST(config_string_values) {
-    const std::filesystem::path f = std::filesystem::temp_directory_path() / "bmj_cfg_strings.txt";
+    const std::filesystem::path f = std::filesystem::temp_directory_path() / "rd_cfg_strings.txt";
     AppConfig a;
     a.player = "3tzami", a.lr2_player = "ichi";
     CHECK(a.save(f.string()));
@@ -361,4 +363,22 @@ TEST(config_string_values) {
     CHECK(c.load(f.string()));
     CHECK(c.lr2_player.empty() && c.player == "me");
     std::filesystem::remove(f);
+}
+
+// 前の名前（BMjoy）のときに書いたリプレイ（1 行目が BMJREPLAY）も読める
+TEST(replay_old_name) {
+    namespace fs = std::filesystem;
+    const fs::path p = fs::temp_directory_path() / "rd_replay_old.rdr";
+    Replay r;
+    r.sha256 = "ab";
+    CHECK(save_replay(p.string(), r));
+    std::ifstream in(p, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    CHECK(text.rfind("RDREPLAY ", 0) == 0);
+    std::ofstream(p, std::ios::binary | std::ios::trunc) << "BMJ" << text.substr(2);
+    Replay back;
+    CHECK(load_replay(p.string(), back));
+    CHECK(back.sha256 == "ab");
+    fs::remove(p);
 }

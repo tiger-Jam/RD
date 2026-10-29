@@ -8,7 +8,7 @@
 #include <string>
 #include <thread>
 
-namespace bmj {
+namespace rd {
 
 struct HttpRequest {
     std::string method, path;               // path は ? の手前（パーセントエンコードのまま）
@@ -46,4 +46,4 @@ bool url_decode(const std::string& in, std::string& out);
 // パーセントエンコードする（英数字と - _ . ~ / 以外）
 std::string url_encode(const std::string& in);
 
-}  // namespace bmj
+}  // namespace rd

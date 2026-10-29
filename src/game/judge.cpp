@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 
-namespace bmj {
+namespace rd {
 
 JudgeWindows JudgeWindows::for_rank(int rank) {
     // #RANK ごとの PGREAT・GREAT・GOOD の幅（VERY HARD・HARD・NORMAL・EASY）。範囲の外は NORMAL
@@ -542,4 +542,4 @@ int JudgeEngine::tail_judge(int lane, int dm) const {
     return demote(j);
 }
 
-}  // namespace bmj
+}  // namespace rd

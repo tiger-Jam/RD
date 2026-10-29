@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Mac から Windows 機（ssh win）で BMjoy をビルド・起動する。
+# Mac から Windows 機（ssh win）で RD をビルド・起動する。
 #
 #   tools/win.sh sync             いまの作業ツリーを送ってビルドする
-#   tools/win.sh run [引数...]     Windows のデスクトップで BMjoybody.exe を起動する（ログイン中の画面に出る）
+#   tools/win.sh run [引数...]     Windows のデスクトップで RDbody.exe を起動する（ログイン中の画面に出る）
 #   tools/win.sh test             Windows でユニットテストを動かす
 #   tools/win.sh log              最後に起動したときのログを見る
 #   tools/win.sh shot [引数...]    起動して画面を1枚撮り、Mac に持ってくる（開発用）
 #
-# Windows 側のフォルダは C:\Users\<ユーザー>\BMjoy-beta20261022（変えるなら BMJ_WIN_DIR）
+# Windows 側のフォルダは C:\Users\<ユーザー>\BMjoy-beta20261022（変えるなら RD_WIN_DIR）
 set -euo pipefail
-HOST=${BMJ_WIN_HOST:-win}
-DIR=${BMJ_WIN_DIR:-BMjoy-beta20261022}
+HOST=${RD_WIN_HOST:-win}
+DIR=${RD_WIN_DIR:-BMjoy-beta20261022}
 cd "$(dirname "$0")/.."
 WINDIR=$(ssh -o BatchMode=yes "$HOST" '$env:USERPROFILE' | tr -d '\r')"\\$DIR"
-EXE="$WINDIR\\build\\RelWithDebInfo\\BMjoybody.exe"
+EXE="$WINDIR\\build\\RelWithDebInfo\\RDbody.exe"
 
 ps() { ssh -o BatchMode=yes "$HOST" "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $1"; }
 # 引数が空のときは -ArgLine を付けない（powershell -File は空の文字列を「引数なし」とみなして失敗する）
@@ -40,11 +40,11 @@ run)
     ;;
 shot)
     shift
-    ps "New-Item -ItemType Directory -Force '$WINDIR\\run' | Out-Null; Remove-Item '$WINDIR\\run\\shot.bmp' -ErrorAction SilentlyContinue; powershell -ExecutionPolicy Bypass -File '$WINDIR\\tools\\windows\\launch.ps1' -Exe '$EXE' -WorkDir '$WINDIR\\run' $(argline "$@") -EnvList 'BMJ_SELECT_SHOT=$WINDIR\\run\\shot.bmp;BMJ_KEYCONFIG_SHOT=$WINDIR\\run\\shot.bmp' ; \$t=0; while (-not (Test-Path '$WINDIR\\run\\shot.bmp') -and \$t -lt 120) { Start-Sleep 1; \$t++ }; Start-Sleep 1"
+    ps "New-Item -ItemType Directory -Force '$WINDIR\\run' | Out-Null; Remove-Item '$WINDIR\\run\\shot.bmp' -ErrorAction SilentlyContinue; powershell -ExecutionPolicy Bypass -File '$WINDIR\\tools\\windows\\launch.ps1' -Exe '$EXE' -WorkDir '$WINDIR\\run' $(argline "$@") -EnvList 'RD_SELECT_SHOT=$WINDIR\\run\\shot.bmp;RD_KEYCONFIG_SHOT=$WINDIR\\run\\shot.bmp' ; \$t=0; while (-not (Test-Path '$WINDIR\\run\\shot.bmp') -and \$t -lt 120) { Start-Sleep 1; \$t++ }; Start-Sleep 1"
     scp -q -o BatchMode=yes "$HOST:$DIR/run/shot.bmp" ./win_shot.bmp && echo "win_shot.bmp に保存した"
     ;;
 test)
-    ps "cd '$WINDIR'; .\\build\\RelWithDebInfo\\bmj_tests.exe | Select-Object -Last 1"
+    ps "cd '$WINDIR'; .\\build\\RelWithDebInfo\\rd_tests.exe | Select-Object -Last 1"
     ;;
 log)
     scp -q -o BatchMode=yes "$HOST:$DIR/run/last_run.log" /dev/stdout

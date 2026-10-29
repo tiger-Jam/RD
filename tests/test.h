@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace bmjtest {
+namespace rdtest {
 
 struct Case {
     const char* name;
@@ -20,20 +20,20 @@ struct Register {
     Register(const char* name, std::function<void()> fn) { registry().push_back({name, std::move(fn)}); }
 };
 
-}  // namespace bmjtest
+}  // namespace rdtest
 
-#define BMJ_CAT2(a, b) a##b
-#define BMJ_CAT(a, b) BMJ_CAT2(a, b)
+#define RD_CAT2(a, b) a##b
+#define RD_CAT(a, b) RD_CAT2(a, b)
 #define TEST(name)                                                              \
     static void name();                                                         \
-    static bmjtest::Register BMJ_CAT(reg_, name)(#name, name);                  \
+    static rdtest::Register RD_CAT(reg_, name)(#name, name);                  \
     static void name()
 
 #define CHECK(cond)                                                                          \
     do {                                                                                     \
         if (!(cond)) {                                                                       \
             std::printf("  失敗 %s:%d: %s\n", __FILE__, __LINE__, #cond);                    \
-            ++bmjtest::g_failures;                                                           \
+            ++rdtest::g_failures;                                                           \
         }                                                                                    \
     } while (0)
 
@@ -44,6 +44,6 @@ struct Register {
         if (!(va_ == vb_)) {                                                                 \
             std::printf("  失敗 %s:%d: %s == %s (%s vs %s)\n", __FILE__, __LINE__, #a, #b,    \
                         std::to_string(va_).c_str(), std::to_string(vb_).c_str());           \
-            ++bmjtest::g_failures;                                                           \
+            ++rdtest::g_failures;                                                           \
         }                                                                                    \
     } while (0)

@@ -4,7 +4,7 @@
 #include <cmath>
 #include <map>
 
-namespace bmj {
+namespace rd {
 
 static const ScrollSeg* seg_at(const std::vector<ScrollSeg>& scroll, int64_t t) {
     if (scroll.empty()) return nullptr;
@@ -185,4 +185,4 @@ int Chart::judgeable_notes() const {
     return n;
 }
 
-}  // namespace bmj
+}  // namespace rd

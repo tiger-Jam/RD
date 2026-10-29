@@ -14,7 +14,7 @@
 
 #include "input/keyconfig.h"
 
-namespace bmj {
+namespace rd {
 
 struct LaneInput {
     uint64_t time_ns = 0;  // SDL_GetTicksNS() 基準
@@ -123,4 +123,4 @@ private:
     std::map<std::pair<uint32_t, int>, int16_t> axis_prev_;
 };
 
-}  // namespace bmj
+}  // namespace rd

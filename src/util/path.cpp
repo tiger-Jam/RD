@@ -6,7 +6,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -124,4 +124,4 @@ std::string DirIndex::find_image(const std::string& name) const {
     return find_with_exts("../" + name, {"png", "jpg", "bmp"});
 }
 
-}  // namespace bmj
+}  // namespace rd

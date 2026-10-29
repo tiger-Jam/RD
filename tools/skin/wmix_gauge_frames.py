@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-# W-MIX（WMIX_HD）の選曲画面の GAUGE のボタンに、BMjoy の GAS・EX-HARD・ASSIST・CUSTOM1〜9 のコマを足す。
+# W-MIX（WMIX_HD）の選曲画面の GAUGE のボタンに、RD の GAS・EX-HARD・ASSIST・CUSTOM1〜9 のコマを足す。
 #
 #   python3 tools/skin/wmix_gauge_frames.py <スキンの select のフォルダ>
 #
 # フォルダは LR2files/Theme/WMIX_HD/select（select.csv と system/main.png・system/pannel.png がある所）。
-# - system/bmjoy_gauge.png を作る（GAUGE の 18 コマ：0〜5 は元の 6 つ、6=GAS 7=EX-HARD 8=ASSIST 9〜17=CUSTOM1〜9）。
+# - system/rd_gauge.png を作る（GAUGE の 18 コマ：0〜5 は元の 6 つ、6=GAS 7=EX-HARD 8=ASSIST 9〜17=CUSTOM1〜9）。
 #   上が下の欄の帯（68×14 のコマ）、その下が設定パネルの帯（116×21 のコマ）
-# - system/bmjoy_judge.png を作る（設定パネルの左上に置く判定の欄：題が JUDGE の箱と、値 OFF・VERY HARD〜EASY・JUDGE1〜9 の 14 コマ）
+# - system/rd_judge.png を作る（設定パネルの左上に置く判定の欄：題が JUDGE の箱と、値 OFF・VERY HARD〜EASY・JUDGE1〜9 の 14 コマ）
 # - select.csv に #IMAGE を足し、GAUGE のボタン（下の欄 1 つ・パネル 3 つ）をその絵の 18 コマにする。
-#   判定の欄（SP のパネルの左上。BMjoy のボタン 900）とメトロノームの欄（SP のパネルの BATTLE の下。ボタン 902）の行を足す
-# - system/bmjoy_mode.png を作り、ASSIST の欄（ボタン 44）を 7k モードの欄（題 PLAY MODE、値 7K+S・7K）にする
-#   元の select.csv は select.csv.bak-bmjoy に残す（もう書き換えてあれば、絵だけ作り直して行を直す）
+#   判定の欄（SP のパネルの左上。RD のボタン 900）とメトロノームの欄（SP のパネルの BATTLE の下。ボタン 902）の行を足す
+# - system/rd_mode.png を作り、ASSIST の欄（ボタン 44）を 7k モードの欄（題 PLAY MODE、値 7K+S・7K）にする
+#   元の select.csv は select.csv.bak-rd に残す（もう書き換えてあれば、絵だけ作り直して行を直す）
 # 字はスキンのほかのボタン・数字の絵から 1 字ずつ切り出して並べる（字の芯がつながった塊を 1 字とし、周りの縁も含める）。
 # 下の欄の字は白にそろえる。要るもの：ffmpeg。スキンを入れ直してコマが消えたら、もう一度これを流す
 import os
@@ -74,8 +74,8 @@ with tempfile.TemporaryDirectory() as tmp:
     raw_path = os.path.join(tmp, "gauge.raw")
     open(raw_path, "wb").write(img)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{W}x{H}", "-i", raw_path,
-                    os.path.join(SYSTEM, "bmjoy_gauge.png")], check=True)
-print("作った:", os.path.join(SYSTEM, "bmjoy_gauge.png"))
+                    os.path.join(SYSTEM, "rd_gauge.png")], check=True)
+print("作った:", os.path.join(SYSTEM, "rd_gauge.png"))
 
 # --- 判定の欄
 def make_j(u):
@@ -93,7 +93,7 @@ def make_j(u):
 pan_lib["J"] = make_j(pan_lib["U"])
 gap_pan = int(statistics.median([pan_lib["A"].cx0 - pan_lib["H"].cx1 - 1, pan_lib["R"].cx0 - pan_lib["A"].cx1 - 1, pan_lib["D"].cx0 - pan_lib["R"].cx1 - 1]))
 pan_bg = raw(P, 658, 1297, 116, 21)[0:4]
-# 値の帯：OFF、本体の判定（VERY HARD … EASY。BMjoy の kStandardJudgeIds の順）、JUDGE1〜9 の 14 コマ
+# 値の帯：OFF、本体の判定（VERY HARD … EASY。RD の kStandardJudgeIds の順）、JUDGE1〜9 の 14 コマ
 JUDGE_WORDS = ["VERY HARD", "HARD", "NORMAL", "EASY"] + [f"JUDGE{i}" for i in range(1, 10)]
 judge_values = raw(P, 782, 1297, 116, 21)  # OFF（SUDDEN+ の欄の 1 コマ目）
 for wd in JUDGE_WORDS:
@@ -130,8 +130,8 @@ with tempfile.TemporaryDirectory() as tmp:
     raw_path = os.path.join(tmp, "judge.raw")
     open(raw_path, "wb").write(jimg)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{JW}x{JH}", "-i", raw_path,
-                    os.path.join(SYSTEM, "bmjoy_judge.png")], check=True)
-print("作った:", os.path.join(SYSTEM, "bmjoy_judge.png"))
+                    os.path.join(SYSTEM, "rd_judge.png")], check=True)
+print("作った:", os.path.join(SYSTEM, "rd_judge.png"))
 
 # --- メトロノームの欄（SP のパネルの BATTLE の下。DP では DP FLIP の箱がある場所）：題が METRONOME の箱と、値 OFF・ON
 mbox = make_box("METRONOME")
@@ -146,10 +146,10 @@ with tempfile.TemporaryDirectory() as tmp:
     raw_path = os.path.join(tmp, "metro.raw")
     open(raw_path, "wb").write(mimg)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{MW}x{MH}", "-i", raw_path,
-                    os.path.join(SYSTEM, "bmjoy_metronome.png")], check=True)
-print("作った:", os.path.join(SYSTEM, "bmjoy_metronome.png"))
+                    os.path.join(SYSTEM, "rd_metronome.png")], check=True)
+print("作った:", os.path.join(SYSTEM, "rd_metronome.png"))
 
-# --- 7k モードの欄（ASSIST の欄を使う。BMjoy のボタン 44：0 = 7K+S 1 = 7K）
+# --- 7k モードの欄（ASSIST の欄を使う。RD のボタン 44：0 = 7K+S 1 = 7K）
 # 上が設定パネルの箱（ASSIST の紫の箱の題を PLAY MODE に描き替えたもの 142×59）、その下に値 7K+S・7K（パネルの 116×21 のコマ）、
 # その下に下の欄の値（73×14 のコマ）
 title_lib2 = library(title_spec + [((P, 37, 1684, 136, 20), "STYLE", (1, 63))], 120, 1, False)
@@ -180,18 +180,18 @@ with tempfile.TemporaryDirectory() as tmp:
     raw_path = os.path.join(tmp, "mode.raw")
     open(raw_path, "wb").write(aimg)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{AW}x{AH}", "-i", raw_path,
-                    os.path.join(SYSTEM, "bmjoy_mode.png")], check=True)
-print("作った:", os.path.join(SYSTEM, "bmjoy_mode.png"))
+                    os.path.join(SYSTEM, "rd_mode.png")], check=True)
+print("作った:", os.path.join(SYSTEM, "rd_mode.png"))
 
 # --- select.csv を書き換える（Shift_JIS のまま、行の区切りも変えない）
 csv = os.path.join(SELECT, "select.csv")
-backup = csv + ".bak-bmjoy"
+backup = csv + ".bak-rd"
 if not os.path.exists(backup):
     shutil.copyfile(csv, backup)
 data = open(csv, "rb").read()
 nl = b"\r\n" if b"\r\n" in data else b"\n"
 lines = data.split(nl)
-IMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\select\\system\\bmjoy_gauge.png,,,,,,,,,,,,,"
+IMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\select\\system\\rd_gauge.png,,,,,,,,,,,,,"
 gr = gl.add_image_line(lines, IMAGE_LINE)
 changed = 0
 for i, l in enumerate(lines):
@@ -209,9 +209,9 @@ for i, l in enumerate(lines):
     changed += 1
 # 判定の欄：#IMAGE を足し、SP のパネルの左上（DP では RIGHT LANE の箱がある場所）に箱・値のボタン・マウスの光を置く。
 # 前に足した分（目印の行のあいだ）は消してから足し直す
-JIMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\select\\system\\bmjoy_judge.png,,,,,,,,,,,,,"
+JIMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\select\\system\\rd_judge.png,,,,,,,,,,,,,"
 jgr = str(gl.add_image_line(lines, JIMAGE_LINE)).encode()
-BEGIN, END = b"//BMjoy judge begin", b"//BMjoy judge end"
+BEGIN, END = b"//RD judge begin", b"//RD judge end"
 if BEGIN in lines:
     a, b = lines.index(BEGIN), lines.index(END)
     del lines[a:b + 1]
@@ -232,10 +232,10 @@ block = [
     b"#DST_ONMOUSE,0,2000,409,130,144,49,0,125,255,255,255,2,0,0,0,,,,,",
     END,
 ]
-# メトロノームの欄（BMjoy のボタン 902）。SP のパネルの BATTLE の下
-MIMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\select\\system\\bmjoy_metronome.png,,,,,,,,,,,,,"
+# メトロノームの欄（RD のボタン 902）。SP のパネルの BATTLE の下
+MIMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\select\\system\\rd_metronome.png,,,,,,,,,,,,,"
 mgr = str(gl.add_image_line(lines, MIMAGE_LINE)).encode()
-MBEGIN, MEND = b"//BMjoy metronome begin", b"//BMjoy metronome end"
+MBEGIN, MEND = b"//RD metronome begin", b"//RD metronome end"
 if MBEGIN in lines:
     a, b = lines.index(MBEGIN), lines.index(MEND)
     del lines[a:b + 1]
@@ -257,7 +257,7 @@ mblock = [
     MEND,
 ]
 # 7k モードの欄：ASSIST のボタン（下の欄 1 つ・パネルの 1P 側）をその絵のコマにし、パネルの ASSIST の箱の上に PLAY MODE の箱を重ねる（SP と DP）
-AIMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\select\\system\\bmjoy_mode.png,,,,,,,,,,,,,"
+AIMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\select\\system\\rd_mode.png,,,,,,,,,,,,,"
 agr = str(gl.add_image_line(lines, AIMAGE_LINE)).encode()
 for i, l in enumerate(lines):
     f = l.split(b",")
@@ -271,7 +271,7 @@ for i, l in enumerate(lines):
         continue
     lines[i] = b",".join(f)
     changed += 1
-ABEGIN, AEND = b"//BMjoy mode begin", b"//BMjoy mode end"
+ABEGIN, AEND = b"//RD mode begin", b"//RD mode end"
 if ABEGIN in lines:
     a, b = lines.index(ABEGIN), lines.index(AEND)
     del lines[a:b + 1]

@@ -11,7 +11,7 @@
 
 #include "input/keyconfig.h"
 
-namespace bmj {
+namespace rd {
 
 // MIDI のメッセージを入力元（MidiSource）の押した・離したに変える。読み方は LR2 と同じ：
 //   ノートオン（ベロシティ 0 はオフ）・ノートオフ、ピッチベンドは上位 7 ビットが 64 より下なら −、上なら +、64 ならどちらも離す、
@@ -46,4 +46,4 @@ private:
 
 MidiInput& midi_input();
 
-}  // namespace bmj
+}  // namespace rd

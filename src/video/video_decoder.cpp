@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -114,4 +114,4 @@ bool VideoDecoder::take(double t_ms, Frame& out) {
     return got;
 }
 
-}  // namespace bmj
+}  // namespace rd

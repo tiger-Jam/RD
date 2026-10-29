@@ -6,7 +6,7 @@
 #include "mod/script.h"
 #include "test.h"
 
-using namespace bmj;
+using namespace rd;
 namespace fs = std::filesystem;
 
 namespace {
@@ -16,7 +16,7 @@ struct TempMod {
     fs::path root, data;
     ModManifest m;
     TempMod(const std::string& id, const std::string& touches, const std::string& lua) {
-        root = fs::temp_directory_path() / ("bmj_mod_test_" + id);
+        root = fs::temp_directory_path() / ("rd_mod_test_" + id);
         data = root / "data";
         fs::remove_all(root);
         fs::create_directories(root / id);
@@ -38,12 +38,12 @@ TEST(mod_script_sandbox) {
         result = {}
         function on_play_start(info)
           result.io = io == nil and os == nil and dofile == nil and loadfile == nil and load == nil and require == nil
-          result.up = bmj.write_file("../escape.txt", "x") == nil
-          result.abs = bmj.write_file("/tmp/escape.txt", "x") == nil
-          result.ok = bmj.write_file("sub/ok.txt", info.title) == true
-          bmj.write_file("flags.txt", tostring(result.io and result.up and result.abs and result.ok))
+          result.up = rd.write_file("../escape.txt", "x") == nil
+          result.abs = rd.write_file("/tmp/escape.txt", "x") == nil
+          result.ok = rd.write_file("sub/ok.txt", info.title) == true
+          rd.write_file("flags.txt", tostring(result.io and result.up and result.abs and result.ok))
         end
-        function on_draw(s) bmj.draw_rect(1, 2, 3, 4, 0xff0000, 128); bmj.draw_text(5, 6, "x", 20) end
+        function on_draw(s) rd.draw_rect(1, 2, 3, 4, 0xff0000, 128); rd.draw_text(5, 6, "x", 20) end
     )LUA");
     ModScripts s;
     s.load({&t.m}, t.data.string());
@@ -71,7 +71,7 @@ TEST(mod_script_limits) {
     TempMod t("loop", "\"evaluation\"", R"LUA(
         n = 0
         function on_judge(e) n = n + 1; if e.judge == 5 then while true do end end end
-        function on_draw(s) bmj.draw_rect(0, 0, 1, 1) end
+        function on_draw(s) rd.draw_rect(0, 0, 1, 1) end
     )LUA");
     ModScripts s;
     s.load({&t.m}, t.data.string());
@@ -130,9 +130,9 @@ TEST(mod_script_folder_labels) {
 // 公式の MOD「リコメンド」：walkure-offline と同じ地力と確率になる（値は walkure-offline の JS で同じ記録から求めたもの）
 TEST(mod_script_official_walkure) {
     ModManifest m;
-    CHECK(load_mod_manifest(std::string(BMJ_SOURCE_DIR) + "/mods/walkure", m));
+    CHECK(load_mod_manifest(std::string(RD_SOURCE_DIR) + "/mods/walkure", m));
     // モデルの譜面を全部持っていることにし、7 つおきにランプを順に付け、600 番目から 7 つおきは FAILED にする
-    std::ifstream in(std::string(BMJ_SOURCE_DIR) + "/mods/walkure/model.tsv");
+    std::ifstream in(std::string(RD_SOURCE_DIR) + "/mods/walkure/model.tsv");
     std::string line;
     std::getline(in, line);
     std::vector<ChartRecord> charts;
@@ -145,7 +145,7 @@ TEST(mod_script_official_walkure) {
         charts.push_back(c);
     }
     CHECK_EQ(charts.size(), size_t(1252));
-    fs::path data = fs::temp_directory_path() / "bmj_mod_test_walkure";
+    fs::path data = fs::temp_directory_path() / "rd_mod_test_walkure";
     std::vector<std::string> errors;
     auto f = build_mod_folders({&m}, charts, scores, data.string(), &errors);
     CHECK(errors.empty());
@@ -170,8 +170,8 @@ TEST(mod_script_official_walkure) {
 // 公式のスクリプトの MOD が読めて動く（判定の記録を書き出す）
 TEST(mod_script_official_judge_log) {
     ModManifest m;
-    CHECK(load_mod_manifest(std::string(BMJ_SOURCE_DIR) + "/mods/judge-log", m));
-    fs::path data = fs::temp_directory_path() / "bmj_mod_test_judgelog";
+    CHECK(load_mod_manifest(std::string(RD_SOURCE_DIR) + "/mods/judge-log", m));
+    fs::path data = fs::temp_directory_path() / "rd_mod_test_judgelog";
     fs::remove_all(data);
     ModScripts s;
     s.load({&m}, data.string());
@@ -201,8 +201,8 @@ TEST(mod_script_official_judge_log) {
 // 公式のランダムセレクト：譜面のあるフォルダにだけバーを出し、決定すると渡した譜面から 1 つを選ぶ
 TEST(mod_script_official_random_select) {
     ModManifest m;
-    CHECK(load_mod_manifest(std::string(BMJ_SOURCE_DIR) + "/mods/random-select", m));
-    fs::path data = fs::temp_directory_path() / "bmj_mod_test_random";
+    CHECK(load_mod_manifest(std::string(RD_SOURCE_DIR) + "/mods/random-select", m));
+    fs::path data = fs::temp_directory_path() / "rd_mod_test_random";
     std::vector<std::string> errors;
     auto bars = mod_folder_bars({&m}, "★18", 3, data.string(), &errors);
     CHECK(errors.empty());
@@ -231,7 +231,7 @@ TEST(mod_script_official_random_select) {
 // 公式の MOD「譜面の傾向」：難易度表 → レベル → 傾向・プレー状況などのフォルダ（中身の無いフォルダは出さない）
 TEST(mod_script_official_constellator) {
     ModManifest m;
-    CHECK(load_mod_manifest(std::string(BMJ_SOURCE_DIR) + "/mods/constellator", m));
+    CHECK(load_mod_manifest(std::string(RD_SOURCE_DIR) + "/mods/constellator", m));
     CHECK(m.chart_attr);
     std::vector<ChartRecord> charts(3);
     const char* ids[] = {"a", "b", "c"};
@@ -244,7 +244,7 @@ TEST(mod_script_official_constellator) {
     std::unordered_map<std::string, std::vector<ModTableLevel>> tables;
     for (const char* id : ids) tables[std::string("m") + id] = {{"表", "★", "3", 0, 2}};
     ModChartExtra extra{&attrs, &tables};
-    fs::path data = fs::temp_directory_path() / "bmj_mod_test_constellator";
+    fs::path data = fs::temp_directory_path() / "rd_mod_test_constellator";
     std::vector<std::string> errors;
     auto f = build_mod_folders({&m}, charts, scores, data.string(), &errors, extra);
     CHECK(errors.empty());

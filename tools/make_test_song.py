@@ -84,8 +84,8 @@ def main():
     lines = [
         "#PLAYER 1",
         "#GENRE TEST",
-        "#TITLE BMjoy テスト曲",
-        "#ARTIST BMjoy",
+        "#TITLE RD テスト曲",
+        "#ARTIST RD",
         "#BPM 150",
         "#PLAYLEVEL 1",
         "#RANK 2",

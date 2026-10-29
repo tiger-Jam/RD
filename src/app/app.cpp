@@ -15,14 +15,14 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 // LR2のフォルダ（LR2files があるところ）を探す
 std::string find_lr2_root(const std::string& configured, const char* argv0) {
     std::vector<std::string> cands;
     if (!configured.empty()) cands.push_back(configured);
-    if (const char* env = dev_env("BMJ_LR2_ROOT")) cands.push_back(env);
-    // 実行ファイルの横（LR2 と同じく、BMjoy のフォルダに LR2files を置いて自己完結させる）
+    if (const char* env = dev_env("RD_LR2_ROOT")) cands.push_back(env);
+    // 実行ファイルの横（LR2 と同じく、RD のフォルダに LR2files を置いて自己完結させる）
     if (const char* base = SDL_GetBasePath()) cands.push_back(base);
     cands.push_back(".");
     std::error_code ec;
@@ -35,7 +35,7 @@ std::string find_lr2_root(const std::string& configured, const char* argv0) {
 }
 
 // #RESOLUTION の無いスキンは、画面全体を覆うDST（0,0 から 640x480 / 1280x720 / 1920x1080）を探して解像度を推定する。
-// 見つからなければSD（BMjoyの拡張。OpenLR2は設定の既定値を使う）
+// 見つからなければSD（RDの拡張。OpenLR2は設定の既定値を使う）
 void guess_resolution(Lr2Skin& sk) {
     static const int sizes[3][2] = {{640, 480}, {1280, 720}, {1920, 1080}};
     int hits[3] = {};
@@ -66,7 +66,7 @@ bool App::init(const char* argv0) {
     std::printf("ウィンドウを作っています\n");
     int ww, wh;
     window_size(640, 480, ww, wh);
-    window = SDL_CreateWindow("BMjoy", ww, wh, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    window = SDL_CreateWindow("Revenant Deliria", ww, wh, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     renderer = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
     if (!renderer) {
         std::fprintf(stderr, "ウィンドウを作れない: %s\n", SDL_GetError());
@@ -417,7 +417,7 @@ std::unique_ptr<Lr2Skin> load_skin(App& app, const std::string& configured, cons
     // GPU に送った画像の画素は捨てる（同じ画像を二重に持たない。引き継ぐときや反転するときはファイルから読み直す）
     if (app.cfg.low_memory) release_skin_pixels(*skin);
     app.last_skin = skin.get();
-    if (dev_env("BMJ_TIMING"))
+    if (dev_env("RD_TIMING"))
         std::printf("  スキンの読み込み %.0f ms、GPU に送る %.0f ms\n", (t1 - t0) / 1e6, (SDL_GetTicksNS() - t1) / 1e6);
     return skin;
 }
@@ -467,4 +467,4 @@ void App::load_courseresult_skin(const std::array<bool, 1000>& options) {
                                   *result_renderer);
 }
 
-}  // namespace bmj
+}  // namespace rd

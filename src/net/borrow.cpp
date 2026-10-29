@@ -14,14 +14,14 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
-constexpr const char* kPrefix = "/bmjoy/v1/";
-constexpr const char* kKeyHeader = "X-BMjoy-Key";
+constexpr const char* kPrefix = "/rd/v1/";
+constexpr const char* kKeyHeader = "X-RD-Key";
 constexpr int kMaxFiles = 20000;  // 1 つのフォルダから返すファイルの数の上限
-constexpr const char* kUsedMark = ".bmjoy-used";
+constexpr const char* kUsedMark = ".rd-used";
 constexpr int kFetchThreads = 6;  // 並べて取るファイルの数
 
 std::string lower(std::string s) {
@@ -103,7 +103,7 @@ void BorrowLibrary::build(const std::vector<ChartRecord>& charts) {
 
 HttpResponse BorrowLibrary::handle(const HttpRequest& req, const std::string& key) const {
     // 合言葉が無い配信はしない
-    auto k = req.headers.find("x-bmjoy-key");
+    auto k = req.headers.find("x-rd-key");
     if (key.empty() || k == req.headers.end() || !same_key(k->second, key)) return text(403, "forbidden\n");
     if (req.path.rfind(kPrefix, 0) != 0) return text(404, "not found\n");
     std::string rest;
@@ -291,4 +291,4 @@ void borrow_trim(const std::string& root, int64_t limit, const std::string& keep
     }
 }
 
-}  // namespace bmj
+}  // namespace rd

@@ -1,5 +1,5 @@
-# BMjoy の標準スキン：選曲画面（1920×1080）。飾らない：黒地に白とグレーの文字、細い線だけ
-#   python3 tools/skin/bmjoy/music_select.py <出力先の LR2 のフォルダ>
+# RD の標準スキン：選曲画面（1920×1080）。飾らない：黒地に白とグレーの文字、細い線だけ
+#   python3 tools/skin/rd/music_select.py <出力先の LR2 のフォルダ>
 import os
 import sys
 
@@ -16,11 +16,11 @@ LINE = '#2a2a2a'
 LAMP = {1: '#6a3030', 2: '#5fcf6a', 3: '#4f9cff', 4: '#f2f2f2', 5: '#ffd84a', 6: '#ffffff'}  # FAILED … PERFECT
 # ---------------------------------------------------------------------------
 
-THEME = 'LR2files\\Theme\\BMjoy\\Select\\'
+THEME = 'LR2files\\Theme\\RD\\Select\\'
 
 
 def build(out):
-    root = os.path.join(out, 'LR2files', 'Theme', 'BMjoy', 'Select')
+    root = os.path.join(out, 'LR2files', 'Theme', 'RD', 'Select')
     csv = Csv()
     images = []
 
@@ -64,7 +64,7 @@ def build(out):
     gr_ui = image('ui.png')
 
     # ---- CSV ----
-    csv.raw('#INFORMATION,5,BMjoy,BMjoy,' + THEME + 'thumb.png')
+    csv.raw('#INFORMATION,5,RD,RD,' + THEME + 'thumb.png')
     csv.raw('#RESOLUTION,2')
     csv.raw('#ENDOFHEADER')
     image_at = len(csv.lines)  # #IMAGE の行は、絵を全部作ってからここに入れる

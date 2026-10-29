@@ -1,13 +1,13 @@
 # MOD の作り方
 
-BMjoy の MOD は、1 つのフォルダに定義ファイル `mod.json` と、必要ならスクリプト（Lua 5.4）を入れたものです。
+RD の MOD は、1 つのフォルダに定義ファイル `mod.json` と、必要ならスクリプト（Lua 5.4）を入れたものです。
 DLL などのプログラムは読みません。
 
 ## 置き場所と選び方
 
 | 場所 | 中身 |
 |---|---|
-| 実行ファイルの横の `mods/` | 公式の MOD（BMjoy に付いてくる） |
+| 実行ファイルの横の `mods/` | 公式の MOD（RD に付いてくる） |
 | `LR2files/Mods/ModData/<MOD の id>/` | MOD が書いてよい場所（ここ以外には書けない） |
 
 今は公式の MOD だけを読みます（自分で入れる MOD は読みません）。
@@ -127,7 +127,7 @@ MOD を外せば、ふだんのベストに戻ります。LR2 から引き継い
 （`judge_use`。選ばなければ判定は変わらず、記録も分けません）。記録は、選んだ判定の幅の値ごとに分けて残します。
 幅を変えれば別の記録になり、戻せば前の記録が出ます。名前を変えても記録は同じです。
 設定画面の一覧の頭には、本体の判定（#RANK どおり・VERY HARD・HARD・NORMAL・EASY）が灰色で並びます。選んで「足す」と、その幅から作れます。
-選曲画面では、スキンのボタン 900（BMjoy で足したもの）を押すと、遊ぶ判定を OFF → JUDGE1 → … → JUDGE9 → OFF の順に替えます
+選曲画面では、スキンのボタン 900（RD で足したもの）を押すと、遊ぶ判定を OFF → JUDGE1 → … → JUDGE9 → OFF の順に替えます
 （JUDGE の番号は設定画面の一覧の順。判定は 9 個まで）。W-MIX には `tools/skin/wmix_gauge_frames.py` で設定パネルの左上に欄を足せます。
 
 ## GAS
@@ -240,7 +240,7 @@ mod.json に書いた値は、最初の中身です。
 |---|---|
 | `time_ms` | 曲の時刻 |
 | `lane` | 0 皿、1〜7 鍵盤 |
-| `judge` | 0 空POOR、1 POOR、2 BAD、3 GOOD、4 GREAT、5 PGREAT（`bmj.JUDGE.PGREAT` なども使える） |
+| `judge` | 0 空POOR、1 POOR、2 BAD、3 GOOD、4 GREAT、5 PGREAT（`rd.JUDGE.PGREAT` なども使える） |
 | `name` | `"PGREAT"` など。地雷なら `"MINE"` |
 | `offset_ms` | 押した時刻 − ノーツの時刻（正が遅い）。見逃しなど、ずれが無いときは `nil` |
 | `fast` `mine` `ln_end` | 早かったか・地雷か・LN の終点か |
@@ -296,20 +296,20 @@ return {
 
 見本：`mods/random-select`（ランダムセレクト）。
 
-### bmj の表
+### rd の表
 
 | 関数 | 中身 |
 |---|---|
-| `bmj.log(...)` / `print(...)` | 黒い画面に出す |
-| `bmj.write_file(名前, 文字)` | `LR2files/Mods/ModData/<id>/名前` に書く。書けたら `true`、書けなければ `nil, 理由`。名前には `/` で下のフォルダを付けられる。`..` や絶対パスは使えない |
-| `bmj.append_file(名前, 文字)` | 後ろに足す |
-| `bmj.read_file(名前)` | 自分が書いたファイルを読む（無ければ `nil`） |
-| `bmj.read_mod_file(名前)` | MOD のフォルダの中のファイルを読む（設定や画像の情報など） |
-| `bmj.time()` | 今の時刻（UNIX 秒） |
-| `bmj.date(書式, 時刻)` | 日時の文字（書式は C の strftime。既定 `"%Y-%m-%d %H:%M:%S"`） |
-| `bmj.draw_rect(x, y, w, h, 色, 不透明度)` | 四角を描く（`on_draw` の中だけ）。色は `0xRRGGBB`、不透明度は 0〜255 |
-| `bmj.draw_text(x, y, 文字, 大きさ, 色, 不透明度, 揃え)` | 文字を描く。揃えは 0 左、1 中央、2 右 |
-| `bmj.id` | この MOD の id |
+| `rd.log(...)` / `print(...)` | 黒い画面に出す |
+| `rd.write_file(名前, 文字)` | `LR2files/Mods/ModData/<id>/名前` に書く。書けたら `true`、書けなければ `nil, 理由`。名前には `/` で下のフォルダを付けられる。`..` や絶対パスは使えない |
+| `rd.append_file(名前, 文字)` | 後ろに足す |
+| `rd.read_file(名前)` | 自分が書いたファイルを読む（無ければ `nil`） |
+| `rd.read_mod_file(名前)` | MOD のフォルダの中のファイルを読む（設定や画像の情報など） |
+| `rd.time()` | 今の時刻（UNIX 秒） |
+| `rd.date(書式, 時刻)` | 日時の文字（書式は C の strftime。既定 `"%Y-%m-%d %H:%M:%S"`） |
+| `rd.draw_rect(x, y, w, h, 色, 不透明度)` | 四角を描く（`on_draw` の中だけ）。色は `0xRRGGBB`、不透明度は 0〜255 |
+| `rd.draw_text(x, y, 文字, 大きさ, 色, 不透明度, 揃え)` | 文字を描く。揃えは 0 左、1 中央、2 右 |
+| `rd.id` | この MOD の id |
 
 ### 使えるもの・制限
 

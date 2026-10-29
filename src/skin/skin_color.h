@@ -8,7 +8,7 @@
 
 #include "skin/lr2_skin.h"
 
-namespace bmj {
+namespace rd {
 
 // #SRC_IMAGE の部品の種類（タイマーから決める）
 enum class SkinImagePart { Frame, Bomb, Hold, Beam, Key, JudgeFx, GaugeFx };
@@ -45,4 +45,4 @@ int apply_skin_colors(Lr2Skin& sk, const std::vector<SkinColorFilter>& filters);
 // from の (x, y, w, h) を写した絵を sk の画像に足して、その番号を返す（写せなければ -1）。from は sk の画像でもよい
 int add_skin_crop(Lr2Skin& sk, const SkinImage& from, int x, int y, int w, int h);
 
-}  // namespace bmj
+}  // namespace rd

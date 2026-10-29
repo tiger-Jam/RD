@@ -1,4 +1,4 @@
-// 曲フォルダの監視（BMjoy の拡張。LR2 は起動時か F8 でしか読み直さない）。
+// 曲フォルダの監視（RD の拡張。LR2 は起動時か F8 でしか読み直さない）。
 // 曲フォルダの下でファイルが増えた・変わった・消えたら、そのフォルダを覚えておき、変化が落ち着いてから渡す。
 // Windows は ReadDirectoryChangesW、macOS は FSEvents。ほかの OS では何もしない
 #pragma once
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 class FolderWatcher {
 public:
@@ -37,4 +37,4 @@ private:
     std::chrono::steady_clock::time_point last_{};
 };
 
-}  // namespace bmj
+}  // namespace rd

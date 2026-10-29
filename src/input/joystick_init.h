@@ -9,7 +9,7 @@
 #include <vector>
 #include <thread>
 
-namespace bmj {
+namespace rd {
 
 class JoystickInit {
 public:
@@ -77,4 +77,4 @@ private:
 // アプリ全体で1つ
 JoystickInit& joystick_init();
 
-}  // namespace bmj
+}  // namespace rd

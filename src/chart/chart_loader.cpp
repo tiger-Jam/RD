@@ -8,7 +8,7 @@
 #include "util/path.h"
 #include "util/text.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 std::string ext_of(const std::string& path) {
@@ -45,4 +45,4 @@ BmsParseResult parse_chart_file(const std::string& path, const BmsParseOptions& 
     return r;
 }
 
-}  // namespace bmj
+}  // namespace rd

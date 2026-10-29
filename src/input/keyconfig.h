@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 // LR2のボタン番号に対応（鍵盤1〜7、皿の2方向、START、SELECT）
 enum Button : int {
@@ -32,7 +32,7 @@ struct Binding {
 
 struct KeyConfig {
     std::array<std::vector<Binding>, kButtonCount> buttons;
-    // アナログ皿（BMjoyの拡張。LR2は軸を方向ボタンとしてしか読まない）。-1 なら使わない
+    // アナログ皿（RDの拡張。LR2は軸を方向ボタンとしてしか読まない）。-1 なら使わない
     int analog_axis = -1;
     bool analog_invert = false;
     int analog_release_ms = 100;  // 皿が止まってから離したとみなすまでの時間
@@ -64,4 +64,4 @@ bool parse_binding(std::string_view s, Binding& b);
 // 設定ファイルの置き場所（macOS なら ~/Library/Application Support/BMjoy/keyconfig.txt）
 std::string keyconfig_path();
 
-}  // namespace bmj
+}  // namespace rd

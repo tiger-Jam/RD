@@ -15,7 +15,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -466,4 +466,4 @@ std::vector<TableCourse> read_lr2_courses(const std::string& path) {
     return out;
 }
 
-}  // namespace bmj
+}  // namespace rd

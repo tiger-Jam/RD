@@ -13,7 +13,7 @@
 #include "skin/lr2_skin.h"
 #include "skin/skin_renderer.h"
 
-namespace bmj {
+namespace rd {
 
 struct PlayContext {
     const Chart* chart = nullptr;
@@ -97,4 +97,4 @@ struct PlayContext {
     std::array<bool, 1000> load_options() const;
 };
 
-}  // namespace bmj
+}  // namespace rd

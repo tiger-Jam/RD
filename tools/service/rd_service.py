@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# BMjoy の受け取り口（Mac mini で動かす）。tailscale funnel で外に出し、配った BMjoy が使う。
+# RD の受け取り口（Mac mini で動かす）。tailscale funnel で外に出し、配った RD が使う。
 #   GET  /update/latest.json     新しい版の情報（tools/service/publish.sh が置く）
 #   GET  /update/<ファイル>       新しい版の zip
 #   POST /log?client=&name=&version=   ログ（本文がファイルの中身）。logs/<client>/<name> に置く
-# funnel の置き方によって頭に /bmjoy が付いてくるので、付いていても付いていなくても受ける。
+# funnel の置き方によって頭に /rd が付いてくるので、付いていても付いていなくても受ける。
 # 127.0.0.1 だけで待ち受ける（外からは funnel を通してだけ届く）
 import os
 import re
@@ -11,11 +11,11 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-ROOT = os.path.expanduser(os.environ.get("BMJOY_SERVICE_ROOT", "~/bmjoy-service"))
+ROOT = os.path.expanduser(os.environ.get("RD_SERVICE_ROOT", "~/rd-service"))
 UPDATE = os.path.join(ROOT, "update")
 LOGS = os.path.join(ROOT, "logs")
-PORT = int(os.environ.get("BMJOY_SERVICE_PORT", "4570"))
-KEY = "bmjoy-7f3c1a9e"  # BMjoy の app/service.cpp と同じ（配る版に入っているので、知らない送り主を断る程度のもの）
+PORT = int(os.environ.get("RD_SERVICE_PORT", "4570"))
+KEY = "rd-7f3c1a9e"  # RD の app/service.cpp と同じ（配る版に入っているので、知らない送り主を断る程度のもの）
 MAX_UPLOAD = 32 << 20  # 1 個の大きさの上限
 MAX_TOTAL = 4 << 30  # ログ全体の上限（超えたら受けない）
 
@@ -35,13 +35,13 @@ def logs_size():
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "bmjoy-service"
+    server_version = "rd-service"
 
     def path_parts(self):
         u = urlparse(self.path)
         p = u.path
-        if p.startswith("/bmjoy/"):
-            p = p[len("/bmjoy"):]
+        if p.startswith("/rd/"):
+            p = p[len("/rd"):]
         return p, parse_qs(u.query)
 
     def reply(self, code, body=b"", ctype="text/plain; charset=utf-8"):
@@ -83,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
         p, q = self.path_parts()
         if p != "/log":
             return self.reply(404, b"not found")
-        if self.headers.get("X-BMjoy-Key") != KEY:
+        if self.headers.get("X-RD-Key") != KEY:
             return self.reply(403, b"forbidden")
         client = (q.get("client") or [""])[0]
         name = (q.get("name") or [""])[0]
@@ -122,7 +122,7 @@ def main():
     os.makedirs(LOGS, exist_ok=True)
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     srv.daemon_threads = True
-    print(f"bmjoy-service: 127.0.0.1:{PORT} root={ROOT}", flush=True)
+    print(f"rd-service: 127.0.0.1:{PORT} root={ROOT}", flush=True)
     srv.serve_forever()
 
 

@@ -15,7 +15,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -351,4 +351,4 @@ D.parts.forEach((key,p)=>{
     return true;
 }
 
-}  // namespace bmj
+}  // namespace rd

@@ -14,7 +14,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -430,4 +430,4 @@ bool read_file_or_dxa(const std::string& path, std::vector<uint8_t>& out) {
     return false;
 }
 
-}  // namespace bmj
+}  // namespace rd

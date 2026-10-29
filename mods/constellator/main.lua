@@ -48,7 +48,7 @@ local COMPOSITE = {
 local DAY = 24 * 60 * 60
 local function played(c) return (c.playcount or 0) > 0 end
 local function rate(c) return c.notes > 0 and c.exscore / (c.notes * 2) or 0 end
-local function since(days) return function(c) return played(c) and (c.last_played or 0) > 0 and bmj.time() - c.last_played >= days * DAY end end
+local function since(days) return function(c) return played(c) and (c.last_played or 0) > 0 and rd.time() - c.last_played >= days * DAY end end
 
 local PLAY = {
   { "未プレイ", function(c) return not played(c) end },

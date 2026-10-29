@@ -7,7 +7,7 @@
 
 #include "audio/sound_bank.h"
 
-namespace bmj {
+namespace rd {
 
 enum SystemSound : int {
     kSysSelect, kSysExSelect, kSysDecide, kSysExDecide, kSysFolderOpen, kSysFolderClose, kSysPanelOpen,
@@ -24,4 +24,4 @@ std::string system_sound_file(const std::string& lr2_root, const std::string& lr
 // その音（SystemSound）のファイルを選んでいる #CUSTOMFILE の項目の番号（書いた順。無ければ -1）
 int system_sound_custom_item(const std::string& lr2ss_path, int id);
 
-}  // namespace bmj
+}  // namespace rd

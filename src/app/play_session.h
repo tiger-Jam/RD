@@ -11,7 +11,7 @@
 #include "app/course.h"
 #include "game/judge.h"
 
-namespace bmj {
+namespace rd {
 
 // コースの進み具合。run_play が 1 ステージ遊ぶたびに書き換え、次のステージへ持ち越す（LR2: bmsload:537）
 struct CourseRun {
@@ -58,4 +58,4 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt);
 // コースを遊ぶ。ステージごとにプレイとリザルト、最後にコースリザルト
 PlayExit run_course(App& app, const Course& course, PlayOptions opt);
 
-}  // namespace bmj
+}  // namespace rd

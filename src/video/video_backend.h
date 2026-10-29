@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 struct VideoFrame {
     double t_ms = 0;  // 動画の頭からの時刻
@@ -37,4 +37,4 @@ bool load();
 std::unique_ptr<VideoBackend> create();
 }  // namespace ff8
 
-}  // namespace bmj
+}  // namespace rd

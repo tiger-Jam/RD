@@ -22,7 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -59,7 +59,7 @@ void push_event(SDL_Event& e, uint64_t ts) {
     e.common.timestamp = ts;
     bool ok = SDL_PushEvent(&e);
     static int logged = 0;
-    if (dev_env("BMJ_DEBUG_INPUT") && logged < 20)
+    if (dev_env("RD_DEBUG_INPUT") && logged < 20)
         std::printf("RawHid: イベント %u を送った（%s）%s\n", e.type, ok ? "成功" : "失敗", ok ? "" : SDL_GetError()), ++logged;
 }
 
@@ -214,7 +214,7 @@ struct RawHid::Impl {
                 if (a == d->axis_state[v.index]) continue;
                 d->axis_state[v.index] = a;
                 static int axis_logged = 0;
-                if (dev_env("BMJ_DEBUG_INPUT") && axis_logged < 300)
+                if (dev_env("RD_DEBUG_INPUT") && axis_logged < 300)
                     std::printf("RawHid: 軸 %d 生 %lu → %d\n", v.index, val, a), ++axis_logged;
                 SDL_Event e{};
                 e.type = SDL_EVENT_JOYSTICK_AXIS_MOTION;
@@ -230,7 +230,7 @@ struct RawHid::Impl {
         auto self = reinterpret_cast<Impl*>(GetWindowLongPtrW(h, GWLP_USERDATA));
         if (msg == WM_INPUT && self) {
             static int logged = 0;
-            if (dev_env("BMJ_DEBUG_INPUT") && logged < 10) std::printf("RawHid: WM_INPUT を受け取った（%d）\n", ++logged);
+            if (dev_env("RD_DEBUG_INPUT") && logged < 10) std::printf("RawHid: WM_INPUT を受け取った（%d）\n", ++logged);
             self->on_input(reinterpret_cast<HRAWINPUT>(lp), SDL_GetTicksNS());
         } else if (msg == WM_INPUT_DEVICE_CHANGE && self && wp == GIDC_REMOVAL) {
             std::lock_guard<std::mutex> lock(self->mu);
@@ -250,7 +250,7 @@ struct RawHid::Impl {
         WNDCLASSW wc{};
         wc.lpfnWndProc = wndproc;
         wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = L"BMjoyRawHid";
+        wc.lpszClassName = L"RDRawHid";
         RegisterClassW(&wc);
         hwnd = CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -312,16 +312,16 @@ std::vector<RawHidDevice> RawHid::devices() const {
     return out;
 }
 
-}  // namespace bmj
+}  // namespace rd
 
 #else
 
-namespace bmj {
+namespace rd {
 struct RawHid::Impl {};
 void RawHid::start() {}
 void RawHid::stop() {}
 bool RawHid::running() const { return false; }
 std::vector<RawHidDevice> RawHid::devices() const { return {}; }
-}  // namespace bmj
+}  // namespace rd
 
 #endif

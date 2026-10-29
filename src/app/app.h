@@ -22,7 +22,7 @@
 #include "skin/lr2_skin.h"
 #include "skin/skin_renderer.h"
 
-namespace bmj {
+namespace rd {
 
 // LR2のフォルダ（LR2files があるところ）を探す。configured（設定の値）を最初に見る。見つからなければ空
 std::string find_lr2_root(const std::string& configured, const char* argv0);
@@ -112,7 +112,7 @@ struct App {
     // 描画の論理解像度を変える。resize_window ならウィンドウの大きさも合わせる
     void set_view(int w, int h, bool resize_window = true);
     void window_size(int skin_w, int skin_h, int& w, int& h) const;
-    void save_config() const { bmj::save_config(cfg); }
+    void save_config() const { rd::save_config(cfg); }
     // フルスクリーンとウインドウを切り替え、次の起動もその状態で始める
     void toggle_fullscreen();
     // 設定の音量をミキサーに渡す（スライダーで変えたときも呼ぶ）
@@ -121,4 +121,4 @@ struct App {
     void apply_sound_fx() { mixer.set_sound_fx(cfg.sound_fx); }
 };
 
-}  // namespace bmj
+}  // namespace rd

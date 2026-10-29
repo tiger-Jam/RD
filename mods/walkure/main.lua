@@ -9,7 +9,7 @@ local function sigmoid(v) return 1.0 / (1.0 + math.exp(-v)) end
 
 -- model.tsv：1 行目は★の換算表、2 行目からは md5・地力譜面度・難度 4 つ・★の難度 4 つ（- は達成者なし）
 local function load_model()
-  local text = bmj.read_mod_file("model.tsv")
+  local text = rd.read_mod_file("model.tsv")
   if not text then return nil end
   local mapping, model = nil, {}
   for line in text:gmatch("[^\n]+") do

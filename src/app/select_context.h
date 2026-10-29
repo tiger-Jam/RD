@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "skin/bmjoy_buttons.h"
+#include "skin/rd_buttons.h"
 #include "app/config.h"
 #include "app/course.h"
 #include "app/skin_catalog.h"
@@ -14,7 +14,7 @@
 #include "skin/lr2_skin.h"
 #include "skin/skin_renderer.h"
 
-namespace bmj {
+namespace rd {
 
 // LR2files/Config/optionstr.csv（オプションの表示名。#GAUGE,GROOVE,SURVIVAL,... の形）
 struct OptionNames {
@@ -59,7 +59,7 @@ struct SelectContext {
     std::string custom_gauge_name;  // カスタムゲージを選んでいればその名前
     int custom_gauge_frame = -1;    // そのときのゲージのボタンのコマ
     bool no_record = false;         // 記録を残さない MOD を使っている（メトロノーム）
-    int judge_frame = 0;            // 判定の欄（BMjoy のボタン 900）のコマ：0 = OFF、1〜4 = VERY HARD … EASY、5〜13 = JUDGE1〜9
+    int judge_frame = 0;            // 判定の欄（RD のボタン 900）のコマ：0 = OFF、1〜4 = VERY HARD … EASY、5〜13 = JUDGE1〜9
     int favorite = 0;            // カーソルの譜面のお気に入り（ボタン 90。0 / 1 = FAVORITE / 2 = IGNORE）
     bool replay_exists = false;  // カーソルの譜面のリプレイがある（op 196 / 197）
     // レベルバーの最大値（LR2: levelbarflash_5 / _7）。5 鍵の譜面は 5 鍵の値
@@ -83,4 +83,4 @@ struct SelectContext {
 // クリアの記録から LR2 のランク（0=F .. 8=AAA を返す。記録が無ければ -1）
 int select_rank(int exscore, int notes);
 
-}  // namespace bmj
+}  // namespace rd

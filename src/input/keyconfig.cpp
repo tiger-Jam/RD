@@ -13,7 +13,7 @@
 #include "util/data_dir.h"
 #include "util/text.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -260,7 +260,7 @@ bool KeyConfig::load(const std::string& path) {
 bool KeyConfig::save(const std::string& path) const {
     std::ofstream f(path);
     if (!f) return false;
-    f << "# BMjoy キーコンフィグ（bmjoy --keyconfig で編集できる）\n";
+    f << "# RD キーコンフィグ（rd --keyconfig で編集できる）\n";
     f << "# 書式: ボタン = 割り当て | 割り当て ...\n";
     f << "#   key:キー名 / joy:button 番号 / joy:axis 番号+ または 番号- / joy:hat 番号 up|down|left|right\n";
     f << "#   joy2:button 番号 のように joy の後に機器の番号（1 から。つないだ順）を付けると、そのパッドだけに効く\n";
@@ -279,4 +279,4 @@ bool KeyConfig::save(const std::string& path) const {
 
 std::string keyconfig_path() { return player_id().empty() ? data_dir() + "Config/keyconfig.txt" : player_dir() + "keyconfig.txt"; }
 
-}  // namespace bmj
+}  // namespace rd

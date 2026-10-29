@@ -13,7 +13,7 @@
 #include "util/data_dir.h"
 #include "util/hash.h"
 
-using namespace bmj;
+using namespace rd;
 namespace fs = std::filesystem;
 
 TEST(hash_vectors) {
@@ -31,7 +31,7 @@ static void write(const fs::path& p, const std::string& s) {
 }
 
 TEST(song_db_scan_diff) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_songs";
+    fs::path dir = fs::temp_directory_path() / "rd_test_songs";
     fs::remove_all(dir);
     write(dir / "a" / "a.bme", "#TITLE A\n#BPM 120\n#00111:01\n");
     write(dir / "b" / "b.bms", "#TITLE B\n#BPM 120\n#00111:0101\n");
@@ -98,7 +98,7 @@ TEST(song_db_scan_diff) {
 #include "sqlite3.h"
 
 TEST(song_db_import_lr2) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_lr2";
+    fs::path dir = fs::temp_directory_path() / "rd_test_lr2";
     fs::remove_all(dir);
     std::string chart_text = "#TITLE A\n#BPM 120\n#00111:0101\n";
     write(dir / "songs" / "a.bme", chart_text);
@@ -156,7 +156,7 @@ TEST(song_db_import_lr2) {
     CHECK_EQ(sc.exscore, 3);  // PG1×2 + GR1
     CHECK_EQ(sc.bp, 3);
     CHECK_EQ(sc.playcount, 10);
-    // BMjoyで遊ぶと合わせて表示する（ランプは高いほう、回数は足す）
+    // RDで遊ぶと合わせて表示する（ランプは高いほう、回数は足す）
     sdb.save_score(charts[0].sha256, 5, 4, 0, 2);
     CHECK(sdb.get_score(charts[0].sha256, sc));
     CHECK_EQ(sc.clear, 5);
@@ -164,11 +164,11 @@ TEST(song_db_import_lr2) {
     CHECK_EQ(sc.bp, 0);
     CHECK_EQ(sc.playcount, 11);
     CHECK_EQ(sdb.all_scores().size(), size_t(2));  // 手元に無い譜面の分は表示には出ない（コースは出る）
-    // コースの記録は、作者の欄を除いた BMjoy のコースのハッシュで引ける
+    // コースの記録は、作者の欄を除いた RD のコースのハッシュで引ける
     CHECK(sdb.get_score("00000000002" + std::string(21, '0') + md5, sc));
     CHECK_EQ(sc.clear, 3);
     CHECK_EQ(sc.exscore, 15);
-    // プレイヤーの情報を引き継ぎ、累計は LR2 の分に BMjoy で遊んだ分（上の 1 回）を足す
+    // プレイヤーの情報を引き継ぎ、累計は LR2 の分に RD で遊んだ分（上の 1 回）を足す
     CHECK(sdb.lr2_player_info()["name"] == "わたし" && sdb.lr2_player_info()["grade_7"] == "9");
     CHECK_EQ(sdb.player_stats().playcount, 101);
     CHECK_EQ(sdb.own_player_stats().playcount, 1);
@@ -197,7 +197,7 @@ TEST(song_db_import_lr2) {
 }
 
 TEST(song_db_ln_mode_and_course_scores) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_lnmode";
+    fs::path dir = fs::temp_directory_path() / "rd_test_lnmode";
     fs::remove_all(dir);
     write(dir / "ln" / "ln.bms", "#TITLE LN\n#BPM 120\n#00151:0101\n#00112:01\n");
     write(dir / "fixed" / "cn.bms", "#TITLE CN\n#LNMODE 2\n#BPM 120\n#00151:0101\n");
@@ -233,7 +233,7 @@ TEST(song_db_ln_mode_and_course_scores) {
 }
 
 TEST(song_db_import_lr2_songs) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_lr2songs";
+    fs::path dir = fs::temp_directory_path() / "rd_test_lr2songs";
     fs::remove_all(dir);
     std::string seven = "#TITLE S\n#BPM 120\n#00111:01\n";
     write(dir / "songs" / "s" / "s.bms", seven);
@@ -270,7 +270,7 @@ TEST(song_db_import_lr2_songs) {
 
 // 選曲の F8：そのフォルダの下だけを読み直し、ほかのフォルダの変化には触らない。F3 の書き換えも残る
 TEST(song_db_scan_only_under) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_songs_f8";
+    fs::path dir = fs::temp_directory_path() / "rd_test_songs_f8";
     fs::remove_all(dir);
     write(dir / "x" / "a" / "a.bme", "#TITLE A\n#BPM 120\n#00111:01\n");
     write(dir / "y" / "b" / "b.bme", "#TITLE B\n#BPM 120\n#00111:01\n");
@@ -295,7 +295,7 @@ TEST(song_db_scan_only_under) {
 
 // 皿の自動演奏や SCATTER などのプレイは、ランプ・回数・オプション履歴だけを残す（LR2: statplay.cpp:895）
 TEST(song_db_lamp_only) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_lamp_only";
+    fs::path dir = fs::temp_directory_path() / "rd_test_lamp_only";
     fs::remove_all(dir);
     fs::create_directories(dir);
     SongDb db;
@@ -381,7 +381,7 @@ TEST(custom_folder_query) {
 
 // 保存したランダムの配置：同じものは 1 つ、新しい順、譜面ごとに使うのは 1 つまで、消せる
 TEST(song_db_saved_random) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_saved_random";
+    fs::path dir = fs::temp_directory_path() / "rd_test_saved_random";
     fs::remove_all(dir);
     fs::create_directories(dir);
     SongDb db;
@@ -420,7 +420,7 @@ TEST(lr2_export) {
     CHECK(lr2_folder_crc("E:/BMSFolder/torrent") == "bb0358c0");  // 区切りと末尾の違いは同じに
     CHECK(lr2_folder_crc("E:\\BMSFolder\\torrent\\[SHIKI] Crystal palace\\") == "15ae94f");
     CHECK(lr2_folder_crc("E:\\BMSFolder\\Music\\0-9\\1024 (by 風鈴奏)\\") == "4297e3f3");  // 日本語を含むパス
-    fs::path dir = fs::temp_directory_path() / "bmj_lr2_export";
+    fs::path dir = fs::temp_directory_path() / "rd_lr2_export";
     fs::remove_all(dir);
     std::vector<ChartRecord> charts(2);
     charts[0].path = "E:/BMSFolder/torrent/[SHIKI] Crystal palace/a.bme", charts[0].folder = "E:/BMSFolder/torrent/[SHIKI] Crystal palace";
@@ -464,7 +464,7 @@ TEST(lr2_export) {
 
 // プレイヤーを分ける：前の songs.db の記録は、最初に開いたプレイヤーの score.db へ移る。別のプレイヤーの記録は別
 TEST(song_db_players) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_players";
+    fs::path dir = fs::temp_directory_path() / "rd_test_players";
     fs::remove_all(dir);
     write(dir / "songs" / "a.bme", "#TITLE A\n#BPM 120\n#00111:0101\n");
     const std::string songs = (dir / "songs.db").string();
@@ -479,7 +479,7 @@ TEST(song_db_players) {
         db.open(songs);
         return db.all_charts()[0].sha256;
     }();
-    set_player_id("bmj_test_player_a");
+    set_player_id("rd_test_player_a");
     fs::remove_all(fs::u8path(player_dir()));
     {
         SongDb db;
@@ -491,7 +491,7 @@ TEST(song_db_players) {
         CHECK_EQ(db.own_player_stats().playcount, 1);
     }
     const std::string dir_a = player_dir();
-    set_player_id("bmj_test_player_b");
+    set_player_id("rd_test_player_b");
     fs::remove_all(fs::u8path(player_dir()));
     {
         SongDb db;
@@ -502,7 +502,7 @@ TEST(song_db_players) {
         CHECK(db.get_score(sha, r) && r.clear == 2);
         CHECK_EQ(db.all_charts().size(), size_t(1));  // 譜面は共通
     }
-    set_player_id("bmj_test_player_a");
+    set_player_id("rd_test_player_a");
     {
         SongDb db;
         CHECK(db.open(songs));
@@ -510,7 +510,7 @@ TEST(song_db_players) {
         CHECK(db.get_score(sha, r) && r.clear == 4);  // A の記録は A のまま
     }
     fs::remove_all(fs::u8path(dir_a));
-    set_player_id("bmj_test_player_b");
+    set_player_id("rd_test_player_b");
     fs::remove_all(fs::u8path(player_dir()));
     set_player_id("");
     fs::remove_all(dir);
@@ -518,7 +518,7 @@ TEST(song_db_players) {
 
 // 譜面の傾向：曲フォルダを読むと分析し、書き出したものを別の曲データベースに入れられる（手元の結果は置き換えない）
 TEST(song_db_chart_attr_bundle) {
-    fs::path dir = fs::temp_directory_path() / "bmj_test_attr";
+    fs::path dir = fs::temp_directory_path() / "rd_test_attr";
     fs::remove_all(dir);
     std::string bms = "#BPM 160\n";
     static const char* ch[] = {"11", "13", "15", "19", "12", "14", "18"};

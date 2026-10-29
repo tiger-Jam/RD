@@ -24,12 +24,12 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
 // 受け取る側が、知らない送り主からのものを断るための合言葉（配る版に入っているので秘密ではない）
-constexpr const char* kServiceKey = "bmjoy-7f3c1a9e";
+constexpr const char* kServiceKey = "rd-7f3c1a9e";
 constexpr size_t kMaxUpload = 32u << 20;  // 送るファイルの大きさの上限
 
 std::string service_url(const AppConfig& cfg) {
@@ -96,8 +96,8 @@ void upload_logs_async(const AppConfig& cfg) {
             if (data.size() > kMaxUpload) data.resize(kMaxUpload);
             std::string reply, err;
             const std::string name = f.filename().string();
-            if (!http_post(url + "?client=" + id + "&name=" + url_escape(name) + "&version=" + url_escape(kBmjVersion), data, reply, err,
-                           {{"X-BMjoy-Key", kServiceKey}, {"Content-Type", "application/octet-stream"}})) {
+            if (!http_post(url + "?client=" + id + "&name=" + url_escape(name) + "&version=" + url_escape(kRdVersion), data, reply, err,
+                           {{"X-RD-Key", kServiceKey}, {"Content-Type", "application/octet-stream"}})) {
                 std::printf("ログを送れない: %s\n", err.c_str());
                 return;  // つながらないときは、次に起動したときにまとめて送る
             }
@@ -132,7 +132,7 @@ int compare_versions(const std::string& a, const std::string& b) {
 
 UpdateInfo check_update(const AppConfig& cfg) {
     UpdateInfo u;
-    if (std::string(kBmjVersion) == "dev") return u.error = "開発中の版", u;
+    if (std::string(kRdVersion) == "dev") return u.error = "開発中の版", u;
     std::string body;
     const std::string base = service_url(cfg);
     if (!http_get(base + "/update/latest.json", body, u.error)) return u;
@@ -149,7 +149,7 @@ UpdateInfo check_update(const AppConfig& cfg) {
     yyjson_doc_free(doc);
     if (u.version.empty() || u.url.empty() || u.sha256.size() != 64) return u.error = "更新の情報が読めない", u;
     if (u.url.find("://") == std::string::npos) u.url = base + "/update/" + u.url;  // 置き場からの相対
-    u.available = compare_versions(u.version, kBmjVersion) > 0;
+    u.available = compare_versions(u.version, kRdVersion) > 0;
     return u;
 }
 
@@ -248,4 +248,4 @@ bool apply_update(const UpdateInfo& u, const std::function<void(const std::strin
 #endif
 }
 
-}  // namespace bmj
+}  // namespace rd

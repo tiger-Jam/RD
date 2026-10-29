@@ -4,7 +4,7 @@
 #include "game/lane_option.h"
 #include "test.h"
 
-using namespace bmj;
+using namespace rd;
 
 namespace {
 Note note(int lane, int ms, int end_ms = -1) {

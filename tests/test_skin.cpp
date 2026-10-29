@@ -11,7 +11,7 @@
 #include "skin/skin_compose.h"
 #include "test.h"
 
-using namespace bmj;
+using namespace rd;
 
 static SkinDst dst_of(std::initializer_list<std::pair<int, float>> keys, int loop, int acc = 0) {
     SkinDst d;
@@ -74,7 +74,7 @@ TEST(skin_src_frame) {
 
 // 手元に WMIX_HD があるときだけ：選曲スキンのバーとマウスの部品が読めること
 TEST(skin_wmix_select_bar) {
-    std::string root = std::string(BMJ_SOURCE_DIR) + "/参考に/LR2beta3 2";
+    std::string root = std::string(RD_SOURCE_DIR) + "/参考に/LR2beta3 2";
     std::string path = root + "/LR2files/Theme/WMIX_HD/select/select.lr2skin";
     SkinHeader h;
     if (!read_skin_header(root, path, h)) return;
@@ -120,7 +120,7 @@ std::string with_newline(const std::string& text, const std::string& nl) {
 
 // 改行が CRLF・LF・CR のどれでも、#IF の入れ子が同じに読める（素の #ENDIF は 6 文字でも読む）
 TEST(skin_line_endings_if_nesting) {
-    auto root = skin_test_dir("bmj_test_skin_nl");
+    auto root = skin_test_dir("rd_test_skin_nl");
     const std::string text =
         "#INFORMATION,0,T,me\n#ENDOFHEADER\n"
         "#IF,10\n#IF,11\n#SRC_IMAGE,0,0,0,0,1,1,1,1,0,0\n#ENDIF\n#SRC_IMAGE,0,0,0,0,1,1,1,1,0,0\n#ENDIF\n"
@@ -142,7 +142,7 @@ TEST(skin_line_endings_if_nesting) {
 
 // #FLIPRESULT / #DISABLEFLIP は読んだ時点で op 350/351 を書き換え、後に書いた方が勝つ（LR2 標準リザルトの RESULT SIDE）
 TEST(skin_flipresult_in_order) {
-    auto root = skin_test_dir("bmj_test_skin_flip");
+    auto root = skin_test_dir("rd_test_skin_flip");
     const std::string text =
         "#INFORMATION,7,T,me\n#ENDOFHEADER\n"
         "#IF,911,\n#DISABLEFLIP,\n#ENDIF,\n#IF,912,\n#FLIPRESULT,\n#ENDIF,\n"
@@ -176,7 +176,7 @@ TEST(skin_flipresult_in_order) {
 
 // #CUSTOMFILE の候補：フォルダは名前のまま、ファイルは最初の '.' の手前まで。txt は除き、最後に RANDOM
 TEST(skin_customfile_candidates) {
-    auto root = skin_test_dir("bmj_test_skin_cf");
+    auto root = skin_test_dir("rd_test_skin_cf");
     std::filesystem::create_directories(root / "parts" / "frame.v2");
     for (const char* n : {"a.png", "b.x.png", "readme.txt"}) std::ofstream(root / "parts" / n) << "x";
     std::ofstream(root / "test.lr2skin") << "#INFORMATION,0,T,me\n#CUSTOMFILE,All,parts\\*,b\n"
@@ -197,7 +197,7 @@ TEST(skin_customfile_candidates) {
 
 // パスの終わりの " は、LR2（Windows のファイル検索）と同じく無いものとして探す。拡張子の大文字小文字も見ない
 TEST(skin_customfile_trailing_quote) {
-    auto root = skin_test_dir("bmj_test_skin_quote");
+    auto root = skin_test_dir("rd_test_skin_quote");
     std::filesystem::create_directories(root / "parts");
     for (const char* n : {"#RED.PNG", "BLUE.PNG"}) std::ofstream(root / "parts" / n) << "x";
     std::ofstream(root / "test.lr2skin") << "#INFORMATION,0,T,me\n#CUSTOMFILE,Flash,.\\parts\\*.png\",#RED\n";
@@ -215,7 +215,7 @@ TEST(skin_customfile_trailing_quote) {
 
 // #CUSTOMFILE は名前で残すので、候補のファイルが増えても選択がずれない。古い形式（番号）も読める
 TEST(skin_custom_choice_by_name) {
-    auto root = skin_test_dir("bmj_test_skin_cfname");
+    auto root = skin_test_dir("rd_test_skin_cfname");
     std::filesystem::create_directories(root / "parts");
     for (const char* n : {"b.png", "c.png"}) std::ofstream(root / "parts" / n) << "x";
     std::string skin = (root / "test.lr2skin").string();
@@ -393,7 +393,7 @@ TEST(skin_compose_dummy_is_blank) {
 
 // 部品の絵を選んでいる #CUSTOMFILE が分かる（画像を読まずに読んだスキンで）
 TEST(skin_part_customs) {
-    auto root = skin_test_dir("bmj_test_skin_partcf");
+    auto root = skin_test_dir("rd_test_skin_partcf");
     for (const char* d : {"note", "bomb", "bg"}) {
         std::filesystem::create_directories(root / d);
         for (const char* n : {"a.png", "b.png"}) std::ofstream(root / d / n) << "x";
@@ -419,7 +419,7 @@ TEST(skin_part_customs) {
 
 // 部品ごとの絵の種類は config.txt に残る
 TEST(skin_parts_config_custom) {
-    auto root = skin_test_dir("bmj_test_skin_partcfg");
+    auto root = skin_test_dir("rd_test_skin_partcfg");
     AppConfig a;
     a.skin_parts["host.lr2skin"].from["bomb"] = "w.lr2skin";
     a.skin_parts["host.lr2skin"].custom["bomb"][12] = "splash blue";
@@ -437,7 +437,7 @@ TEST(skin_parts_config_custom) {
 
 // 判定の表示の大きさは config.txt に残る。前の版の 11 個の行は 100% として読む
 TEST(skin_adjust_judge_scale_config) {
-    auto root = skin_test_dir("bmj_test_skin_adjcfg");
+    auto root = skin_test_dir("rd_test_skin_adjcfg");
     const std::string path = (root / "config.txt").string();
     AppConfig a;
     a.skin_adjust["host.lr2skin"].judge_scale = 135;

@@ -15,7 +15,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -63,7 +63,7 @@ std::string dir_name(const std::string& dir) {
 // LR2 のノーツ数（LR2 の数え方とは細かく違う譜面がある。手元の LR2 の song.db とは 7 割ほどが同じ）
 int lr2_notes(const ChartRecord& c) { return c.notes; }
 
-// BMjoy のコースの鍵（頭の 32 文字が、11 文字目の種類のほかは 0。続けてステージの md5）
+// RD のコースの鍵（頭の 32 文字が、11 文字目の種類のほかは 0。続けてステージの md5）
 bool is_course_key(const std::string& k) {
     if (k.size() <= 32 || k.size() % 32 != 0) return false;
     for (size_t i = 0; i < 32; ++i)
@@ -262,7 +262,7 @@ bool export_lr2_files(const SongDb& db, const std::string& database_dir, const s
     Lr2Carry carry{db.lr2_player_info(), db.lr2_course_keys()};
     if (player.empty())
         if (auto it = carry.player.find("id"); it != carry.player.end()) player = it->second;
-    if (player.empty()) player = player_id().empty() ? "BMjoy" : player_id();
+    if (player.empty()) player = player_id().empty() ? "RD" : player_id();
     std::vector<ChartRecord> charts = db.all_charts();
     fill_difficulties(charts);  // LR2 は #DIFFICULTY の無い譜面の難易度を補って入れている
     if (songs && !export_lr2_song_db(database_dir + "/song.db", charts, roots, error)) return false;
@@ -270,4 +270,4 @@ bool export_lr2_files(const SongDb& db, const std::string& database_dir, const s
                              error);
 }
 
-}  // namespace bmj
+}  // namespace rd

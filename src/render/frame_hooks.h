@@ -6,7 +6,7 @@
 
 #include <functional>
 
-namespace bmj {
+namespace rd {
 
 // キーの監視を始める。on_shot はスクリーンショットを保存したときに呼ぶ（シャッターの音を鳴らす）
 void frame_hooks_install(std::function<void()> on_shot);
@@ -20,4 +20,4 @@ void frame_target_set(SDL_Renderer* r, int w, int h);
 // 1 フレームを出す（frame_hooks_before_present、拡大、SDL_RenderPresent）。各画面は SDL_RenderPresent の代わりにこれを呼ぶ
 void frame_present(SDL_Renderer* r);
 
-}  // namespace bmj
+}  // namespace rd

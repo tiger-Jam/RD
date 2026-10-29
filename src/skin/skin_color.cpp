@@ -5,7 +5,7 @@
 #include <map>
 #include <tuple>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -214,4 +214,4 @@ int apply_skin_colors(Lr2Skin& sk, const std::vector<SkinColorFilter>& filters) 
     return count;
 }
 
-}  // namespace bmj
+}  // namespace rd

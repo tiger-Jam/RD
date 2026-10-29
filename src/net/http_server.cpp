@@ -24,7 +24,7 @@ using socklen_t = int;
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -233,4 +233,4 @@ void HttpServer::serve(intptr_t sock) {
     close_socket(sock);
 }
 
-}  // namespace bmj
+}  // namespace rd

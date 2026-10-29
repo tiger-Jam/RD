@@ -15,7 +15,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -197,10 +197,10 @@ private:
         lua_setfield(L_, -2, "JUDGE");
         lua_pushstring(L_, id_.c_str());
         lua_setfield(L_, -2, "id");
-        lua_setglobal(L_, "bmj");
+        lua_setglobal(L_, "rd");
     }
 
-    // bmj.log(...)：黒い画面に出す
+    // rd.log(...)：黒い画面に出す
     static int l_log(lua_State* L) {
         int n = lua_gettop(L);
         luaL_Buffer b;
@@ -261,7 +261,7 @@ private:
         if (!ok) lua_pushnil(L);
         return 1;
     }
-    // bmj.read_file(name)：自分が書いたファイル。bmj.read_mod_file(name)：MOD のフォルダのファイル
+    // rd.read_file(name)：自分が書いたファイル。rd.read_mod_file(name)：MOD のフォルダのファイル
     static int l_read_file(lua_State* L) { return read_impl(L, self(L)->data_dir_); }
     static int l_read_mod_file(lua_State* L) { return read_impl(L, self(L)->dir_); }
 
@@ -269,7 +269,7 @@ private:
         lua_pushinteger(L, static_cast<lua_Integer>(std::time(nullptr)));
         return 1;
     }
-    // bmj.date(書式, 時刻)：strftime と同じ書式（既定 "%Y-%m-%d %H:%M:%S"、時刻の既定は今）
+    // rd.date(書式, 時刻)：strftime と同じ書式（既定 "%Y-%m-%d %H:%M:%S"、時刻の既定は今）
     static int l_date(lua_State* L) {
         const char* fmt = luaL_optstring(L, 1, "%Y-%m-%d %H:%M:%S");
         std::time_t t = static_cast<std::time_t>(luaL_optinteger(L, 2, static_cast<lua_Integer>(std::time(nullptr))));
@@ -285,7 +285,7 @@ private:
         return 1;
     }
 
-    // bmj.draw_rect(x, y, w, h, 色 0xRRGGBB, 不透明度 0〜255)
+    // rd.draw_rect(x, y, w, h, 色 0xRRGGBB, 不透明度 0〜255)
     static int l_draw_rect(lua_State* L) {
         ModDrawCmd c;
         c.kind = ModDrawCmd::Kind::Rect;
@@ -297,7 +297,7 @@ private:
         if (s->draw_sink && s->draw_sink->size() < 4096) s->draw_sink->push_back(c);
         return 0;
     }
-    // bmj.draw_text(x, y, 文字, 大きさ, 色, 不透明度, 揃え 0 左 1 中央 2 右)
+    // rd.draw_text(x, y, 文字, 大きさ, 色, 不透明度, 揃え 0 左 1 中央 2 右)
     static int l_draw_text(lua_State* L) {
         lua_Number x = luaL_checknumber(L, 1), y = luaL_checknumber(L, 2);
         size_t len = 0;
@@ -657,4 +657,4 @@ std::string mod_pick_chart(const ModManifest& m, const ModBar& bar, const std::s
     return picked;
 }
 
-}  // namespace bmj
+}  // namespace rd

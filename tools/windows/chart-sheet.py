@@ -1,5 +1,5 @@
 # 難易度表ごとに、持っている譜面と持っていない譜面を Excel の表（.xlsx）にする。
-#   BMjoybody.exe --list-charts "*" --tables-file <集める表の一覧> > charts.tsv
+#   RDbody.exe --list-charts "*" --tables-file <集める表の一覧> > charts.tsv
 #   py -3 chart-sheet.py charts.tsv <ミラーの索引 mirror-index.tsv> <書き出す .xlsx>
 # 最初のシートは表ごとの数（譜面・持っている・持っていない）、そのあとに表ごとのシート
 # （レベル・曲名・作者・持っているか・URL1〜3・md5）。URL は持っていない譜面だけ。その譜面が載っているどの表の差分の URL、

@@ -8,7 +8,7 @@
 #include "input/midi.h"
 #include "test.h"
 
-using namespace bmj;
+using namespace rd;
 
 static SDL_Event key_event(SDL_Scancode sc, bool down, uint64_t ms) {
     SDL_Event e{};
@@ -90,7 +90,7 @@ TEST(keyconfig_roundtrip) {
     c.analog_axis = 2;
     c.analog_invert = true;
     c.analog_release_ms = 70;
-    std::string path = (std::filesystem::temp_directory_path() / "bmj_keyconfig_test.txt").string();
+    std::string path = (std::filesystem::temp_directory_path() / "rd_keyconfig_test.txt").string();
     CHECK(c.save(path));
     KeyConfig d;
     CHECK(d.load(path));
@@ -157,7 +157,7 @@ TEST(keyconfig_labels) {
 }
 
 TEST(keyconfig_editor_items) {
-    // LR2 の項目の番号 → BMjoy のボタン
+    // LR2 の項目の番号 → RD のボタン
     CHECK_EQ(keyconfig_item_button(1), int(kKey1));
     CHECK_EQ(keyconfig_item_button(7), int(kKey7));
     CHECK_EQ(keyconfig_item_button(10), int(kScratchA));
@@ -238,7 +238,7 @@ TEST(keyconfig_slots_save_load) {
     ed.assign({Binding::Type::JoyAxis, 2, -1});
     ed.click(157, 1);
     ed.assign({Binding::Type::Key, SDL_SCANCODE_BACKSPACE, 0});
-    std::string path = (std::filesystem::temp_directory_path() / "bmj_keyconfig_slots_test.txt").string();
+    std::string path = (std::filesystem::temp_directory_path() / "rd_keyconfig_slots_test.txt").string();
     CHECK(c.save(path));
     KeyConfig d;
     CHECK(d.load(path));

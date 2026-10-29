@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace bmj {
+namespace rd {
 
 void GaugeSet::init(int total, int notes, int course) {
     course_ = course >= 0;
@@ -102,4 +102,4 @@ int clear_type(const GaugeSet& g, int gauge_type, int total_notes, int note_curr
     return 1;
 }
 
-}  // namespace bmj
+}  // namespace rd

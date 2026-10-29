@@ -3,7 +3,7 @@
 #   python3 tools/mods/walkure_model.py <walkure-offline のフォルダ> mods/walkure/model.tsv
 # 1 行目は★の換算表（発狂難易度表★1〜25 に当たる難度。25 個）。2 行目からは譜面ごとに
 #   md5  地力譜面度  難度（EASY NORMAL HARD FULLCOMBO）  ★の難度（同じ順。達成者がいなければ -）
-# コース（段位）は BMjoy のコースの鍵と合わないので入れない
+# コース（段位）は RD のコースの鍵と合わないので入れない
 import json
 import sys
 from pathlib import Path

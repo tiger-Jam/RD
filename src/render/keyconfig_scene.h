@@ -8,7 +8,7 @@
 
 #include "input/keyconfig.h"
 
-namespace bmj {
+namespace rd {
 
 // 閉じるまで動き続ける。変更は path に保存する
 void run_keyconfig(SDL_Window* window, SDL_Renderer* r, KeyConfig& cfg, const std::string& path);
@@ -29,4 +29,4 @@ struct SelectContext;
 bool open_keyconfig_from_select(App& app, TextCache& text, SelectContext& sctx, const std::function<double()>& scene_ms,
                                 bool faded = false);
 
-}  // namespace bmj
+}  // namespace rd

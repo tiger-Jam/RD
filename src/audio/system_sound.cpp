@@ -9,7 +9,7 @@
 #include "skin/lr2_skin.h"
 #include "util/text.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -139,4 +139,4 @@ int system_sound_custom_item(const std::string& lr2ss_path, int id) {
     return item < 0 ? -1 : item;
 }
 
-}  // namespace bmj
+}  // namespace rd

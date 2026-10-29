@@ -1,5 +1,5 @@
-# BMjoy の標準スキン：スキンセレクト（1920×1080）。黒地に白とグレーの文字、細い線だけ
-#   python3 tools/skin/bmjoy/skinselect.py <出力先の LR2 のフォルダ>
+# RD の標準スキン：スキンセレクト（1920×1080）。黒地に白とグレーの文字、細い線だけ
+#   python3 tools/skin/rd/skinselect.py <出力先の LR2 のフォルダ>
 import os
 import sys
 
@@ -8,7 +8,7 @@ from common import Csv, Sheet, label, page, render_html
 W, H = 1920, 1080
 GRAY = '#8a8a8a'
 LINE = '#333333'
-THEME = 'LR2files\\Theme\\BMjoy\\SkinSelect\\'
+THEME = 'LR2files\\Theme\\RD\\SkinSelect\\'
 # スキンの種類のボタン（170 + 種類）
 TYPES = [(170, 'PLAY'), (175, 'SELECT'), (176, 'DECIDE'), (177, 'RESULT'), (185, 'COURSE RESULT'), (178, 'KEY CONFIG'),
          (179, 'SKIN SELECT'), (180, 'SOUND')]
@@ -17,7 +17,7 @@ ROW = 52
 
 
 def build(out):
-    root = os.path.join(out, 'LR2files', 'Theme', 'BMjoy', 'SkinSelect')
+    root = os.path.join(out, 'LR2files', 'Theme', 'RD', 'SkinSelect')
     csv = Csv()
     px, py, pw, ph = PREVIEW
 
@@ -40,7 +40,7 @@ def build(out):
     white = ui.add(8, 8, '<div style="width:100%;height:100%;background:#fff"></div>')
     ui.render(os.path.join(root, 'ui.png'))
 
-    csv.raw('#INFORMATION,9,BMjoy,BMjoy,' + THEME + 'thumb.png')
+    csv.raw('#INFORMATION,9,RD,RD,' + THEME + 'thumb.png')
     csv.raw('#RESOLUTION,2')
     csv.raw('#ENDOFHEADER')
     csv.raw('#IMAGE,' + THEME + 'bg.png')

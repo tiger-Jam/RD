@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <mutex>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -204,7 +204,7 @@ void InputMapper::analog_motion(uint32_t which, int16_t value, uint64_t ts) {
     it->second = value;
     if (d == 0) return;
     int dir = (d > 0) == !cfg_.analog_invert ? 1 : -1;
-    static const bool debug = dev_env("BMJ_DEBUG_INPUT") != nullptr;
+    static const bool debug = dev_env("RD_DEBUG_INPUT") != nullptr;
     if (debug && dir != analog_dir_) std::printf("皿: 値 %d（差 %d）で向き %d → %d\n", value, d, analog_dir_, dir);
     analog_move_ns_ = ts;
     // 向きは、その向きに割り当てた皿のボタンで決める（時計回りの皿のボタン kScratchB が +）
@@ -252,7 +252,7 @@ void InputMapper::apply_button(int button, bool down, uint64_t ts) {
     count += down ? 1 : -1;
     if (count < 0) count = 0;
     button_out_.push_back({ts, button, down});
-    static const bool debug = dev_env("BMJ_DEBUG_INPUT") != nullptr;
+    static const bool debug = dev_env("RD_DEBUG_INPUT") != nullptr;
     if (debug && (button == kScratchA || button == kScratchB))
         std::printf("皿 %s %s（%.1f ms、押している数 %d）\n", button == kScratchA ? "A" : "B", down ? "押す" : "離す", ts / 1e6, count), std::fflush(stdout);
 
@@ -328,4 +328,4 @@ bool BindingCapture::take(const SDL_Event& e, Binding& out, int analog_axis) {
     }
 }
 
-}  // namespace bmj
+}  // namespace rd

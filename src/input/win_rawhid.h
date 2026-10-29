@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 struct RawHidDevice {
     uint32_t id = 0;  // SDL のイベントの which に入る番号
@@ -34,4 +34,4 @@ private:
 
 RawHid& raw_hid();
 
-}  // namespace bmj
+}  // namespace rd

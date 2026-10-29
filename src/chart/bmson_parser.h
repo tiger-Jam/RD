@@ -5,9 +5,9 @@
 
 #include "chart/bms_parser.h"
 
-namespace bmj {
+namespace rd {
 
 // beat-7k（と mode_hint の無いもの）だけを取り込む。それ以外は ok = false
 BmsParseResult parse_bmson_text(std::string_view text);
 
-}  // namespace bmj
+}  // namespace rd

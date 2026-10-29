@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -399,4 +399,4 @@ ChartAttr analyze_chart_attr(const Chart& chart) {
     return a;
 }
 
-}  // namespace bmj
+}  // namespace rd

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# W-MIX（WMIX_HD）のリザルト画面に、BMjoy のゲージ（GAS・EX-HARD・ASSIST・CUSTOM1〜9）の名前のコマを足し、
-# 「今回のクリア」の絵を BMjoy のボタン 901（ランプの色に染めて出す）にする。
+# W-MIX（WMIX_HD）のリザルト画面に、RD のゲージ（GAS・EX-HARD・ASSIST・CUSTOM1〜9）の名前のコマを足し、
+# 「今回のクリア」の絵を RD のボタン 901（ランプの色に染めて出す）にする。
 #
 #   python3 tools/skin/wmix_result_frames.py <スキンの result のフォルダ>
 #
 # フォルダは LR2files/Theme/WMIX_HD/result（result_L.csv などと system/main.png がある所）。
-# - system/bmjoy_result.png を作る（ゲージの欄の 18 コマ：0〜5 は元の 6 つ、6=GAS 7=EX-HARD 8=ASSIST 9〜17=CUSTOM1〜9）。
-#   足したコマは白い字。BMjoy が遊んだゲージの色に染めて出す
+# - system/rd_result.png を作る（ゲージの欄の 18 コマ：0〜5 は元の 6 つ、6=GAS 7=EX-HARD 8=ASSIST 9〜17=CUSTOM1〜9）。
+#   足したコマは白い字。RD が遊んだゲージの色に染めて出す
 # - result_*.csv のゲージの欄（ボタン 40）をその絵の 18 コマにし、「今回のクリア」（CLEAR.png のボタン 40）をボタン 901 にする。
-#   元の CSV は <名前>.csv.bak-bmjoy に残す（もう書き換えてあれば、絵だけ作り直して行を直す）
+#   元の CSV は <名前>.csv.bak-rd に残す（もう書き換えてあれば、絵だけ作り直して行を直す）
 # 字はゲージの名前（GROOVE … NONSTOP）から切り出す。この字に無い I・X・M は H・K・V から作り、数字はリザルトの数字の絵に縁を付けて使う
 import os
 import shutil
@@ -54,17 +54,17 @@ with tempfile.TemporaryDirectory() as tmp:
     raw_path = os.path.join(tmp, "result.raw")
     open(raw_path, "wb").write(strip)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{W}x{FH * n}", "-i", raw_path,
-                    os.path.join(SYSTEM, "bmjoy_result.png")], check=True)
-print("作った:", os.path.join(SYSTEM, "bmjoy_result.png"))
+                    os.path.join(SYSTEM, "rd_result.png")], check=True)
+print("作った:", os.path.join(SYSTEM, "rd_result.png"))
 
 # --- result_*.csv を書き換える（Shift_JIS のまま、行の区切りも変えない）
-IMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\result\\system\\bmjoy_result.png,,,,,,,,,,"
+IMAGE_LINE = b"#IMAGE,LR2files\\Theme\\WMIX_HD\\result\\system\\rd_result.png,,,,,,,,,,"
 for name in sorted(os.listdir(RESULT)):
     if not (name.startswith("result") and name.endswith(".csv")):
         continue
     csv = os.path.join(RESULT, name)
-    if not os.path.exists(csv + ".bak-bmjoy"):
-        shutil.copyfile(csv, csv + ".bak-bmjoy")
+    if not os.path.exists(csv + ".bak-rd"):
+        shutil.copyfile(csv, csv + ".bak-rd")
     data = open(csv, "rb").read()
     nl = b"\r\n" if b"\r\n" in data else b"\n"
     lines = data.split(nl)

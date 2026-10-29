@@ -9,7 +9,7 @@
 #include "app/config.h"
 #include "audio/sound_bank.h"
 
-namespace bmj {
+namespace rd {
 
 struct BgmChoice {
     std::string key;   // 設定に書く値
@@ -23,4 +23,4 @@ std::vector<BgmChoice> bgm_choices(const std::string& lr2_root, int sys_id);
 // 選んだ音を読む（読めなければ false）
 bool load_bgm_choice(const std::string& lr2_root, const AppConfig& cfg, const std::string& key, int sys_id, uint32_t rate, Sample& out);
 
-}  // namespace bmj
+}  // namespace rd

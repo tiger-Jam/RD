@@ -7,7 +7,7 @@
 #include "audio/system_sound.h"
 #include "util/data_dir.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -71,4 +71,4 @@ bool load_bgm_choice(const std::string& lr2_root, const AppConfig& cfg, const st
     return !file.empty() && decode_sound_file(file, rate, out, err);
 }
 
-}  // namespace bmj
+}  // namespace rd

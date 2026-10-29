@@ -25,7 +25,7 @@
 #include <thread>
 #endif
 
-namespace bmj {
+namespace rd {
 
 void MidiDecoder::set(int source, bool down, std::vector<std::pair<int, bool>>& out) {
     if (down_[source] == down) return;
@@ -153,11 +153,11 @@ void MidiInput::start() {
     if (impl_) return;
     Impl* im = new Impl;
     mach_timebase_info(&im->timebase);
-    OSStatus st = MIDIClientCreateWithBlock(CFSTR("BMjoy"), &im->client, ^(const MIDINotification* n) {
+    OSStatus st = MIDIClientCreateWithBlock(CFSTR("RD"), &im->client, ^(const MIDINotification* n) {
         if (n->messageID == kMIDIMsgSetupChanged) im->connect_all();
     });
     if (st == noErr)
-        st = MIDIInputPortCreateWithProtocol(im->client, CFSTR("BMjoy input"), kMIDIProtocol_1_0, &im->port,
+        st = MIDIInputPortCreateWithProtocol(im->client, CFSTR("RD input"), kMIDIProtocol_1_0, &im->port,
                                              ^(const MIDIEventList* list, void*) { im->receive(list); });
     if (st != noErr) {
         std::printf("MIDI: 準備できない（%d）\n", static_cast<int>(st));
@@ -304,4 +304,4 @@ MidiInput& midi_input() {
     return m;
 }
 
-}  // namespace bmj
+}  // namespace rd

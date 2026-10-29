@@ -1,6 +1,6 @@
 // 起動前の設定アプリ（LR2 の LR2.exe「LR2 SETUP」に相当）。見た目とタブの並びは LR2 SETUP と同じにしてある
-// （LR2beta3 付属マニュアル help/8.html の画像）。BMjoy で使えない項目は同じ場所に灰色で置き、BMjoy だけの項目は
-// 最後の「BMJOY」タブにまとめる。「BMjoyの起動」で本体（BMjoybody）を立ち上げて、自分は閉じる
+// （LR2beta3 付属マニュアル help/8.html の画像）。RD で使えない項目は同じ場所に灰色で置き、RD だけの項目は
+// 最後の「RD」タブにまとめる。「RDの起動」で本体（RDbody）を立ち上げて、自分は閉じる
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #ifdef _WIN32
@@ -35,7 +35,7 @@
 #include "yyjson.h"
 
 namespace fs = std::filesystem;
-using namespace bmj;
+using namespace rd;
 
 namespace {
 
@@ -92,22 +92,22 @@ bool launch_body(std::string& err) {
         w.resize(n > 0 ? n - 1 : 0);
         return w;
     };
-    std::wstring exe = wide(dir + "BMjoybody.exe");
+    std::wstring exe = wide(dir + "RDbody.exe");
     std::wstring cmdline = L"\"" + exe + L"\"";
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
     if (!CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, FALSE, 0, nullptr, wide(dir).c_str(), &si, &pi)) {
-        err = "BMjoybody.exe を起動できない（" + std::to_string(GetLastError()) + "）";
+        err = "RDbody.exe を起動できない（" + std::to_string(GetLastError()) + "）";
         return false;
     }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return true;
 #else
-    std::string exe = dir + "BMjoybody";
+    std::string exe = dir + "RDbody";
     if (!fs::exists(exe)) {
-        err = "BMjoybody が見つからない: " + exe;
+        err = "RDbody が見つからない: " + exe;
         return false;
     }
     std::string cmd = "'" + exe + "' >/dev/null 2>&1 &";
@@ -131,7 +131,7 @@ void relaunch_self() {
         w.resize(n > 0 ? n - 1 : 0);
         return w;
     };
-    std::wstring exe = wide(dir + "BMjoy.exe");
+    std::wstring exe = wide(dir + "RD.exe");
     std::wstring cmdline = L"\"" + exe + L"\"";
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -204,7 +204,7 @@ std::string make_serve_key() {
     return k;
 }
 
-// 譜面を貸す（BMjoybody --serve）を、ログインしている間ずっと動かす（Windows のタスクスケジューラ）。
+// 譜面を貸す（RDbody --serve）を、ログインしている間ずっと動かす（Windows のタスクスケジューラ）。
 // 設定を変えたら、動いているものを止めて登録し直し、すぐ動かす。貸さないなら登録を消す
 void apply_serve(const AppConfig& cfg, std::string& message) {
 #ifdef _WIN32
@@ -230,8 +230,10 @@ void apply_serve(const AppConfig& cfg, std::string& message) {
         CloseHandle(pi.hProcess);
         return code == 0;
     };
-    const std::wstring task = L"BMjoy 譜面の配信";
+    const std::wstring task = L"RD 譜面の配信";
     run(L"schtasks /End /TN \"" + task + L"\"");
+    // 前の名前（BMjoy）のときに登録したものは消す
+    run(L"schtasks /End /TN \"BMjoy 譜面の配信\""), run(L"schtasks /Delete /F /TN \"BMjoy 譜面の配信\"");
     const bool serving = cfg.serve && static_cast<int>(cfg.serve_key.size()) >= kMinServeKey;
     // インターネットに出す口（Tailscale の funnel）。貸さないときと、外に出さないときは閉じる
     const std::wstring ts = L"\"" + tailscale_exe() + L"\"";
@@ -241,7 +243,7 @@ void apply_serve(const AppConfig& cfg, std::string& message) {
         if (cfg.serve) message = "合言葉が " + std::to_string(kMinServeKey) + " 文字より短いので、譜面を貸しません";
         return;
     }
-    const std::wstring exe = wide(dir + "BMjoybody.exe");
+    const std::wstring exe = wide(dir + "RDbody.exe");
     const bool ok = run(L"schtasks /Create /F /SC ONLOGON /RL LIMITED /TN \"" + task + L"\" /TR \"\\\"" + exe + L"\\\" --serve\"") &&
                     run(L"schtasks /Run /TN \"" + task + L"\"");
     message = ok ? "譜面を貸し始めました（ポート " + std::to_string(cfg.serve_port) + "）" : "譜面の配信を登録できません";
@@ -250,7 +252,7 @@ void apply_serve(const AppConfig& cfg, std::string& message) {
         message = "譜面を貸し始めましたが、インターネットには出せません（Tailscale の funnel が使えるか確かめてください）";
 #else
     (void)cfg;
-    if (cfg.serve) message = "譜面を貸すのは Windows だけです（BMjoybody --serve を動かしてください）";
+    if (cfg.serve) message = "譜面を貸すのは Windows だけです（RDbody --serve を動かしてください）";
 #endif
 }
 
@@ -1198,14 +1200,14 @@ int main(int, char**) {
         return 1;
     }
     AppConfig cfg;
-    migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の BMjoyfiles へ
+    migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の RDfiles へ
     const std::string cfg_path = config_path();
     std::error_code first_ec;
     // 初めての起動（設定ファイルがまだ無い）なら、案内の画面から始める
     const bool first_run = !fs::exists(fs::u8path(cfg_path), first_ec);
     load_config(cfg);
     // ログを残し、前に残したログを送る。前の更新でどけた古いファイルを消す
-#ifdef BMJ_DEV
+#ifdef RD_DEV
     if (!output_is_redirected())
 #endif
         start_log("launcher");
@@ -1215,7 +1217,7 @@ int main(int, char**) {
     auto serve_state = [](const AppConfig& c) { return std::make_tuple(c.serve, c.serve_port, c.serve_key, c.serve_public); };
     auto serve_applied = serve_state(cfg);
 
-    SDL_Window* window = SDL_CreateWindow("BMjoy SETUP", kW, kH, SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    SDL_Window* window = SDL_CreateWindow("RD SETUP", kW, kH, SDL_WINDOW_HIGH_PIXEL_DENSITY);
     SDL_Renderer* r = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
     if (!r) {
         std::fprintf(stderr, "ウィンドウを作れない: %s\n", SDL_GetError());
@@ -1235,7 +1237,7 @@ int main(int, char**) {
     g.font = 11;  // MS UI ゴシックより横に広い書体なので、少し小さくして LR2 SETUP の配置に収める
 #endif
 
-    // BMjoy に無い項目の見た目だけの値（LR2 SETUP の既定に合わせる）
+    // RD に無い項目の見た目だけの値（LR2 SETUP の既定に合わせる）
     bool d_false = false, d_true = true;
     int d_flash = 0, d_buffer = 128;
     std::string d_font = "HG丸ｺﾞｼｯｸM-PRO";
@@ -1267,11 +1269,11 @@ int main(int, char**) {
     std::string new_player_id;
     // MOD の詳細の画面（-1 なら一覧）。det_sel は詳細の中の一覧で選んでいる行
     int mod_detail = -1, det_page = 0, det_sel = 0, det_scroll = 0, det_add = 0;
-    if (const char* d = dev_env("BMJ_LAUNCHER_DETAIL"))  // 開発用：その MOD の詳細を開いておく
+    if (const char* d = dev_env("RD_LAUNCHER_DETAIL"))  // 開発用：その MOD の詳細を開いておく
         for (size_t i = 0; i < mods.size(); ++i)
             if (mods[i].id == d) mod_detail = mod_sel = static_cast<int>(i);
-    if (const char* d = dev_env("BMJ_LAUNCHER_PAGE")) det_page = std::atoi(d);  // 開発用：詳細の何枚目を開くか
-    if (const char* d = dev_env("BMJ_LAUNCHER_ROW")) det_sel = std::atoi(d);    // 開発用：詳細の一覧の何行目を選ぶか
+    if (const char* d = dev_env("RD_LAUNCHER_PAGE")) det_page = std::atoi(d);  // 開発用：詳細の何枚目を開くか
+    if (const char* d = dev_env("RD_LAUNCHER_ROW")) det_sel = std::atoi(d);    // 開発用：詳細の一覧の何行目を選ぶか
     // プレイヤーを切り替える：今の人の設定を書いてから、その人の設定と MOD の詳細の設定を読み直す
     auto switch_player = [&](const std::string& id) {
         save_changed_settings();
@@ -1349,8 +1351,8 @@ int main(int, char**) {
         }
     } borrow_test;
     bool quit = false, start = false;
-    bool autostart = dev_env("BMJ_LAUNCHER_AUTOSTART") != nullptr;  // 開発用：すぐ起動する
-    // LR2 から引き継ぐ（BMJOY タブのボタンと、初めての起動の案内から）
+    bool autostart = dev_env("RD_LAUNCHER_AUTOSTART") != nullptr;  // 開発用：すぐ起動する
+    // LR2 から引き継ぐ（RD タブのボタンと、初めての起動の案内から）
     auto start_lr2_import = [&](const std::string& dir) {
         job.running = true, job.done = false;
         job.status = "LR2 から引き継いでいます";
@@ -1363,7 +1365,7 @@ int main(int, char**) {
                 std::lock_guard<std::mutex> lock(job.mu);
                 job.status = s;
             }, base.lr2_root);
-            // 素材（スキン・サウンドセット・BGM など）も BMjoy のフォルダ（実行ファイルの横）に写し、そこから読む
+            // 素材（スキン・サウンドセット・BGM など）も RD のフォルダ（実行ファイルの横）に写し、そこから読む
             AssetCopyResult ac;
             if (r.ok) {
                 if (c.lr2_root.empty()) c.lr2_root = dir;
@@ -1386,7 +1388,7 @@ int main(int, char**) {
     };
     // 初めての起動の案内（-1 なら出さない。0 = 始め方を選ぶ 1 = 曲フォルダ 2 = 難易度表）
     int guide = first_run ? 0 : -1;
-    if (const char* gs = dev_env("BMJ_LAUNCHER_GUIDE")) guide = std::atoi(gs);  // 開発用：案内の画面を出す
+    if (const char* gs = dev_env("RD_LAUNCHER_GUIDE")) guide = std::atoi(gs);  // 開発用：案内の画面を出す
 
     while (!quit) {
         g.pressed = false, g.wheel = 0, g.typed.clear();
@@ -1416,10 +1418,10 @@ int main(int, char**) {
                     cfg.song_dirs.push_back(p), tab = 1;
             }
         }
-        // 開発用：BMJ_LAUNCHER_CLICKS の「x,y;x,y;…」（/ でも区切れる）を、5 フレーム目から 3 フレームごとに 1 つずつ押したことにする
+        // 開発用：RD_LAUNCHER_CLICKS の「x,y;x,y;…」（/ でも区切れる）を、5 フレーム目から 3 フレームごとに 1 つずつ押したことにする
         static std::vector<std::pair<float, float>> dev_clicks = [] {
             std::vector<std::pair<float, float>> v;
-            if (const char* c = dev_env("BMJ_LAUNCHER_CLICKS"))
+            if (const char* c = dev_env("RD_LAUNCHER_CLICKS"))
                 for (const char* q = c; *q;) {
                     float x = 0, y = 0;
                     int n = 0;
@@ -1447,7 +1449,7 @@ int main(int, char**) {
         g.label(6, 3, "Language");
 
         // タブ（クラシック：選んでいるタブは少し大きく、ページとつながる）
-        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "BMJOY", "PLAY", "MOD", "SHARE"};
+        static const char* tabs[] = {"MAIN", "JUKEBOX1", "JUKEBOX2", "OPTION", "SELECT", "SYSTEM", "RD", "PLAY", "MOD", "SHARE"};
         const SDL_FRect page{10, 56, 590, 368};
         g.fill(page, kFace);
         g.raised(page);
@@ -1475,13 +1477,13 @@ int main(int, char**) {
             g.raised({page.x, 40, page.w, page.h + 16});
             const float gx = X + 24, gy = 56;
             if (guide == 0) {
-                g.label(gx, gy, "BMjoy へようこそ");
+                g.label(gx, gy, "RD へようこそ");
                 g.label(gx, gy + 30, "はじめに、遊ぶための準備をします。");
                 g.label(gx, gy + 50, "LR2 を使っていたなら、曲フォルダ・記録・スキン・設定をまとめて引き継げます。");
                 if (g.button(gx, gy + 90, 240, 30, "LR2 から引き継ぐ", !job.running))
                     pick_folder(window, [&](const std::string& dir) {
                         start_lr2_import(dir);
-                        guide = -1, tab = 6;  // 引き継ぎの進み具合は BMJOY タブの下に出る
+                        guide = -1, tab = 6;  // 引き継ぎの進み具合は RD タブの下に出る
                     });
                 g.label(gx + 256, gy + 99, "LR2 のフォルダ（LR2body.exe がある所）を選びます");
                 if (g.button(gx, gy + 136, 240, 30, "新しく始める")) guide = 1;
@@ -1502,7 +1504,7 @@ int main(int, char**) {
                 if (g.button(gx + 456, gy + 300, 74, 24, "次へ", !cfg.song_dirs.empty())) guide = 2;
             } else {
                 g.label(gx, gy, "2 / 2　難易度表");
-                g.label(gx, gy + 24, "使いたい難易度表の URL を登録します（あとから BMJOY タブでも登録できます）。");
+                g.label(gx, gy + 24, "使いたい難易度表の URL を登録します（あとから RD タブでも登録できます）。");
                 g.listview(gx, gy + 50, 530, 170, "url", cfg.tables, table_sel, table_scroll);
                 g.edit_str(table_input, gx, gy + 230, 380, 20);
                 if (g.button(gx + 390, gy + 229, 64, 22, "追加", !table_input.empty())) {
@@ -1515,11 +1517,11 @@ int main(int, char**) {
                 if (g.button(gx + 456, gy + 300, 74, 24, "完了")) {
                     guide = -1;
                     save_config(cfg);
-                    message = "準備ができました。「BMjoyの起動」で始めると、最初に曲フォルダを読み込みます";
+                    message = "準備ができました。「RDの起動」で始めると、最初に曲フォルダを読み込みます";
                 }
             }
         } else if (tab == 0) {
-            // LR2 SETUP（100201）の MAIN と同じ並び。プレイヤーと IR は BMjoy に無いので灰色
+            // LR2 SETUP（100201）の MAIN と同じ並び。プレイヤーと IR は RD に無いので灰色
             // プレイヤー（LR2 SETUP と同じ並び）。スコア・オプション・キー・スキン・MOD はプレイヤーごと。パスワードは IR 用なので灰色
             g.group(X + 9, Y + 9, 556, 99, "PLAYER");
             g.label(X + 26, Y + 40, "PLAYER ID");
@@ -1683,7 +1685,7 @@ int main(int, char**) {
             g.check(X + 48, Y + 268, "FMOD Exを使用しない(どうしても発音遅延やノイズが気になるならチェックを入れてください)", d_true, false);
             g.check(X + 22, Y + 328, "高精度なタイマーを使用する(基本的に外して下さい)", d_true, false);
         } else if (tab == 6) {
-            // BMjoy だけの設定（LR2 SETUP には無い）
+            // RD だけの設定（LR2 SETUP には無い）
             if (g.button(X + 268, Y + 10, 146, 22, "LR2 から引き継ぐ", !job.running)) {
                 pick_folder(window, start_lr2_import);
             }
@@ -1918,7 +1920,7 @@ int main(int, char**) {
             }
         }
         if (!message.empty()) g.label(10, kH - 50 + 14, message);
-        if (g.button(10, kH - 29, 87, 21, "BMjoyの起動", !updating) || (autostart && !updating)) start = true, autostart = false;
+        if (g.button(10, kH - 29, 87, 21, "RDの起動", !updating) || (autostart && !updating)) start = true, autostart = false;
         g.button(115, kH - 29, 87, 21, "プレイオプション", false);
         g.button(409, kH - 29, 83, 21, "動画作成", false);
         if (g.button(514, kH - 29, 87, 21, "終了")) {
@@ -1943,11 +1945,11 @@ int main(int, char**) {
                 quit = true;
             }
         }
-        if (const char* shot = dev_env("BMJ_LAUNCHER_SHOT")) {
-            // 開発用：BMJ_LAUNCHER_TAB のタブを1枚保存して終わる
+        if (const char* shot = dev_env("RD_LAUNCHER_SHOT")) {
+            // 開発用：RD_LAUNCHER_TAB のタブを1枚保存して終わる
             static int frames = 0;
-            if (const char* t = dev_env("BMJ_LAUNCHER_TAB")) tab = std::atoi(t);
-            // 押す操作（BMJ_LAUNCHER_CLICKS）があれば、押し終わってから撮る
+            if (const char* t = dev_env("RD_LAUNCHER_TAB")) tab = std::atoi(t);
+            // 押す操作（RD_LAUNCHER_CLICKS）があれば、押し終わってから撮る
             if (++frames == 10 + 3 * static_cast<int>(dev_clicks.size())) {
                 if (SDL_Surface* sf = SDL_RenderReadPixels(r, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
                 quit = true;

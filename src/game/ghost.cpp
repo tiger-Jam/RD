@@ -4,7 +4,7 @@
 #include <cmath>
 #include <utility>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -165,4 +165,4 @@ void Ghost::deal() {
     }
 }
 
-}  // namespace bmj
+}  // namespace rd

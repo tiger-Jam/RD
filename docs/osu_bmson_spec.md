@@ -3,7 +3,7 @@
 調査日 2026-10-19。挙動だけを書く。コードの表現は写していない。
 記号: **[?]** = 出典で確認できていない／推測を含む。**[差]** = 出典どうしで食い違う。
 
-関係する BMjoy 側: 仕様書 2章（対応範囲）・5章（譜面モデルとインポーター）・6章「ハイスピ・LIFT・緑数字」、
+関係する RD 側: 仕様書 2章（対応範囲）・5章（譜面モデルとインポーター）・6章「ハイスピ・LIFT・緑数字」、
 `/Users/fdk/BMjoy/src/chart/chart.h`、`/Users/fdk/BMjoy/src/chart/bms_parser.h`。
 スクロールの比較は `docs/hispeed_research.md` の C.4 にもある（本書はその続き）。
 
@@ -21,7 +21,7 @@
 | `BMU/` | bmson 仕様の作者側の参照実装（Bemuse） `https://github.com/bemusic/bmson/blob/129b92871f008fcccfa4cf999bab6dd114eeb437/` |
 | `JBP` | beatoraja の bmson 読み込み `https://github.com/exch-bms2/jbms-parser/blob/8108cd54a19275810e1f5d2c9586f008eb6db95e/src/bms/model/BMSONDecoder.java` 。同梱の `/Users/fdk/BMjoy/参考に/beatoraja-master/lib/jbms-parser.jar` を逆アセンブルし、本書で引いた読み込み処理（ヘッダ・タイミング・ノーツ・`c`・LN）が同じであることを確かめた（GitHub 版には入力検査の処理が追加されている） |
 | `BRJ/` | `/Users/fdk/BMjoy/参考に/beatoraja-master/src/bms/player/beatoraja/` |
-| `BMJ/` | `/Users/fdk/BMjoy/src/` |
+| `RD/` | `/Users/fdk/BMjoy/src/` |
 
 「stable」は旧クライアント osu!(stable)、「lazer」は現行の osu!(lazer)。stable のソースは公開されていないので、stable の挙動は wiki と、lazer のソースに書かれた「stable 互換のため」という注記から読む。
 
@@ -67,7 +67,7 @@
 | `SliderMultiplier` | mania のスクロールには効かない（1.4.2） | 0.4〜3.6 | `LegacyBeatmapDecoder.cs:130` |
 
 - キー数は `CircleSize` を四捨五入した整数（1 未満は 1）。mania 用の譜面ならこの値をそのまま使う（`LZ/osu.Game.Rulesets.Mania/Beatmaps/ManiaBeatmapConverter.cs:75-81`）。
-- 11 キー以上（mania 用譜面で 10 を超えるとき）は、半分ずつの 2 段（Dual stage）にする（`ManiaBeatmapConverter.cs:67-73`、1段の上限 10 は `LZ/osu.Game.Rulesets.Mania/ManiaRuleset.cs:54`）。BMjoy では対象外。
+- 11 キー以上（mania 用譜面で 10 を超えるとき）は、半分ずつの 2 段（Dual stage）にする（`ManiaBeatmapConverter.cs:67-73`、1段の上限 10 は `LZ/osu.Game.Rulesets.Mania/ManiaRuleset.cs:54`）。RD では対象外。
 
 #### [Events]
 
@@ -139,7 +139,7 @@ lazer の読み方（`LegacyBeatmapDecoder.cs:484-603`）:
 #### 1.3.2 mania で音が鳴る時（キー音のモデル）
 
 - **キーを押した瞬間に、その列で次にまだ判定されていないノーツの音を鳴らす**。ノーツに当たったかどうかとは関係なく、空押しでも次のノーツの音が鳴る（`LZ/osu.Game.Rulesets.Mania/UI/Column.cs:186-192` → `LZ/osu.Game/Rulesets/UI/GameplaySampleTriggerSource.cs:63-75, 104-120`）。列にもう未判定のノーツが無ければ最後のノーツの音を鳴らす（`:115-118`）。
-  - これは BMS の「押したキーの音＝そのレーンの次のノーツの音」と同じ考え方。BMjoy の判定部もそうなっている（`BMJ/game/judge.cpp:33-35`）。
+  - これは BMS の「押したキーの音＝そのレーンの次のノーツの音」と同じ考え方。RD の判定部もそうなっている（`RD/game/judge.cpp:33-35`）。
 - ホールドは**始点の音だけ**を鳴らす。終端には音が無い（mania の既定。`LZ/osu.Game.Rulesets.Mania/Objects/HoldNote.cs:126-138`）。
 - 通常の mania 譜面は「音源 1 本 + 標準ヒット音」。BMS から変換した「キー音譜面」は、各ノーツの `filename` にキー音を、伴奏を `Sample` 行（1.3.3）に書く [?: 慣習。仕様として書かれたものは見つけていない]。
 
@@ -180,7 +180,7 @@ lazer の読み方（`LegacyBeatmapDecoder.cs:484-603`）:
 
 - lazer の設定値は 1〜40（0.1 刻み、既定 8）（`LZ/osu.Game.Rulesets.Mania/Configuration/ManiaRulesetConfigManager.cs:24`）。
 - **表示時間 TimeRange = 11485 ms ÷ 設定値**（`DrawableManiaRuleset.cs:38-43, 183`）。これは「倍率 1（最頻 BPM・SV 1）のノーツが、レーンの端から判定位置に届くまでの時間」。スキンの判定位置に合わせてこの時間を伸縮し、レート系 mod（DT/HT）のときは曲の速さを掛けて実時間を保つ（`:167-176`）。
-- BMjoy の緑数字（1/600 秒）に直すと **緑数字 ≒ TimeRange[ms] × 0.6**（レーンを全部見せたとき）。設定値 8 → 1436ms → 緑数字 約 861。
+- RD の緑数字（1/600 秒）に直すと **緑数字 ≒ TimeRange[ms] × 0.6**（レーンを全部見せたとき）。設定値 8 → 1436ms → 緑数字 約 861。
 
 #### 1.4.4 stable の扱い
 
@@ -224,7 +224,7 @@ lazer の mania の小節線（`LZ/osu.Game/Rulesets/Objects/BarLineGenerator.cs
 - lazer の Classic mod では stable と同じ値になる（PERFECT 16、他は 34 + 3·(10−OD) など。`ManiaHitWindows.cs:140-150`、mod の適用は `ManiaRuleset.cs:492-495`）。
 - 端数: lazer は「切り捨てた整数 + 0.5」を窓にする（`ManiaHitWindows.cs:133-159`）。stable も「ずれは四捨五入、窓は切り捨て」で、最大 0.5ms の差が出る（`WK-judge:20`）。
 - ずれが MISS の窓より外なら、押しても何も起きない（BMS の空 POOR に当たるものは無い）。stable は OK の窓を過ぎると見逃し MISS（遅い MEH は出ない）（`WK-judge:39`）。lazer は MEH の窓を過ぎると MISS（`LZ/osu.Game/Rulesets/Scoring/HitWindows.cs:109`、`LZ/osu.Game.Rulesets.Mania/Objects/Drawables/DrawableNote.cs:85-100`）。**[差]**
-- osu! 標準モードからの変換譜面（BMjoy の対象外）は別の固定値になる（`WK-judge:22-31`）。
+- osu! 標準モードからの変換譜面（RD の対象外）は別の固定値になる（`WK-judge:22-31`）。
 - DT/HT などのレート系 mod では、mania の判定窓は実時間で変わらない（`WK-judge:33`、`ManiaHitWindows.cs:21-37`）。
 
 ### 1.8 ライフ（HP）
@@ -420,9 +420,9 @@ beatoraja の細部（`JBP:186-314`）:
 
 ---
 
-## Part 3 — BMjoy への写し方
+## Part 3 — RD への写し方
 
-対象の型は `BMJ/chart/chart.h` の `Note` / `ScrollSeg` / `BarLine` / `BgmEvent` / `BgaEvent` / `ChartMeta` / `Chart`。API は BMS と同じ形で、`parse_osu_text/file` と `parse_bmson_text/file` が `...ParseResult{ok, error, warnings, chart}` を返す形が素直（`BMJ/chart/bms_parser.h:19-31`。osu と bmson には #RANDOM が無いので、乱数の欄は不要）。
+対象の型は `RD/chart/chart.h` の `Note` / `ScrollSeg` / `BarLine` / `BgmEvent` / `BgaEvent` / `ChartMeta` / `Chart`。API は BMS と同じ形で、`parse_osu_text/file` と `parse_bmson_text/file` が `...ParseResult{ok, error, warnings, chart}` を返す形が素直（`RD/chart/bms_parser.h:19-31`。osu と bmson には #RANDOM が無いので、乱数の欄は不要）。
 
 ### 3.1 osu!mania → 内部モデル
 
@@ -464,7 +464,7 @@ beatoraja の細部（`JBP:186-314`）:
 - 最後のノーツより後の点は見た目に影響しないので、無視してよい（lazer は捨てている）。
 - `pos` は speed を積分した値。これで lazer の Sequential と同じ形の「時刻→位置」になる（定数倍だけが違う）。
 - `main_bpm` = 60000 / 最頻の拍の長さ（1.4.2 の 4 の求め方）。`initial_bpm` = 最初の非継承点の BPM。
-- フローティングの基準 BPM を「一番長く使われる BPM」にすると、lazer の基準と一致する。ただし BMS の `main_bpm` は「ノーツ数が一番多い BPM」で求めている（`BMJ/chart/bms_parser.cpp:411-418`）ので、定義が違う。
+- フローティングの基準 BPM を「一番長く使われる BPM」にすると、lazer の基準と一致する。ただし BMS の `main_bpm` は「ノーツ数が一番多い BPM」で求めている（`RD/chart/bms_parser.cpp:411-418`）ので、定義が違う。
 - HS-FIX の CONSTANT（`Chart::make_constant_speed`）は、lazer の Constant Speed mod と同じ（BPM も SV も無視）。osu には STOP が無いので「止まる」ことも無い。
 - 仕様書 6章の「osu のソフラン（未決）」は、本書 1.4 で「BPM の変化 → bpm、SV → scroll」と確定できる（lazer はそう動いている。stable も、曲の途中の BPM 変化で速さが変わることは wiki で確認できる）。
 
@@ -475,7 +475,7 @@ beatoraja の細部（`JBP:186-314`）:
 - `hitSample` の `filename` があれば、それを `wav` に登録して `Note::sound` にする（キー音）。
 - 無ければ、仕様書 5章のとおり「無音」か「汎用ヒット音」を設定で選ぶ。
 - ホールドの終端の音（`end_sound`）は 0。
-- 押したときに鳴る音のモデル（次の未判定ノーツの音）は、BMjoy の既存の動きと同じ。
+- 押したときに鳴る音のモデル（次の未判定ノーツの音）は、RD の既存の動きと同じ。
 - `[Events]` の `Sample` 行（`.osb` も含む）→ `BgmEvent`。
 
 **画像**
@@ -516,7 +516,7 @@ beatoraja の細部（`JBP:186-314`）:
 - STOP と同じ y のノーツの時刻は、停止の始まり（BMS と同じ）。
 - 同じ y の STOP を足すか、上書きするか → 未決（仕様は足す、beatoraja は上書き）。
 
-**レーン（beat-7k）**: x 1〜7 → lane 1〜7、x 8 → lane 0。皿のノーツが無ければ BMS と同じく `KeyLayout::K7`（`BMJ/chart/bms_parser.cpp:409`、仕様書 2章）。x が 0・null・範囲外なら `BgmEvent`。
+**レーン（beat-7k）**: x 1〜7 → lane 1〜7、x 8 → lane 0。皿のノーツが無ければ BMS と同じく `KeyLayout::K7`（`RD/chart/bms_parser.cpp:409`、仕様書 2章）。x が 0・null・範囲外なら `BgmEvent`。
 
 **LN**
 
@@ -563,7 +563,7 @@ beatoraja の細部（`JBP:186-314`）:
 **判定と TOTAL**
 
 - `judge_rank` → 下の表の未決事項（今の `Chart::judge_rank` は LR2 の #RANK 0〜3 の整数だけ）。
-- `total` → 「total / 100 × 既定の TOTAL」。既定の TOTAL を何にするか → 未決。BMjoy は LR2 の既定式（`BMJ/chart/bms_parser.cpp:420-427`）、beatoraja は IIDX 型の式。
+- `total` → 「total / 100 × 既定の TOTAL」。既定の TOTAL を何にするか → 未決。RD は LR2 の既定式（`RD/chart/bms_parser.cpp:420-427`）、beatoraja は IIDX 型の式。
 
 **ファイル名**
 
@@ -584,8 +584,8 @@ beatoraja の細部（`JBP:186-314`）:
 | osu の音量 | ノーツごと・タイミングポイントごとの音量。今の `Note` / `BgmEvent` に音量の欄が無い |
 | osu のストーリーボードの音 | Pass / Fail レイヤの音を、ゲージの状態で鳴らし分けるか、全部鳴らすか、Background / Foreground だけ鳴らすか。`.osb` を読むか |
 | osu の動画・背景 | 背景画像を STAGEFILE と BGA のどちらに使うか。動画の開始時刻が負のときの扱い |
-| osu の AudioLeadIn | 開始前の待ち時間に足すか、BMjoy の既定の待ち時間に任せるか |
-| 主 BPM の定義 | osu は「時間で最頻」（lazer）、BMS は「ノーツ数で最頻」（今の BMjoy）。揃えるか、形式ごとに変えるか |
+| osu の AudioLeadIn | 開始前の待ち時間に足すか、RD の既定の待ち時間に任せるか |
+| 主 BPM の定義 | osu は「時間で最頻」（lazer）、BMS は「ノーツ数で最頻」（今の RD）。揃えるか、形式ごとに変えるか |
 | bmson の版 | `version` の無い 0.21 を読むか（Bemuse は読む）、拒否するか |
 | bmson の judge_rank | (a) 仕様の参考どおり 100 ＝ #RANK 2 として判定幅を伸縮する、(b) beatoraja と同じく 100 ＝ EASY 相当、(c) 一番近い #RANK に丸める。どれも `Chart` に「判定幅の倍率」を持たせるかどうかに関わる。beatoraja の「1〜4 は #RANK」の特例を入れるか |
 | bmson の total | 既定の TOTAL を LR2 式にするか IIDX 式にするか。0 を「増えない」とするか（仕様）、未定義とするか（beatoraja） |

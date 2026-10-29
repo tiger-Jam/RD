@@ -11,7 +11,7 @@
 #include <curl/curl.h>
 #endif
 
-namespace bmj {
+namespace rd {
 
 #if defined(_WIN32)
 
@@ -41,7 +41,7 @@ static bool http_request(const std::string& url, const std::string* post, const 
     uc.lpszExtraInfo = extra;
     uc.dwExtraInfoLength = 2048;
     if (!WinHttpCrackUrl(wurl.c_str(), 0, 0, &uc)) return error = "URLが正しくない（" + url + "）", false;
-    HINTERNET ses = WinHttpOpen(L"BMjoy", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET ses = WinHttpOpen(L"RD", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!ses) return error = "WinHTTP を開けない", false;
     WinHttpSetTimeouts(ses, 10000, 10000, 60000, 60000);
     HINTERNET con = WinHttpConnect(ses, host, uc.nPort, 0);
@@ -125,7 +125,7 @@ static bool http_request(const std::string& url, const std::string* post, const 
     curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);  // 60 秒なにも来なければやめる（大きなファイルは時間で切らない）
     curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 60L);
     curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(c, CURLOPT_USERAGENT, "BMjoy");
+    curl_easy_setopt(c, CURLOPT_USERAGENT, "RD");
     curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
     if (hl) curl_easy_setopt(c, CURLOPT_HTTPHEADER, hl);
     if (post) {
@@ -162,4 +162,4 @@ bool http_post(const std::string& url, const std::string& data, std::string& rep
     return http_request(url, &data, [&](const char* p, size_t n) { return reply.append(p, n), true; }, error, headers);
 }
 
-}  // namespace bmj
+}  // namespace rd

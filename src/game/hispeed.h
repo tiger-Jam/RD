@@ -3,7 +3,7 @@
 
 #include "chart/chart.h"
 
-namespace bmj {
+namespace rd {
 
 // 譜面の BPM の幅（LR2 の minBPM / maxBPM）。譜面の頭の #BPM から始めて、ノーツのある BPM で広げる
 void note_bpm_range(const Chart& chart, double& lo, double& hi);
@@ -21,4 +21,4 @@ int hs_for_green(double lane_px, double visible, double green, double bpm, doubl
 
 constexpr int kFloatingHsMin = 50, kFloatingHsMax = 1000;
 
-}  // namespace bmj
+}  // namespace rd

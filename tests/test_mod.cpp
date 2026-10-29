@@ -6,7 +6,7 @@
 #include "mod/mod.h"
 #include "test.h"
 
-using namespace bmj;
+using namespace rd;
 
 static Chart mod_chart(const std::string& s) {
     BmsParseOptions o;
@@ -19,7 +19,7 @@ static int64_t mod_ms(int v) { return static_cast<int64_t>(v) * 1000; }
 // 公式の MOD の定義が読めて、分類と中身が合っている
 TEST(mod_official_manifests) {
     std::vector<std::string> errors;
-    auto mods = scan_mods(std::string(BMJ_SOURCE_DIR) + "/mods", true, &errors);
+    auto mods = scan_mods(std::string(RD_SOURCE_DIR) + "/mods", true, &errors);
     CHECK(errors.empty());
     ModManifest *exhard = nullptr, *assist = nullptr, *custom = nullptr, *judge = nullptr, *gas = nullptr;
     for (ModManifest& m : mods) {
@@ -50,7 +50,7 @@ TEST(mod_official_manifests) {
             CHECK(m.metronome && std::filesystem::exists(m.metronome_accent) && std::filesystem::exists(m.metronome_beat));
             CHECK((m.touches & static_cast<uint32_t>(ModTouch::Sound)) && !m.affects_play());
             m.metronome_volume = 35;
-            const std::string f = (std::filesystem::temp_directory_path() / "bmj_metro.json").string();
+            const std::string f = (std::filesystem::temp_directory_path() / "rd_metro.json").string();
             CHECK(save_mod_settings(m, f));
             ModManifest n = m;
             n.metronome_volume = 0;
@@ -65,7 +65,7 @@ TEST(mod_official_manifests) {
             m.bgm_sets = {{"夜", {"LR2files/Sound/a.lr2ss|0|bgm2", "LR2files/Sound/a.lr2ss|0|bgm3"}, {"LR2files/Sound/b.lr2ss|-1|"}},
                           {"空", {}, {}}};
             m.bgm_use = "夜";
-            const std::string f = (std::filesystem::temp_directory_path() / "bmj_bgm.json").string();
+            const std::string f = (std::filesystem::temp_directory_path() / "rd_bgm.json").string();
             CHECK(save_mod_settings(m, f));
             ModManifest n = m;
             n.bgm_sets.clear(), n.bgm_use.clear();
@@ -107,7 +107,7 @@ TEST(mod_official_manifests) {
 // ゲージのランプを引く：同じ MOD のランプ、ほかの MOD のランプ（「MOD/id」）、本体のランプ。番号の付くゲージの名前とコマ
 TEST(mod_resolve_gauge_lamps) {
     std::vector<std::string> errors;
-    auto mods = scan_mods(std::string(BMJ_SOURCE_DIR) + "/mods", true, &errors);
+    auto mods = scan_mods(std::string(RD_SOURCE_DIR) + "/mods", true, &errors);
     ModManifest* custom = nullptr;
     for (ModManifest& m : mods)
         if (m.id == "custom-gauge") custom = &m;
@@ -237,7 +237,7 @@ TEST(mod_gas_chain) {
 // 詳細の設定：書いて読めば同じ（GAS の順番、カスタムゲージ、カスタムランプ）
 TEST(mod_settings_roundtrip) {
     std::vector<std::string> errors;
-    auto mods = scan_mods(std::string(BMJ_SOURCE_DIR) + "/mods", true, &errors);
+    auto mods = scan_mods(std::string(RD_SOURCE_DIR) + "/mods", true, &errors);
     ModManifest *cg = nullptr, *gas = nullptr;
     for (ModManifest& m : mods) {
         if (m.id == "custom-gauge") cg = &m;
@@ -245,7 +245,7 @@ TEST(mod_settings_roundtrip) {
     }
     CHECK(cg && gas);
     if (!cg || !gas) return;
-    const std::string dir = (std::filesystem::temp_directory_path() / "bmj_mod_settings").string();
+    const std::string dir = (std::filesystem::temp_directory_path() / "rd_mod_settings").string();
     CustomLampDef lamp;
     lamp.id = "l1", lamp.name = "紫", lamp.color = 0x8040ff, lamp.rank = 4.2, lamp.as = 3;
     lamp.colors = 2, lamp.color2 = 0xffffff, lamp.blink_ms = 400;
@@ -355,7 +355,7 @@ TEST(metronome_beats) {
 // skin_colors を読むと、見た目の MOD になる（記録は分けない）
 TEST(mod_skin_colors) {
     namespace fs = std::filesystem;
-    fs::path dir = fs::temp_directory_path() / "bmj_mod_test_skin_colors";
+    fs::path dir = fs::temp_directory_path() / "rd_mod_test_skin_colors";
     fs::remove_all(dir);
     fs::create_directories(dir);
     std::ofstream(dir / "mod.json") << R"({"id":"note-color","skin_colors":[
@@ -378,7 +378,7 @@ TEST(mod_skin_colors) {
 // 部品の色の設定は settings.json に書いて、読み直すと同じになる（設定のほうが mod.json より優先）
 TEST(mod_skin_colors_settings) {
     namespace fs = std::filesystem;
-    fs::path dir = fs::temp_directory_path() / "bmj_mod_test_skin_colors_settings";
+    fs::path dir = fs::temp_directory_path() / "rd_mod_test_skin_colors_settings";
     fs::remove_all(dir);
     fs::create_directories(dir);
     std::ofstream(dir / "mod.json") << R"({"id":"c","settings":[{"type":"skin_colors","name":"部品の色"}],

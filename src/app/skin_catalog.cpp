@@ -7,7 +7,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -101,7 +101,7 @@ void SkinCatalog::scan(const std::string& lr2_root) {
             if (read_skin_header(lr2_root, e.path, e.header) && e.header.type >= 0) by_type_[e.header.type].push_back(std::move(e));
         }
     };
-    // 素材の置き場（LR2 の LR2files か、BMjoy の BMjoyfiles）
+    // 素材の置き場（LR2 の LR2files か、RD の RDfiles）
     const std::string files = resolve_lr2_path(lr2_root, "LR2files", false);
     if (!files.empty()) {
         add_dir(fs::path(files) / "Theme", ".lr2skin");
@@ -351,4 +351,4 @@ int SkinCatalog::button(int t) const {
     return 0;
 }
 
-}  // namespace bmj
+}  // namespace rd

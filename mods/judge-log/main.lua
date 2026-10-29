@@ -27,8 +27,8 @@ function on_play_end(r)
     "time_ms,lane,judge,offset_ms,fast_slow,combo,exscore,hp",
   }
   for _, l in ipairs(rows) do lines[#lines + 1] = l end
-  local name = bmj.date("%Y%m%d_%H%M%S") .. "_" .. info.sha256:sub(1, 12) .. ".csv"
-  local ok, err = bmj.write_file(name, table.concat(lines, "\n") .. "\n")
-  if ok then bmj.log("書き出した: " .. name) else bmj.log("書き出せない: " .. tostring(err)) end
+  local name = rd.date("%Y%m%d_%H%M%S") .. "_" .. info.sha256:sub(1, 12) .. ".csv"
+  local ok, err = rd.write_file(name, table.concat(lines, "\n") .. "\n")
+  if ok then rd.log("書き出した: " .. name) else rd.log("書き出せない: " .. tostring(err)) end
   rows = nil
 end

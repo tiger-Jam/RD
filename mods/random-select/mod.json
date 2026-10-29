@@ -2,7 +2,7 @@
   "id": "random-select",
   "name": "ランダムセレクト",
   "version": "1",
-  "author": "BMjoy",
+  "author": "RD",
   "description": "フォルダの名前の下に ????? のバーを出す。決定すると、そのフォルダに見えている譜面から 1 つを選んで遊ぶ",
   "touches": ["control"],
   "script": "main.lua"

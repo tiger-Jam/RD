@@ -1,13 +1,13 @@
-// BMjoy：譜面を1つ指定して、LR2スキン（または仮の画面）で遊ぶ
+// RD：譜面を1つ指定して、LR2スキン（または仮の画面）で遊ぶ
 //
-//   bmjoy <譜面ファイル> [--auto] [--gauge groove|hard|death|easy|pattack|gattack] [--gas]
+//   rd <譜面ファイル> [--auto] [--gauge groove|hard|death|easy|pattack|gattack] [--gas]
 //                        [--hs 100] [--seed N] [--timing ms] [--lr2-root DIR] [--skin FILE]
 //                        [--skin-opt 番号=選択] [--skin-res sd|hd|fhd] [--no-skin] [--fps N] [--vsync]
 //                        [--simulate] [--info]
-//   bmjoy                    選曲画面
-//   bmjoy --keyconfig
-//   bmjoy --add-song-dir DIR --add-table URL   曲フォルダ・難易度表を登録する
-//   bmjoy --import-lr2 LR2files/Database/Score/名前.db   LR2のスコアを取り込む
+//   rd                    選曲画面
+//   rd --keyconfig
+//   rd --add-song-dir DIR --add-table URL   曲フォルダ・難易度表を登録する
+//   rd --import-lr2 LR2files/Database/Score/名前.db   LR2のスコアを取り込む
 //
 // 指定したオプションは設定ファイル（config.txt）に保存され、次からは指定しなくても使われる
 #include <SDL3/SDL.h>
@@ -63,14 +63,14 @@
 #include "util/dev.h"
 #include "util/startup_clock.h"
 
-using namespace bmj;
+using namespace rd;
 
-JoystickInit& bmj::joystick_init() {
+JoystickInit& rd::joystick_init() {
     static JoystickInit j;
     return j;
 }
 
-RawHid& bmj::raw_hid() {
+RawHid& rd::raw_hid() {
     static RawHid r;
     return r;
 }
@@ -157,7 +157,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         else if (a == "--chart-dump") o.chart_dump_list = next();  // 開発用：ファイルの 1 行ずつの譜面を読み、ノーツの中身の要約を出す  // まだ傾向を分析していない譜面を全部分析して終わる
         else if (a == "--export-chart-attrs") o.export_chart_attrs = next();  // 分析した傾向を書き出して終わる（配る分析の結果を作る）
         else if (a == "--serve") o.serve = true;
-#ifdef BMJ_DEV
+#ifdef RD_DEV
         else if (a == "--serve-dev") o.serve = true, o.serve_dev_port = std::atoi(next()), o.serve_dev_key = next();
         else if (a == "--borrow-test") o.borrow_test = next(), o.borrow_test_key = next(), o.borrow_test_hash = next();
 #endif
@@ -310,7 +310,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
         float y = 0;
         for (const std::string& l : lines) text.draw(0, y, font, white, l, 0, 0, 0), y += font;
         for (const std::string& l : temp) text.draw(0, y, font, white, l, 0, 0, 0), y += font;
-        if (const char* shot = dev_env("BMJ_LOADING_SHOT"); shot && !temp.empty()) {
+        if (const char* shot = dev_env("RD_LOADING_SHOT"); shot && !temp.empty()) {
             // 開発用：読み込み中の画面を1枚保存する
             static bool saved = false;
             if (!saved)
@@ -325,7 +325,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
     if (update) {
         SongDb db;
         if (db.open(song_db_path())) {
-            if (dev_env("BMJ_FORCE_RESCAN")) db.clear_charts();  // 開発用：全部読み直す
+            if (dev_env("RD_FORCE_RESCAN")) db.clear_charts();  // 開発用：全部読み直す
             int threads = static_cast<int>(std::max(2u, std::thread::hardware_concurrency()));
             // 曲フォルダの確かめは裏で行い、その間も画面を描き直して応答する（HDD の中身の情報が OS に残っていないと
             // 数分かかることがあり、その間黙っていると Windows に「応答なし」として閉じられる）
@@ -440,13 +440,13 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
     startup_mark("難易度表を読んだ");
     if (before_wait) before_wait();
     lines.push_back("");
-    lines.push_back("BMjoy version 0.1.0");
+    lines.push_back("RD version 0.1.0");
     lines.push_back("PUSH ANY KEY");
-    startup_shot = dev_env("BMJ_STARTUP_SHOT");  // 開発用：入力待ちの画面を1枚保存して終わる
+    startup_shot = dev_env("RD_STARTUP_SHOT");  // 開発用：入力待ちの画面を1枚保存して終わる
     draw({});
     if (startup_shot) return false;
     // 何か押されるまで待つ（キーボード・コントローラーのボタン・マウス）。開発用の撮影中は待たない
-    bool pushed = dev_env("BMJ_SELECT_SHOT") != nullptr || dev_env("BMJ_SCROLL_TEST") != nullptr || dev_env("BMJ_OPEN_TEST") != nullptr;
+    bool pushed = dev_env("RD_SELECT_SHOT") != nullptr || dev_env("RD_SCROLL_TEST") != nullptr || dev_env("RD_OPEN_TEST") != nullptr;
     while (!pushed && !closed) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -469,7 +469,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
 
 // 難易度表の譜面のうち、曲データベースに無いもの（持っていないもの）を 1 行ずつ出す：md5、レベル、曲名、アーティスト、表の名前、
 // 本体の URL、差分の URL（表に書いてあれば）。
-// 表は手元の版（BMjoy が起動のときに取ったもの）を使う。which は表の名前・記号・URL のどれか（名前は大文字小文字を区別せず、一部でよい）。"*" なら登録した表を全部。
+// 表は手元の版（RD が起動のときに取ったもの）を使う。which は表の名前・記号・URL のどれか（名前は大文字小文字を区別せず、一部でよい）。"*" なら登録した表を全部。
 // 外の道具（曲を取ってくる道具など）から使う
 // 登録した表の URL に、一覧のファイル（あれば）の URL を足したもの（重なりは 1 つ）
 std::vector<std::string> table_urls_with(const AppConfig& cfg, const std::string& file) {
@@ -717,15 +717,15 @@ int main(int argc, char** argv) {
 #endif
     if (!parse_args(argc, argv, opt)) {
         std::fprintf(stderr,
-                     "使い方: bmjoy <譜面ファイル> [--auto] [--gauge groove|hard|death|easy|pattack|gattack] [--gas]\n"
+                     "使い方: rd <譜面ファイル> [--auto] [--gauge groove|hard|death|easy|pattack|gattack] [--gas]\n"
                      "                [--hs 100] [--seed N] [--timing ms] [--lr2-root DIR] [--skin FILE]\n"
                      "                [--skin-opt 番号=選択] [--skin-res sd|hd|fhd] [--no-skin] [--fps N] [--vsync]\n"
                      "                [--simulate] [--info]\n"
-                     "       bmjoy --keyconfig\n");
+                     "       rd --keyconfig\n");
         return 2;
     }
     // ログを残す（開発用の道具としてパイプやファイルに出しているときは残さない）
-#ifdef BMJ_DEV
+#ifdef RD_DEV
     if (!output_is_redirected())
 #endif
         start_log(opt.serve ? "serve" : "body");
@@ -743,7 +743,7 @@ int main(int argc, char** argv) {
         int64_t total = 0;
         for (const auto& [size, rel] : f.files) total += size;
         std::printf("フォルダ %s（%s）：ファイル %zu、%.1f MB、譜面 %s\n", f.name.c_str(), f.id.c_str(), f.files.size(), total / 1048576.0, f.chart.c_str());
-        const std::string dir = (std::filesystem::temp_directory_path() / ("bmj_borrow_test_" + f.id)).string();
+        const std::string dir = (std::filesystem::temp_directory_path() / ("rd_borrow_test_" + f.id)).string();
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
         const auto t0 = std::chrono::steady_clock::now();
@@ -918,7 +918,7 @@ int main(int argc, char** argv) {
     int rc = 0;
     {
         App app;
-        migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の BMjoyfiles へ
+        migrate_old_data();  // 前の置き場（OS の設定フォルダ）の設定と記録を、実行ファイルの横の RDfiles へ
         app.cfg_path = config_path();
         if (load_config(app.cfg)) std::printf("設定: %s（プレイヤー %s）\n", app.cfg_path.c_str(), app.cfg.player.c_str());
         // コマンドラインの指定は設定に上書きし、終了時に保存する
@@ -1050,9 +1050,9 @@ int main(int argc, char** argv) {
             startup_mark("選曲画面に入る");
             run_select(app, prep);
         } else {
-            // 開発用：BMJ_CHART_DELAY のときは、選曲画面から遊ぶのと同じく曲データベースの譜面の情報を渡す
+            // 開発用：RD_CHART_DELAY のときは、選曲画面から遊ぶのと同じく曲データベースの譜面の情報を渡す
             std::vector<ChartRecord> recs;
-            if (dev_env("BMJ_CHART_DELAY")) {
+            if (dev_env("RD_CHART_DELAY")) {
                 std::error_code ec;
                 const std::string abs = std::filesystem::absolute(opt.chart_path, ec).lexically_normal().string();
                 recs = app.db.charts_in_folder(std::filesystem::path(abs).parent_path().string());
@@ -1068,6 +1068,7 @@ int main(int argc, char** argv) {
     if (!joystick_init().ready()) {
         // 準備中（Windows の DirectInput の列挙中）なら、待たずにそのまま終わる。設定やスコアは保存済み
         std::fflush(stdout);
+        stop_log();
         std::_Exit(rc);
     }
     joystick_init().join();

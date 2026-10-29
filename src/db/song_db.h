@@ -14,7 +14,7 @@
 
 struct sqlite3;
 
-namespace bmj {
+namespace rd {
 
 struct ChartRecord {
     std::string path, folder;  // 譜面ファイルと、それがあるフォルダ
@@ -161,15 +161,15 @@ public:
     PlayerStats player_stats() const;
     // LR2 から引き継いだプレイヤーの情報（LR2 の player 表の欄の名前 → 値。ID・名前・IR の番号・段位 grade_7 など）
     std::map<std::string, std::string> lr2_player_info() const;
-    // BMjoy で遊んだ分だけの累計
+    // RD で遊んだ分だけの累計
     PlayerStats own_player_stats() const;
-    // LR2 のコースの記録の鍵（BMjoy の鍵 → LR2 の元の鍵。頭の作者などの部分を、書き出すときに戻すため）
+    // LR2 のコースの記録の鍵（RD の鍵 → LR2 の元の鍵。頭の作者などの部分を、書き出すときに戻すため）
     std::unordered_map<std::string, std::string> lr2_course_keys() const;
     bool get_score(const std::string& sha256, ScoreRecord& out, int ln_mode = 0, int profile = 0) const;
     // プレーに影響する MOD の組み合わせ（play_mod_key）を記録の番号にする。空なら 0。初めての組み合わせなら新しく振る
     int mod_profile(const std::string& key);
     // LR2のスコアデータベース（LR2files/Database/Score/<名前>.db）を取り込む。取り込んだ件数を返す（失敗なら -1）。
-    // 手元に無い譜面のスコアも MD5 のまま残し、表示するときに BMjoy の記録と合わせて良いほうを使う。
+    // 手元に無い譜面のスコアも MD5 のまま残し、表示するときに RD の記録と合わせて良いほうを使う。
     // player 表（ID・名前・段位・累計など）も、欄ごとにそのまま残す
     int import_lr2_scores(const std::string& lr2_score_db, std::string* error = nullptr);
     // LR2 の曲データベース（song.db）のお気に入り（favorite 1 = FAVORITE、2 = IGNORE）を写す。写した数（読めなければ -1）
@@ -207,4 +207,4 @@ private:
 // attr があれば、譜面の傾向も分析する（chart/chart_attr.h）
 bool make_chart_record(const std::string& path, ChartRecord& out, ChartAttr* attr = nullptr);
 
-}  // namespace bmj
+}  // namespace rd

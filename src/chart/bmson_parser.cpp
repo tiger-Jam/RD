@@ -8,7 +8,7 @@
 
 #include "yyjson.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -290,4 +290,4 @@ BmsParseResult parse_bmson_text(std::string_view text) {
     return res.ok = true, res;
 }
 
-}  // namespace bmj
+}  // namespace rd

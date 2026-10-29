@@ -4,7 +4,7 @@
 #include <cmath>
 #include <map>
 
-namespace bmj {
+namespace rd {
 
 namespace {
 bool counts(const Note& n) { return n.kind != NoteKind::Invisible && n.kind != NoteKind::Mine; }
@@ -57,4 +57,4 @@ int hs_for_green(double lane_px, double visible, double green, double bpm, doubl
     return std::clamp(static_cast<int>(std::lround(hs)), kFloatingHsMin, kFloatingHsMax);
 }
 
-}  // namespace bmj
+}  // namespace rd

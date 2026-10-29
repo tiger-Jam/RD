@@ -10,7 +10,7 @@
 
 #include "chart/chart.h"
 
-namespace bmj {
+namespace rd {
 
 struct BmsParseOptions {
     uint32_t random_seed = 0;  // #RANDOM の評価に使うシード
@@ -41,4 +41,4 @@ BmsParseResult parse_bms_text(std::string_view text, const BmsParseOptions& opts
 // ファイルを読み、文字コードを判定してパースする。chart.base_dir にファイルのあるフォルダを入れる
 BmsParseResult parse_bms_file(const std::string& path, const BmsParseOptions& opts);
 
-}  // namespace bmj
+}  // namespace rd

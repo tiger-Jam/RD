@@ -5,13 +5,13 @@
 #include <functional>
 #include <string>
 
-namespace bmj {
+namespace rd {
 
 struct AppConfig;
 
-inline constexpr const char* kServiceUrl = "https://mac-mini.tailbfd111.ts.net:8443/bmjoy";
+inline constexpr const char* kServiceUrl = "https://mac-mini.tailbfd111.ts.net:8443/rd";
 
-// この PC の印（BMjoyfiles/Config/client_id.txt。無ければ作る）。ログの送り主を分けるため
+// この PC の印（RDfiles/Config/client_id.txt。無ければ作る）。ログの送り主を分けるため
 std::string client_id();
 
 // 残っているログ（書き終わったもの）を裏で送る。送ったものは Log/Sent へ移す。cfg.log_upload が偽なら何もしない
@@ -40,4 +40,4 @@ void remove_old_update_files();
 // 2 つの版（"2026.10.30.1" の形）を比べる。a が新しければ正、同じなら 0
 int compare_versions(const std::string& a, const std::string& b);
 
-}  // namespace bmj
+}  // namespace rd

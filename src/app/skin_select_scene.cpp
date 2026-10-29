@@ -14,7 +14,7 @@
 #include "render/frame_hooks.h"
 #include "util/dev.h"
 
-namespace bmj {
+namespace rd {
 
 namespace {
 
@@ -254,8 +254,8 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         if (o.src.gr == 105 && o.src.w > 0 && o.src.h > 0) pw = o.src.w, ph = o.src.h;
     SkinPreview preview(app, pw, ph);
     renderer.set_image_override(105, preview.texture());
-    // 開発用：BMJ_RENDER_DUMP のファイルに、プレー・選曲・リザルトのスキンの試し見で描くものを、決まった時刻ごとに書いて終わる
-    if (const char* dump = dev_env("BMJ_RENDER_DUMP")) {
+    // 開発用：RD_RENDER_DUMP のファイルに、プレー・選曲・リザルトのスキンの試し見で描くものを、決まった時刻ごとに書いて終わる
+    if (const char* dump = dev_env("RD_RENDER_DUMP")) {
         std::string out;
         for (int type : {0, 5, 7}) {
             catalog.select_type(type, app.cfg);
@@ -361,8 +361,8 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         }
         if (timers.on(2) && timers.lapse(2, t) >= skin.fadeout) done = true;
 
-        // 開発用：BMJ_SKINSELECT_KEYS の文字を 1 フレームに 1 つずつ。'0'〜'4' はその行を次へ、'j' は 1 行下へ送る
-        if (const char* keys = dev_env("BMJ_SKINSELECT_KEYS"); keys && keys[dev_key] && t > 300) {
+        // 開発用：RD_SKINSELECT_KEYS の文字を 1 フレームに 1 つずつ。'0'〜'4' はその行を次へ、'j' は 1 行下へ送る
+        if (const char* keys = dev_env("RD_SKINSELECT_KEYS"); keys && keys[dev_key] && t > 300) {
             const char k = keys[dev_key++];
             if (k >= '0' && k <= '4') catalog.step_custom(app.cfg, k - '0', 1);
             else if (k == 'j') catalog.set_scroll(catalog.scroll() + 1, app.cfg);
@@ -386,9 +386,9 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
         SDL_SetRenderDrawColor(app.renderer, 0, 0, 0, 255);
         SDL_RenderClear(app.renderer);
         renderer.draw_select(skin, st);
-        const char* wait = dev_env("BMJ_SKINSELECT_WAIT");
-        if (const char* shot = dev_env("BMJ_SKINSELECT_SHOT"); shot && t > (wait ? std::atof(wait) : 800)) {
-            // 開発用：1 枚保存して閉じる（BMJ_SKINSELECT_WAIT ms 待ってから。既定 800）
+        const char* wait = dev_env("RD_SKINSELECT_WAIT");
+        if (const char* shot = dev_env("RD_SKINSELECT_SHOT"); shot && t > (wait ? std::atof(wait) : 800)) {
+            // 開発用：1 枚保存して閉じる（RD_SKINSELECT_WAIT ms 待ってから。既定 800）
             if (SDL_Surface* sf = SDL_RenderReadPixels(app.renderer, nullptr)) SDL_SaveBMP(sf, shot), SDL_DestroySurface(sf);
             done = true;
         }
@@ -398,4 +398,4 @@ bool run_skin_select(App& app, SkinCatalog& catalog) {
     return select_changed;
 }
 
-}  // namespace bmj
+}  // namespace rd

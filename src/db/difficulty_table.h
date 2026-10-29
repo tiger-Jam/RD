@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 struct TableChart {
     std::string md5, sha256, level, title, artist, url, url_diff;
@@ -54,4 +54,4 @@ std::string resolve_url(const std::string& base, const std::string& rel);
 // HTMLから bmstable メタタグの content を取り出す
 std::string find_bmstable_meta(const std::string& html);
 
-}  // namespace bmj
+}  // namespace rd

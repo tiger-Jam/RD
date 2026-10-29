@@ -3,7 +3,7 @@
 #include "db/difficulty_table.h"
 #include "test.h"
 
-using namespace bmj;
+using namespace rd;
 
 TEST(table_resolve_url) {
     CHECK(resolve_url("https://a.b/x/table.html", "header.json") == "https://a.b/x/header.json");

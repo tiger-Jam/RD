@@ -8,12 +8,12 @@
 
 #include "input/keyconfig.h"
 
-namespace bmj {
+namespace rd {
 
-// LR2 のキーコンフィグの項目の番号（ボタン 101〜139 の下 2 桁）→ BMjoy のボタン。BMjoy に無い項目（2P）は -1。
+// LR2 のキーコンフィグの項目の番号（ボタン 101〜139 の下 2 桁）→ RD のボタン。RD に無い項目（2P）は -1。
 //   1〜7 = 1P の鍵盤、10 / 11 = 皿の 2 方向（10 = scratch_a、11 = scratch_b）、12 = START、13 = SELECT
 int keyconfig_item_button(int item);
-// ボタン 140 で前後に送る順（7 鍵モード）。n 番目の項目の番号（0 は「選んでいない」）。BMjoy では 1P の分だけ
+// ボタン 140 で前後に送る順（7 鍵モード）。n 番目の項目の番号（0 は「選んでいない」）。RD では 1P の分だけ
 constexpr int kKeyconfigOrder[] = {0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13};
 constexpr int kKeyconfigOrderCount = static_cast<int>(sizeof(kKeyconfigOrder) / sizeof(kKeyconfigOrder[0]));
 
@@ -45,4 +45,4 @@ private:
     int item_ = 1, slot_ = -1;
 };
 
-}  // namespace bmj
+}  // namespace rd

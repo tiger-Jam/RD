@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 // フォルダの中のファイルを、大文字小文字を区別せずに探す（LR2 は Windows のパスとして開くので区別しない）。
 // 名前の区切りは '/' でも '\' でもよい。サブフォルダはどの深さでもよく、".." も使える。
@@ -41,4 +41,4 @@ std::string normalize_key(const std::string& rel);
 std::string parent_dir(const std::string& path);
 std::string join_path(const std::string& dir, const std::string& rel);
 
-}  // namespace bmj
+}  // namespace rd

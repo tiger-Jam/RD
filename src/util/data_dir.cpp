@@ -11,7 +11,7 @@
 
 namespace fs = std::filesystem;
 
-namespace bmj {
+namespace rd {
 
 std::string base_dir() {
     const char* b = SDL_GetBasePath();
@@ -20,10 +20,11 @@ std::string base_dir() {
 
 namespace {
 
-constexpr const char* kDataDirName = "BMjoyfiles";
+constexpr const char* kDataDirName = "RDfiles";
 
-std::string pref_dir() {
-    char* d = SDL_GetPrefPath(nullptr, "BMjoy");
+// OS の設定フォルダ。app は名前（前の置き場は RD の前の名前の BMjoy）
+std::string pref_dir(const char* app = "RD") {
+    char* d = SDL_GetPrefPath(nullptr, app);
     std::string p = d ? d : "";
     SDL_free(d);
     return p;
@@ -34,7 +35,7 @@ bool writable(const fs::path& dir) {
     std::error_code ec;
     fs::create_directories(dir, ec);
     if (ec) return false;
-    const fs::path probe = dir / ".bmjoy_write_test";
+    const fs::path probe = dir / ".rd_write_test";
     {
         std::ofstream f(probe, std::ios::binary);
         if (!f) return false;
@@ -45,13 +46,17 @@ bool writable(const fs::path& dir) {
     return true;
 }
 
-// 前の名前（LR2files）の置き場が BMjoy のものなら、BMjoyfiles に名前を変える。
-// BMjoy のものかは、BMjoy だけが作るもの（songs.db・Player）で見る。LR2 の中に置かれた BMjoy（横に LR2body.exe がある）なら
+// 前の名前（BMjoyfiles・LR2files）の置き場が RD のものなら、RDfiles に名前を変える。
+// RD のものかは、RD だけが作るもの（songs.db・Player）で見る。LR2 の中に置かれた RD（横に LR2body.exe がある）なら
 // LR2 のフォルダなので名前は変えず、そのまま使う。名前を変えられなければ（ほかのプロセスが開いているなど）前の名前のまま使う
 fs::path data_root(const fs::path& base) {
     std::error_code ec;
-    const fs::path now = base / kDataDirName, old = base / "LR2files";
-    if (fs::exists(now, ec) || !fs::is_directory(old, ec)) return now;
+    const fs::path now = base / kDataDirName;
+    if (fs::exists(now, ec)) return now;
+    // BMjoyfiles は RD の前の名前（BMjoy）のときの置き場。それより前は LR2files
+    fs::path old = base / "BMjoyfiles";
+    if (!fs::is_directory(old, ec)) old = base / "LR2files";
+    if (!fs::is_directory(old, ec)) return now;
     const bool ours = fs::exists(old / "Database" / "songs.db", ec) || fs::is_directory(old / "Player", ec);
     if (!ours) return now;
     if (fs::exists(base / "LR2body.exe", ec)) return old;
@@ -85,7 +90,7 @@ std::string data_dir_name() {
 }
 
 bool migrate_old_data() {
-    const fs::path old = fs::u8path(pref_dir()), now = fs::u8path(data_dir());
+    const fs::path old = fs::u8path(pref_dir("BMjoy")), now = fs::u8path(data_dir());
     std::error_code ec;
     if (old.empty() || fs::equivalent(old, now, ec)) return false;
     if (fs::exists(now / "Config" / "config.txt", ec) || !fs::exists(old / "config.txt", ec)) return false;
@@ -133,12 +138,12 @@ std::string from_portable(const std::string& path) {
     const std::string base = base_dir();
     if (base.empty()) return path;
     fs::path rel = p;
-    // 前の名前（LR2files）で書いた BMjoy の置き場の中のパスは、今の置き場に読み替える
+    // 前の名前（LR2files・BMjoyfiles）で書いた RD の置き場の中のパスは、今の置き場に読み替える
     if (auto it = p.begin(); it != p.end()) {
         std::string first = it->string();
         for (char& c : first) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         // （実行ファイルの横の LR2files は、外部ツールのための書き出しの置き場なので、設定が指すことはない）
-        if (first == "lr2files" && data_dir_name() == kDataDirName) {
+        if ((first == "lr2files" || first == "bmjoyfiles") && data_dir_name() == kDataDirName) {
             rel = kDataDirName;
             for (++it; it != p.end(); ++it) rel /= *it;
         }
@@ -176,4 +181,4 @@ bool valid_player_id(const std::string& id) {
     return id.front() != ' ' && id.back() != ' ' && id.back() != '.';
 }
 
-}  // namespace bmj
+}  // namespace rd

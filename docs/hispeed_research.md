@@ -9,7 +9,7 @@
 - `LR2help/` = `/Users/fdk/BMjoy/参考に/LR2beta3 2/help/`（CP932。行番号は UTF-8 変換後も同じ）
 - `LR2hist` = `/Users/fdk/BMjoy/参考に/LR2beta3 2/history.txt`
 - `BRJ/` = `/Users/fdk/BMjoy/参考に/beatoraja-master/src/bms/player/beatoraja/`
-- `BMJ/` = `/Users/fdk/BMjoy/src/`
+- `RD/` = `/Users/fdk/BMjoy/src/`
 
 注意: OpenLR2 には原作 LR2 に無い拡張が混ざっている。README と `new_command(*.md)` で拡張と明記されているもの:
 **MAINBPM の HS-FIX**（`OpenLR2-main/README.md:35`）、**#SCROLL**（`new_command(bms).md:5`、2026-06 追加）、**LIFT**（`new_command(skin).md` の 421/422・slider 27/28・button 331、2026-08 追加。コード中にも `Extension: OpenLR2 lift` の注記）。
@@ -126,7 +126,7 @@ y_offset[px] = (現在の描画位置 − ノーツの描画位置) × (basespee
 - `m_HIDSUD`（`LR2help/4.html:60-63`）
 - 1P 側は判定ラインまでの高さの固定 60% 位置で切る（`Scene04_Play.cpp:330-346`）
 - 2P 側のコードは lanecoverv を混ぜた式になっていて、1P 側と一致しない（`:352-367`）。原作の挙動か移植の誤りかは [?]
-- BMjoy は 1P 側に合わせて判定ラインの位置を使っている（`BMJ/skin/skin_renderer.cpp` add_notes の注記）
+- RD は 1P 側に合わせて判定ラインの位置を使っている（`RD/skin/skin_renderer.cpp` add_notes の注記）
 
 #### LIFT
 
@@ -144,7 +144,7 @@ y_offset[px] = (現在の描画位置 − ノーツの描画位置) × (basespee
 | NUMBER | 10 | 1P HS（100 = 1.00） | 一致（:324） |
 | NUMBER | 11 | 2P HS | 一致（:325） |
 | NUMBER | 14 | 1P レーンカバー 0-100 | 一致（:328 "SUD+ 1P"） |
-| NUMBER | 15 | 2P レーンカバー | 一致（:329。BMjoy は 1P 値を返す＝誤り、と既に記載） |
+| NUMBER | 15 | 2P レーンカバー | 一致（:329。RD は 1P 値を返す＝誤り、と既に記載） |
 | SLIDER | 2 / 3 | HS 1P / 2P（範囲 10〜990） | 一致（:491-492） |
 | SLIDER | 4 / 5 | レーンカバー 1P / 2P | 一致（:493-494） |
 | BUTTON | 55 | HS-FIX（0..4、OpenLR2 は 5=MAINBPM） | 一致（:542） |
@@ -154,16 +154,16 @@ y_offset[px] = (現在の描画位置 − ノーツの描画位置) × (basespee
 
 - BPM の表示は別の ID（1815/1818 付近の max/min BPM、1978 付近の現在 BPM など）。緑数字系の ID は無い
 
-### A.4 BMjoy の現状と LR2 の比較
+### A.4 RD の現状と LR2 の比較
 
-| 項目 | BMjoy | LR2 | 判定 |
+| 項目 | RD | LR2 | 判定 |
 |---|---|---|---|
-| 位置の式 | `y = (render_beat − note.pos) × 480 × mult × HS × base/100 / 600`（`BMJ/skin/skin_renderer.cpp:248-252`）。pos は拍単位で STOP 中は進まない（`BMJ/chart/bms_parser.cpp:241-250`, `chart.cpp:15-19`） | 1920/小節 × HS/600 | **一致**（1 拍 480 単位と同じ） |
+| 位置の式 | `y = (render_beat − note.pos) × 480 × mult × HS × base/100 / 600`（`RD/skin/skin_renderer.cpp:248-252`）。pos は拍単位で STOP 中は進まない（`RD/chart/bms_parser.cpp:241-250`, `chart.cpp:15-19`） | 1920/小節 × HS/600 | **一致**（1 拍 480 単位と同じ） |
 | ソフランで速さが変わる | 変わる | 変わる | 一致 |
-| HS-FIX MAX/MIN/AVERAGE/MAIN | 150/基準 BPM の定数倍率（`BMJ/app/play_session.cpp:124-154`） | 同じ | 概ね一致。1 点違う: LR2 の MAX/MIN はヘッダ `#BPM` で初期化する（`LR2_bmsload.cpp:2446-2447`）。BMjoy はノーツ位置の BPM だけを使う。**開始 BPM にノーツが無い譜面で値が変わる**。MAINBPM が同数のときは、BMjoy は小さい BPM、OpenLR2 は不定 |
-| CONSTANT | 選べない（`BMJ/app/select_scene.cpp:195`, `:937`「CONSTANT は未対応」）。値 4 を受け取ると倍率 1.0 で OFF と同じ動き | 実時間比例・BPM 150 相当・#SCROLL 無視・STOP で停止・スコア保存なし | **未実装** |
+| HS-FIX MAX/MIN/AVERAGE/MAIN | 150/基準 BPM の定数倍率（`RD/app/play_session.cpp:124-154`） | 同じ | 概ね一致。1 点違う: LR2 の MAX/MIN はヘッダ `#BPM` で初期化する（`LR2_bmsload.cpp:2446-2447`）。RD はノーツ位置の BPM だけを使う。**開始 BPM にノーツが無い譜面で値が変わる**。MAINBPM が同数のときは、RD は小さい BPM、OpenLR2 は不定 |
+| CONSTANT | 選べない（`RD/app/select_scene.cpp:195`, `:937`「CONSTANT は未対応」）。値 4 を受け取ると倍率 1.0 で OFF と同じ動き | 実時間比例・BPM 150 相当・#SCROLL 無視・STOP で停止・スコア保存なし | **未実装** |
 | #SCROLL | 対応なし | 原作にも無い（OpenLR2 拡張） | 原作とは一致 |
-| HS 操作 | START/SELECT＋1・3・5 で −、2・4 で +、6・7 はカバー（無ければ HS）、カーソル上下は端で回る、ホイールでカバー、250 ms 以内の 2 回押しでカバー切替（`BMJ/app/play_session.cpp:440-505`） | 同じ | 一致 |
+| HS 操作 | START/SELECT＋1・3・5 で −、2・4 で +、6・7 はカバー（無ければ HS）、カーソル上下は端で回る、ホイールでカバー、250 ms 以内の 2 回押しでカバー切替（`RD/app/play_session.cpp:440-505`） | 同じ | 一致 |
 | カバーのスライダーをマウスでドラッグ | 不可（`lr2_skin_ids.md:493`） | 可 | 既知の差 |
 | 2P のカバー・HS | 1P 値を流用 | 個別 | 既知の差（SP では影響なし） |
 
@@ -388,7 +388,7 @@ LR2 との違い: LR2 は px/拍 の絶対値。beatoraja は **レーン高を�
 
 ---
 
-## BMjoy の設計への示唆
+## RD の設計への示唆
 
 ここに挙げるのは選択肢で、決めたことではない。
 

@@ -1,23 +1,23 @@
-﻿# BMjoy を配る形にまとめて zip にする（tools/release/make_release.sh から呼ぶ）。
-#   -Build    ビルドのフォルダ（BMjoybody.exe がある所）
+﻿# RD を配る形にまとめて zip にする（tools/release/make_release.sh から呼ぶ）。
+#   -Build    ビルドのフォルダ（RDbody.exe がある所）
 #   -Name     zip の中のフォルダの名前（zip の名前にもなる）
 #   -OutDir   zip を置く所
-#   -Assets   素材を取ってくる BMjoy の置き場（BMjoyfiles。スキン・サウンドセット・BGM・壁紙など）
+#   -Assets   素材を取ってくる RD の置き場（RDfiles。スキン・サウンドセット・BGM・壁紙など）
 #   -Notices  使っているもののライセンス（THIRD_PARTY_NOTICES.md）
 # 2 つ作る：
-#   <Name>.zip         はじめて入れる人向け。実行ファイル・DLL・公式の MOD と、素材の入った BMjoyfiles
+#   <Name>.zip         はじめて入れる人向け。実行ファイル・DLL・公式の MOD と、素材の入った RDfiles
 #   <Name>-update.zip  自動の更新で入れ替える分。実行ファイル・DLL・公式の MOD・ライセンスだけ（フォルダを切らずに置く）
 # 個人のもの（設定・曲データベース・記録・プレイヤー・リプレイ・ログ）は入れない。開発用のもの（.pdb・.lib・テストの exe）も入れない
 param([string]$Build, [string]$Name, [string]$OutDir, [string]$Assets, [string]$Notices)
 $ErrorActionPreference = "Stop"
-$work = Join-Path $env:TEMP "bmjoy_package"
+$work = Join-Path $env:TEMP "rd_package"
 if (Test-Path $work) { Remove-Item -Recurse -Force $work }
 $prog = Join-Path $work "program"
 $stage = Join-Path $work $Name
 New-Item -ItemType Directory -Force $prog, $stage | Out-Null
 
 # 実行ファイルと DLL（SDL・FFmpeg）、公式の MOD、ライセンス
-Copy-Item "$Build\bmjoy.exe", "$Build\BMjoybody.exe" $prog
+Copy-Item "$Build\rd.exe", "$Build\RDbody.exe" $prog
 Get-ChildItem $Build -Filter *.dll | Copy-Item -Destination $prog
 # Visual C++ のランタイム（vcruntime140.dll・msvcp140.dll など）。入れていない PC でも動くように、実行ファイルの横に置く
 $crt = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022\*\VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT" -Directory -ErrorAction SilentlyContinue |
@@ -58,11 +58,11 @@ New-Zip $prog $upd ""
 
 # はじめて入れる人向け：プログラムと素材
 Copy-Item -Recurse "$prog\*" $stage
-$files = Join-Path $stage "BMjoyfiles"
+$files = Join-Path $stage "RDfiles"
 New-Item -ItemType Directory -Force $files | Out-Null
 $personal = @("Database", "Player", "Replay", "Log", "Mods", "Update")
 Get-ChildItem $Assets -Directory | Where-Object { $personal -notcontains $_.Name } | ForEach-Object { Copy-Item -Recurse $_.FullName (Join-Path $files $_.Name) }
-# 設定の置き場に残っている個人のもの：BMjoy の設定とその控え、LR2 の設定（曲フォルダの場所などが入っている）
+# 設定の置き場に残っている個人のもの：RD の設定とその控え、LR2 の設定（曲フォルダの場所などが入っている）
 Get-ChildItem (Join-Path $files "Config") -File | Where-Object { $_.Name -like "config.txt*" -or $_.Name -in @("keyconfig.txt", "client_id.txt", "config.xml", "config.xmh", "openlr2-config.xml") } | Remove-Item -Force
 $full = Join-Path $OutDir "$Name.zip"
 if (Test-Path $full) { Remove-Item -Force $full }

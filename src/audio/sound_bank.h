@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace bmj {
+namespace rd {
 
 struct Sample {
     std::vector<float> pcm;      // ステレオのインターリーブ（float で持つとき）
@@ -38,4 +38,4 @@ private:
     std::vector<Sample> samples_;
 };
 
-}  // namespace bmj
+}  // namespace rd

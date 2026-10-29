@@ -6,7 +6,7 @@
 #include "audio/sound_bank.h"
 #include "test.h"
 
-using namespace bmj;
+using namespace rd;
 
 namespace {
 constexpr double kFs = 48000;

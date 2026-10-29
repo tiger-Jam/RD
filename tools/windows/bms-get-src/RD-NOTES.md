@@ -1,6 +1,6 @@
 # bms-get（改造版）
 
-元は bms-get（MIT ライセンス、LICENSE を参照）。BMjoy の収集（`tools/windows/bms-fetch.ps1`）のために次を足した。
+元は bms-get（MIT ライセンス、LICENSE を参照）。RD の収集（`tools/windows/bms-fetch.ps1`）のために次を足した。
 
 - exFAT でハードリンクが使えないときの保存（`store.rs`）
 - `--body-dir`：持っている本体のフォルダへ差分だけを入れる
