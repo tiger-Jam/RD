@@ -137,6 +137,8 @@ void relaunch_self() {
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
     if (CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, FALSE, 0, nullptr, wide(dir).c_str(), &si, &pi)) {
+        // 新しい版の窓を前に出せるようにする（Windows は、前にいるプロセスが許さないと、ほかのプロセスの窓を前に出さない）
+        AllowSetForegroundWindow(pi.dwProcessId);
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
     }
@@ -1229,6 +1231,8 @@ int main(int, char**) {
         }
         SDL_SetWindowMinimumSize(window, kW / 2, kH / 2);
         SDL_ShowWindow(window);
+        // 更新で起動し直したときに、前の版の窓の後ろに出ないようにする
+        SDL_RaiseWindow(window);
     }
     SDL_Renderer* r = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
     if (!r) {

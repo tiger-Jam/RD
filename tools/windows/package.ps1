@@ -25,6 +25,8 @@ $crt = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022\*\VC\Redi
 if ($crt) { Get-ChildItem $crt.FullName -Filter *.dll | Copy-Item -Destination $prog }
 else { Write-Output "Visual C++ のランタイムが見つからない（入れずに作る）" }
 Copy-Item -Recurse "$Build\mods" "$prog\mods"
+# 公開版にはまだ入れない MOD（推定難易度のフォルダ・判定の記録・判定のずれのバー）。更新で、入れてある人の分も消える
+foreach ($m in @("level-folders", "judge-log", "judge-bar")) { Remove-Item -Recurse -Force "$prog\mods\$m" -ErrorAction SilentlyContinue }
 Copy-Item -Recurse "$Build\skinpatch" "$prog\skinpatch"  # RD で足したスキンの表示（スキンのファイルは書き換えない）
 Copy-Item $Notices $prog
 # FFmpeg（LGPL 2.1）を入れるので、その全文も置く（vcpkg が入れたもの）
