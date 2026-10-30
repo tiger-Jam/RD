@@ -28,6 +28,7 @@ table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: .95em
 th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
 th { background: var(--box); white-space: nowrap; }
 kbd { display: inline-block; min-width: 1.6em; padding: 0 .4em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; font: .9em/1.6 Consolas, monospace; text-align: center; background: var(--bg); }
+pre.tree { font: .95em/1.6 Consolas, "MS Gothic", monospace; background: var(--box); padding: 10px 14px; border-radius: 6px; overflow-x: auto; }
 code { font: .92em Consolas, monospace; background: var(--box); padding: 1px 5px; border-radius: 4px; }
 .note { background: var(--warn); border-left: 4px solid var(--warn-line); padding: 10px 14px; border-radius: 6px; margin: 14px 0; }
 .tip { background: var(--box); border-left: 4px solid var(--accent); padding: 10px 14px; border-radius: 6px; margin: 14px 0; }
@@ -79,6 +80,17 @@ footer { margin-top: 56px; color: var(--sub); font-size: .9em; }
   <li><b>新しく始める</b>：曲フォルダ → 難易度表の順に登録します。</li>
   <li><b>あとで設定する</b>：何もせずに設定アプリに進みます。</li>
 </ul>
+
+<h3>LR2 のフォルダの選び方</h3>
+<p>選ぶのは、<b><code>LR2body.exe</code> と <code>LR2files</code> フォルダが並んで入っているフォルダ</b>です。スコアが入っている <code>Database</code> や、<code>LR2files</code> そのものを選ばないでください。</p>
+<pre class="tree">LR2beta3          ← これを選ぶ
+├ LR2body.exe
+├ LR2files
+│ ├ Database      ← ここではない
+│ ├ Theme
+│ └ …
+└ …</pre>
+<p>フォルダの名前は人によって違います（<code>LR2beta3</code>、<code>LR2</code> など）。違うフォルダを選ぶと「LR2 のフォルダではありません（LR2files がありません）」と出るので、選び直してください。</p>
 
 <h3>LR2 から引き継ぐもの</h3>
 <ul>
