@@ -45,6 +45,7 @@
 #include "util/hash.h"
 #include "db/difficulty_table.h"
 #include "app/lr2_import.h"
+#include "app/service.h"
 #include "db/song_db.h"
 #include "net/borrow.h"
 #include "game/judge.h"
@@ -61,6 +62,7 @@
 #include "skin/skin_parts.h"
 #include "util/data_dir.h"
 #include "util/log.h"
+#include "util/version.h"
 #include "util/dev.h"
 #include "util/startup_clock.h"
 
@@ -445,7 +447,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
     startup_mark("難易度表を読んだ");
     if (before_wait) before_wait();
     lines.push_back("");
-    lines.push_back("RD version 0.1.0");
+    lines.push_back(std::string("RD version ") + kRdVersion);
     lines.push_back("PUSH ANY KEY");
     startup_shot = dev_env("RD_STARTUP_SHOT");  // 開発用：入力待ちの画面を1枚保存して終わる
     draw({});
@@ -737,6 +739,7 @@ int main(int argc, char** argv) {
 #endif
         start_log(opt.serve ? "serve" : "body");
     set_skin_patch_dir(base_dir() + "skinpatch");  // RD で足したスキンの表示（スキンのファイルは書き換えない）
+    if (!opt.serve) remove_old_update_files();      // 前の更新でどけた古いファイル（設定アプリを通さずに起動したときも）
     // コマンドで動かすときも、先に設定を読んで今のプレイヤーを決める（決めずに曲データベースを開くと、
     // songs.db に空の記録の表を作り、プレイヤーの記録が見えなくなる）
     if (player_id().empty()) {

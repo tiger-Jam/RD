@@ -36,7 +36,7 @@ UpdateInfo check_update(const AppConfig& cfg);
 // progress には「何をしているか」を渡す。成功したら true（呼んだ側は自分を起動し直す）
 bool apply_update(const UpdateInfo& u, const std::function<void(const std::string&)>& progress, std::string& error);
 
-// 前の更新でどけた古いファイル（.old）を消す。起動のはじめに呼ぶ
+// 前の更新でどけた古いファイル（.old）を消す。起動のはじめに呼ぶ（裏で、消えるまで最大 1 分試す）
 void remove_old_update_files();
 
 // 2 つの版（"2026.10.30.1" の形）を比べる。a が新しければ正、同じなら 0

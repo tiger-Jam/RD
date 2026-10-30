@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -165,21 +166,30 @@ UpdateInfo check_update(const AppConfig& cfg) {
 }
 
 void remove_old_update_files() {
-    std::error_code ec;
-    const fs::path base = fs::u8path(base_dir());
-    if (base.empty()) return;
-    for (auto it = fs::recursive_directory_iterator(base, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
-        // データの置き場の中は見ない（曲やスキンが多い）
-        if (it->is_directory(ec) && it.depth() == 0 && it->path().filename().string() == data_dir_name()) {
-            it.disable_recursion_pending();
-            continue;
+    // 更新した直後は、前の版の設定アプリがまだ終わっておらず .old を掴んでいることがある。裏で 1 秒ごとに、消えるまで（最大 1 分）試す
+    std::thread([] {
+        std::error_code ec;
+        const fs::path base = fs::u8path(base_dir());
+        if (base.empty()) return;
+        fs::remove_all(fs::u8path(data_dir()) / "Update", ec);
+        for (int tries = 0; tries < 60; ++tries) {
+            int left = 0;
+            for (auto it = fs::recursive_directory_iterator(base, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                // データの置き場の中は見ない（曲やスキンが多い）
+                if (it->is_directory(ec) && it.depth() == 0 && it->path().filename().string() == data_dir_name()) {
+                    it.disable_recursion_pending();
+                    continue;
+                }
+                if (it->is_regular_file(ec) && it->path().extension() == ".old") {
+                    std::error_code e2;
+                    if (!fs::remove(it->path(), e2) || e2) ++left;
+                }
+            }
+            ec.clear();
+            if (left == 0) return;
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
-        if (it->is_regular_file(ec) && it->path().extension() == ".old") {
-            std::error_code e2;
-            fs::remove(it->path(), e2);
-        }
-    }
-    fs::remove_all(fs::u8path(data_dir()) / "Update", ec);
+    }).detach();
 }
 
 bool apply_update(const UpdateInfo& u, const std::function<void(const std::string&)>& progress, std::string& error) {
