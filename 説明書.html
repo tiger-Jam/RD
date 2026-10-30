@@ -108,7 +108,7 @@ footer { margin-top: 56px; color: var(--sub); font-size: .9em; }
 <h3>よく使うところ</h3>
 <div class="table-wrap"><table>
   <tr><th>MAIN</th><td>
-    プレイヤーの切り替え・作成・削除（削除は 2 回押し。最後の 1 人は消せません）。<br>
+    プレイヤーの切り替え・作成・削除（削除は 2 回押し。最後の 1 人は消せません。消したプレイヤーは残してあり、<a href="#data">戻せます</a>）。<br>
     ウインドウモード。<br>
     「データベース自動更新」：起動のたびに全部の曲フォルダを読み直すか、手動（選曲画面の <kbd>F8</kbd>）にするか。
   </td></tr>
@@ -250,10 +250,12 @@ footer { margin-top: 56px; color: var(--sub); font-size: .9em; }
   <tr><th>Config</th><td>全員で共通の設定</td></tr>
   <tr><th>Database</th><td>曲の一覧（songs.db）と難易度表</td></tr>
   <tr><th>Log</th><td>ログ</td></tr>
+  <tr><th>Deleted\Player</th><td>設定アプリで消したプレイヤー（<code>&lt;名前&gt;_&lt;消した日時&gt;</code>）</td></tr>
   <tr><th>Theme・Sound・Bgm など</th><td>スキンと音の素材</td></tr>
 </table></div>
 <ul>
   <li><b>記録を残しておきたいとき</b>：<code>RDfiles</code> の中の <code>Player</code> フォルダを写しておけば十分です。</li>
+  <li><b>消したプレイヤーを戻すとき</b>：設定アプリを閉じてから、<code>RDfiles\Deleted\Player</code> の中のフォルダを <code>RDfiles\Player</code> に移し、名前の後ろの <code>_日時</code> を消します。要らなければ <code>Deleted</code> フォルダごと消してかまいません。</li>
   <li><b>別の PC に移すとき</b>：フォルダごと写します。</li>
   <li><b>消すとき</b>：フォルダごと消せば終わりです。RD はほかの場所には何も書きません。</li>
 </ul>

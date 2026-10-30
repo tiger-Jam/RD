@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <thread>
 
+#include "app/config.h"
 #include "db/custom_folder.h"
 #include "db/lr2_export.h"
 #include "db/song_db.h"
@@ -564,4 +566,27 @@ TEST(song_db_chart_attr_bundle) {
         CHECK(attrs.count(sha) && attrs[sha].attr == kAttrRanda && attrs[sha].sub == kSubRandaMid && attrs[sha].grid_bpm > 150);
     }
     fs::remove_all(dir);
+}
+
+// プレイヤーを消すと、Deleted/Player/<ID>_<日時> に移して残す（keep が false なら本当に消す）
+TEST(player_delete_keeps_copy) {
+    const std::string id = "rdtest_delete_" + std::to_string(std::time(nullptr));
+    std::string err;
+    CHECK(create_player(id, "", &err));
+    std::ofstream(fs::u8path(data_dir() + "Player/" + id + "/score.db")) << "x";
+    CHECK(delete_player(id, &err));
+    CHECK(!fs::exists(fs::u8path(data_dir() + "Player/" + id)));
+    std::vector<fs::path> kept;
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(fs::u8path(deleted_players_dir()), ec))
+        if (e.path().filename().u8string().rfind(std::u8string(id.begin(), id.end()) + u8"_", 0) == 0) kept.push_back(e.path());
+    CHECK_EQ(kept.size(), size_t(1));
+    if (kept.size() == 1) CHECK(fs::exists(kept[0] / "score.db"));
+    for (const fs::path& p : kept) fs::remove_all(p, ec);
+    // 試験で作った空の置き場は片付ける（中に何かあれば消さない）
+    fs::remove(fs::u8path(deleted_players_dir()), ec);
+    fs::remove(fs::u8path(deleted_players_dir()).parent_path(), ec);
+    CHECK(create_player(id, "", &err));
+    CHECK(delete_player(id, &err, false));
+    CHECK(!fs::exists(fs::u8path(data_dir() + "Player/" + id)));
 }

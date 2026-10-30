@@ -162,7 +162,10 @@ bool load_config(AppConfig& cfg, const std::string& player = {});
 bool save_config(const AppConfig& cfg);
 // プレイヤーを作る（copy_from のプレイヤーの設定とキーコンフィグを写す。空なら写さない）・消す
 bool create_player(const std::string& id, const std::string& copy_from, std::string* error = nullptr);
-bool delete_player(const std::string& id, std::string* error = nullptr);
+// 消すときは RDfiles/Deleted/Player/<ID>_<日時> へ移して残す（keep が false なら本当に消す）
+bool delete_player(const std::string& id, std::string* error = nullptr, bool keep = true);
+// 消したプレイヤーを残す所
+std::string deleted_players_dir();
 // プレイヤーごとの設定と記録（RDfiles/Player/<ID>/config.txt・score.db）
 std::string player_config_path();
 std::string player_score_db_path();

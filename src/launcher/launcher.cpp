@@ -1596,7 +1596,7 @@ int main(int, char**) {
                         if (p != gone && next.empty()) next = p;
                     switch_player(next);
                     std::string err;
-                    message = delete_player(gone, &err) ? "プレイヤー " + gone + " を消しました" : err;
+                    message = delete_player(gone, &err) ? "プレイヤー " + gone + " を消しました（RDfiles\\Deleted に残してあります）" : err;
                     delete_armed = false;
                 }
             }
@@ -1938,7 +1938,7 @@ int main(int, char**) {
                         if (before == "player" && !from_lr2 && old.open(song_db_path(), before) && old.own_player_stats().playcount == 0) {
                             old.close();
                             std::string err;
-                            if (delete_player(before, &err)) std::printf("記録の無いプレイヤー %s を消した\n", before.c_str());
+                            if (delete_player(before, &err, false)) std::printf("記録の無いプレイヤー %s を消した\n", before.c_str());
                         }
                     }
                     message = "LR2 から引き継ぎました（プレイヤー " + std::to_string(job.res.players.size()) + "、曲フォルダ " +

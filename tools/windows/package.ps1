@@ -64,7 +64,7 @@ New-Zip $prog $upd ""
 Copy-Item -Recurse "$prog\*" $stage
 $files = Join-Path $stage "RDfiles"
 New-Item -ItemType Directory -Force $files | Out-Null
-$personal = @("Database", "Player", "Replay", "Log", "Mods", "Update")
+$personal = @("Database", "Player", "Replay", "Log", "Mods", "Update", "Deleted")
 Get-ChildItem $Assets -Directory | Where-Object { $personal -notcontains $_.Name } | ForEach-Object { Copy-Item -Recurse $_.FullName (Join-Path $files $_.Name) }
 # 設定の置き場に残っている個人のもの：RD の設定とその控え、LR2 の設定（曲フォルダの場所などが入っている）
 Get-ChildItem (Join-Path $files "Config") -File | Where-Object { $_.Name -like "config.txt*" -or $_.Name -in @("keyconfig.txt", "client_id.txt", "config.xml", "config.xmh", "openlr2-config.xml") } | Remove-Item -Force

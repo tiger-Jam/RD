@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -470,10 +471,30 @@ bool create_player(const std::string& id, const std::string& copy_from, std::str
     return true;
 }
 
-bool delete_player(const std::string& id, std::string* error) {
+std::string deleted_players_dir() { return data_dir() + "Deleted/Player"; }
+
+bool delete_player(const std::string& id, std::string* error, bool keep) {
     if (!valid_player_id(id)) return false;
     std::error_code ec;
-    fs::remove_all(fs::u8path(data_dir() + "Player/" + id), ec);
+    const fs::path dir = fs::u8path(data_dir() + "Player/" + id);
+    if (!keep) {
+        fs::remove_all(dir, ec);
+        if (ec) return set_error(error, "消せません: " + ec.message());
+        return true;
+    }
+    // 押し間違えても戻せるように、消さずに移す。名前に消した日時を付ける（同じ ID を何度消しても重ならない）
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &now);
+#else
+    localtime_r(&now, &tm);
+#endif
+    char stamp[32];
+    std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &tm);
+    const fs::path to = fs::u8path(deleted_players_dir()) / fs::u8path(id + "_" + stamp);
+    fs::create_directories(to.parent_path(), ec);
+    fs::rename(dir, to, ec);
     if (ec) return set_error(error, "消せません: " + ec.message());
     return true;
 }
