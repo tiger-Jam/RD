@@ -858,6 +858,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                 scripts.play_end(mr);
                 report_mod_errors();
             }
+            const uint64_t result_enter_ns = SDL_GetTicksNS();
             // 比較に使う「このプレイの前の自己ベスト」は、記録する前に取っておく
             ctx.old_exscore = has_best ? best_score.exscore : 0;
             ctx.old_maxcombo = has_best ? best_score.max_combo : 0;
@@ -911,7 +912,14 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             ctx.in_result = true;
             // リザルトのフリップ：プレイスキンの旗から始め、リザルトスキンの #FLIPRESULT / #DISABLEFLIP を読み込み順に当てる
             ctx.result_flip = skin && skin->flip_result;
+            const uint64_t rskin_ns = SDL_GetTicksNS();
             app.load_result_skin(ctx.load_options());
+            if (dev_env("RD_TIMING"))
+                std::printf("リザルト：記録と入力の記録 %.0f ms、リザルトスキン %.0f ms\n", (rskin_ns - result_enter_ns) / 1e6,
+                            (SDL_GetTicksNS() - rskin_ns) / 1e6);
+            if (dev_env("RD_AUTO_RESULT"))
+                // 開発用：リザルトを 5 秒出したら終わる
+                std::thread([] { SDL_Delay(5000); SDL_Event ev{}; ev.type = SDL_EVENT_QUIT; SDL_PushEvent(&ev); }).detach();
             rskin = app.result_skin.get();
             if (rskin) ctx.result_flip = rskin->flip_result;
             // リザルトのスキンのカスタマイズ（op 900〜）は、リザルトのスキンの値を見る

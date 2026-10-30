@@ -9,9 +9,11 @@
 namespace rd {
 
 // 選曲画面の下ごしらえ（曲の一覧づくり）。自分の曲データベースの接続を使うので、裏のスレッドで作ってよい。
-// 起動の画面で「PUSH ANY KEY」を待っている間に作っておき、READY のあとすぐ選曲画面に入れるようにする
+// 起動の画面で「PUSH ANY KEY」を出す前に作っておき、READY のあとすぐ選曲画面に入れるようにする
 struct SelectPrep;
 std::shared_ptr<SelectPrep> prepare_select(App& app);
+// prepare_select が今している段（起動の画面に出す。していなければ空）
+const char* select_prep_step();
 // 選曲スキンを先に読んでおく（画面の処理から呼ぶ。run_select はもう一度は読まない）
 void preload_select_skin(App& app);
 

@@ -390,6 +390,7 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
         // 外部ツールのための LR2 の形の曲データベースとスコア（曲が変わったときと、まだ無いときに書く）
         std::error_code ec;
         if (app.cfg.lr2_export && (songs_changed || !std::filesystem::exists(std::filesystem::u8path(lr2_database_dir() + "/song.db"), ec))) {
+            draw({"Exporting song database..."});
             SongDb db;
             if (db.open(song_db_path())) write_lr2_files(db, app.cfg, true);
         }
@@ -446,11 +447,14 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
         }
     }
     startup_mark("難易度表を読んだ");
+    // 選曲スキンを読む間は画面が止まるので、先に出しておく
+    draw({"Loading skin..."});
     if (before_wait) before_wait();
     if (prepared) {
         const auto t0 = std::chrono::steady_clock::now();
         while (!closed && !prepared()) {
-            draw({});
+            const char* step = select_prep_step();
+            draw({std::string(*step ? step : "Building song list") + "..."});
             SDL_Delay(16);
         }
         const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -706,7 +710,8 @@ int main(int argc, char** argv) {
     // ログをファイルに流しても、落ちたり止まったりしたときに残るようにする
 #if defined(_WIN32)
     // コンソールへはすぐ出す。ファイルやパイプ（ほかの道具が読む一覧など）へは、まとめて書く（1 行ずつ書くと何十倍も遅い）
-    if (output_is_redirected()) std::setvbuf(stdout, nullptr, _IOFBF, 1 << 16);
+    // 開発用：RD_TIMING があればすぐに書く（止まったときにも途中まで残る）
+    if (output_is_redirected() && !dev_env("RD_TIMING")) std::setvbuf(stdout, nullptr, _IOFBF, 1 << 16);
     else std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     // コマンドプロンプトから動かしたときに、日本語のログを読めるようにする

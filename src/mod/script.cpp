@@ -1,6 +1,7 @@
 #include "mod/script.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
@@ -11,6 +12,7 @@
 // Lua は C++ として組んでいる（CMakeLists.txt）ので、extern "C" の lua.hpp ではなく素のヘッダを読む
 #include "lauxlib.h"
 #include "lua.h"
+#include "util/dev.h"
 #include "lualib.h"
 
 namespace fs = std::filesystem;
@@ -559,6 +561,8 @@ std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& 
             continue;
         }
         if (!s->has("build_folders")) continue;
+        // 開発用：RD_TIMING があれば、MOD ごとに譜面を渡すまでと、MOD の処理の時間を出す
+        auto t0 = std::chrono::steady_clock::now(), t1 = t0;
         bool ok = s->run("build_folders", [&](lua_State* L) {
             lua_createtable(L, static_cast<int>(charts.size()), 0);
             lua_Integer i = 0;
@@ -566,6 +570,7 @@ std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& 
                 push_chart(L, c, scores, m->chart_attr ? extra : ModChartExtra{});
                 lua_rawseti(L, -2, ++i);
             }
+            t1 = std::chrono::steady_clock::now();
         }, kStepsFolders, [&](lua_State* L) {
             // 戻り値はフォルダの配列
             if (!lua_istable(L, -1)) return;
@@ -579,6 +584,10 @@ std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& 
                 lua_pop(L, 1);
             }
         });
+        if (dev_env("RD_TIMING"))
+            std::printf("      MOD %s：譜面を渡す %.0f ms、MOD の処理 %.0f ms\n", m->id.c_str(),
+                        std::chrono::duration<double, std::milli>(t1 - t0).count(),
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count());
         if (!ok && errors) errors->push_back(s->error());
     }
     return out;

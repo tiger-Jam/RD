@@ -284,6 +284,7 @@ std::vector<ModFolder> make_mod_folders(const Library& lib, const std::vector<co
             auto a = std::make_shared<std::unordered_map<std::string, ChartAttr>>();
             if (rd.open(song_db_path())) *a = rd.chart_attrs();
             lib.attrs = std::move(a);
+            if (dev_env("RD_TIMING")) std::printf("      MOD：譜面の傾向を読んだ（%zu 件）\n", lib.attrs->size());
         }
         for (size_t ti = 0; ti < lib.tables.size(); ++ti) {
             const DifficultyTable& t = lib.tables[ti];
@@ -306,8 +307,17 @@ std::vector<ModFolder> make_mod_folders(const Library& lib, const std::vector<co
 // MOD のフォルダも、ここで作り直す
 void load_custom(Library& lib, const std::vector<const ModManifest*>& mods, const std::vector<std::string>& custom_dirs,
                  const std::unordered_map<std::string, int>& favs) {
+    // 開発用：RD_TIMING があれば内訳を出す
+    uint64_t lap_ns = SDL_GetTicksNS();
+    auto lap = [&](const char* what) {
+        if (!dev_env("RD_TIMING")) return;
+        uint64_t now = SDL_GetTicksNS();
+        std::printf("    %s %.0f ms\n", what, (now - lap_ns) / 1e6);
+        lap_ns = now;
+    };
     std::vector<std::string> errors;
     lib.mod_folders = make_mod_folders(lib, mods, &errors);
+    lap("MOD のフォルダ");
     for (const std::string& e : errors) std::printf("MOD のフォルダを作れない：%s\n", e.c_str());
     lib.custom_nodes.clear();
     for (const std::string& d : custom_dirs) {
@@ -319,7 +329,9 @@ void load_custom(Library& lib, const std::vector<const ModManifest*>& mods, cons
         return;
     }
     auto q = std::make_shared<CustomFolderQuery>();
+    lap("カスタムフォルダを読む");
     if (q->build(lib.charts, lib.scores, favs)) lib.custom_query = q;
+    lap("カスタムフォルダの表を作る");
 }
 
 void load_custom(Library& lib, App& app, const std::unordered_map<std::string, int>& favs) {
@@ -727,7 +739,16 @@ std::vector<ChartRecord> playable_charts(const SongDb& db) {
 
 void load_charts(Library& lib, const SongDb& db, const AppConfig& cfg) {
     lib.roots = cfg.song_dirs;
+    // 開発用：RD_TIMING があれば内訳を出す
+    uint64_t lap_ns = SDL_GetTicksNS();
+    auto lap = [&](const char* what) {
+        if (!dev_env("RD_TIMING")) return;
+        uint64_t now = SDL_GetTicksNS();
+        std::printf("    %s %.0f ms\n", what, (now - lap_ns) / 1e6);
+        lap_ns = now;
+    };
     lib.charts = playable_charts(db);
+    lap("譜面：曲データベースから読む");
     // 登録した曲フォルダそのものが無い（ドライブが無い・別の PC へ持ってきた）ときは、その中の譜面を持っていない扱いにする。
     // 曲データベースからは消さない（つなぎ直せば戻る）。見るのは曲フォルダの 1 段目だけ（譜面ごとには確かめない）
     std::vector<std::string> gone;
@@ -764,7 +785,9 @@ void load_charts(Library& lib, const SongDb& db, const AppConfig& cfg) {
                          lib.charts.end());
         std::printf("無い曲フォルダの譜面 %zu 件を外した\n", before - lib.charts.size());
     }
+    lap("譜面：曲フォルダがあるか確かめる");
     fill_difficulties(lib.charts);
+    lap("譜面：難易度を埋める");
 }
 
 
@@ -867,7 +890,17 @@ struct SelectPrep {
     RecordProfile profile;
 };
 
+namespace {
+std::atomic<const char*> g_prep_step{""};
+}
+
+const char* select_prep_step() { return g_prep_step.load(); }
+
 std::shared_ptr<SelectPrep> prepare_select(App& app) {
+    struct StepReset {
+        ~StepReset() { g_prep_step = ""; }
+    } step_reset;
+    g_prep_step = "Loading charts";
     auto p = std::make_shared<SelectPrep>();
     SongDb db;  // 自分の接続（裏のスレッドで動かすため、app.db は使わない）
     if (!db.open(song_db_path())) return nullptr;
@@ -883,19 +916,24 @@ std::shared_ptr<SelectPrep> prepare_select(App& app) {
     };
     load_charts(lib, db, app.cfg);
     lap("譜面を読む");
+    g_prep_step = "Loading difficulty tables";
     for (const std::string& u : app.cfg.tables) {
         DifficultyTable t;
         if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
         lib.tables.push_back(std::move(t));
     }
     lap("難易度表を読む");
+    g_prep_step = "Loading scores";
     p->profile = record_profile(db, app);
     lib.load_records(db, app.cfg.ln_mode, p->profile);
     p->favs = db.favorites();
     lap("記録を読む");
     lib.build_indexes();
+    lap("索引");
+    g_prep_step = "Building custom folders";
     load_custom(lib, app, p->favs);
     lap("カスタムフォルダと MOD のフォルダ");
+    g_prep_step = "Building song list";
     p->root = build_tree(lib, new_song_since(app.cfg.title_flash), p->favs);
     lap("一覧を組む");
     return p;
@@ -3727,7 +3765,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             }
         }
         if (const char* shot = dev_env("RD_SELECT_SHOT"); shot && settled) {
-            // 開発用：更新が終わってから1枚保存して終わる。RD_SELECT_KEYS の文字で操作してから撮る（d=下 e=決定）
+            // 開発用：更新が終わってから1枚保存して終わる。RD_SELECT_KEYS の文字で操作してから撮る（d=下 e=決定 a=オートで決定）
             static size_t step = 0;
             const char* keys = dev_env("RD_SELECT_KEYS");
             if (keys && keys[step]) {
@@ -3743,6 +3781,13 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                 else if (k == 'D') move(10);
                 else if (k == 'u') move(-1);
                 else if (k == 'e') decide();
+                else if (k == 'a') {
+                    // オートで開始（6 番と同じ）
+                    bool was = autoplay;
+                    autoplay = true;
+                    decide();
+                    autoplay = was;
+                }
                 else if (k == 'b') back();
                 else if (k == 'k') run_key_wizard(r, text, app.keycfg, keyconfig_path());
                 else if (k == 'K' && !to_keyconfig) {
