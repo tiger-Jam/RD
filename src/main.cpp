@@ -288,10 +288,11 @@ int latency_test(bool exclusive, int buffer) {
 //   曲データベースの更新中は「Now Loading...」と読み込み中の譜面のパス（1件ごとに描き直す）、
 //   難易度表の取得中は表ごとの状態を出し、最後に版の名前と「PUSH ANY KEY」を出して入力を待つ。押すと「READY」。
 // 閉じられたら false
-// before_wait は「PUSH ANY KEY」を出す直前に呼ぶ（選曲画面の下ごしらえを始め、押されるのを待つ間に済ませる）
+// before_wait は「PUSH ANY KEY」を出す直前に呼ぶ（選曲画面の下ごしらえを始める）。prepared が false を返す間は
+// 「PUSH ANY KEY」を出さずに待つ（READY のあとに処理を残さない）
 // only が空でなければ、曲フォルダのうちそのフォルダだけを読む（「手動」のときの、まだ読んでいない曲フォルダ）
 bool startup_screen(App& app, bool update, const std::function<void()>& before_wait = {},
-                    const std::vector<std::string>& only = {}) {
+                    const std::function<bool()>& prepared = {}, const std::vector<std::string>& only = {}) {
     // LR2（DxLib の printfDx）と同じく、拡大せずにウィンドウの画素にそのまま、ぼかさない 16px の文字で描く
     frame_target_set(app.renderer, 0, 0);
     SDL_SetRenderLogicalPresentation(app.renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
@@ -446,6 +447,16 @@ bool startup_screen(App& app, bool update, const std::function<void()>& before_w
     }
     startup_mark("難易度表を読んだ");
     if (before_wait) before_wait();
+    if (prepared) {
+        const auto t0 = std::chrono::steady_clock::now();
+        while (!closed && !prepared()) {
+            draw({});
+            SDL_Delay(16);
+        }
+        const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        if (waited > 1.0) std::printf("選曲画面の一覧ができるのを %.1f 秒待った\n", waited);
+        if (closed) return false;
+    }
     lines.push_back("");
     lines.push_back(std::string("RD version ") + kRdVersion);
     lines.push_back("PUSH ANY KEY");
@@ -1046,7 +1057,7 @@ int main(int argc, char** argv) {
                 update = !unread.empty();
                 startup_mark("まだ読んでいない曲フォルダを確かめた");
             }
-            // 「PUSH ANY KEY」を待っている間に、選曲画面の一覧を裏で作り、選曲スキンを読んでおく（READY のあと待たせない）
+            // 選曲画面の一覧を裏で作り、選曲スキンを読んでおく。両方済んでから「PUSH ANY KEY」を出す
             auto prepare = [&] {
                 select_prep = std::async(std::launch::async, [&app] {
                     auto prep = prepare_select(app);
@@ -1056,7 +1067,11 @@ int main(int argc, char** argv) {
                 if (!opt.no_skin && opt.skin_opts.empty()) preload_select_skin(app);
                 startup_mark("選曲スキンを読んだ");
             };
-            if (!startup_screen(app, update, prepare, unread)) {
+            auto prepared = [&] {
+                return !select_prep.valid() ||
+                       select_prep.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+            };
+            if (!startup_screen(app, update, prepare, prepared, unread)) {
                 if (select_prep.valid()) select_prep.wait();
                 return 0;
             }
@@ -1090,26 +1105,6 @@ int main(int argc, char** argv) {
             run_keyconfig(app.window, app.renderer, app.keycfg, keyconfig_path());
         } else if (opt.chart_path.empty()) {
             app.scene_end_ns = SDL_GetTicksNS();
-            // 選曲画面の一覧ができるまで（READY の間）も、窓の知らせを処理する（止めていると「応答なし」になり、閉じられもしない）。
-            // 待っている間に閉じられたら、そのまま終わる（設定とスコアは保存済み）
-            if (select_prep.valid()) {
-                const auto t0 = std::chrono::steady_clock::now();
-                while (select_prep.wait_for(std::chrono::milliseconds(16)) != std::future_status::ready) {
-                    SDL_Event e;
-                    bool quit = false;
-                    while (SDL_PollEvent(&e))
-                        if (e.type == SDL_EVENT_QUIT) quit = true;
-                    if (quit) {
-                        std::printf("選曲画面の一覧を作っている間に閉じた（%.1f 秒待った）\n",
-                                    std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
-                        std::fflush(stdout);
-                        stop_log();
-                        std::_Exit(0);
-                    }
-                }
-                const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-                if (waited > 1.0) std::printf("READY のあと、選曲画面の一覧ができるのを %.1f 秒待った\n", waited);
-            }
             auto prep = select_prep.valid() ? select_prep.get() : nullptr;
             startup_mark("選曲画面に入る");
             run_select(app, prep);
