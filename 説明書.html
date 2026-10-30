@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revenant Deliria 説明書</title>
+<style>
+:root {
+  --bg: #fbfaf8; --fg: #1d1d1f; --sub: #5b5b63; --line: #e2e0dc; --accent: #7a3cff; --box: #f1eff9; --warn: #fff4e0; --warn-line: #f0c36d;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16161a; --fg: #ececf1; --sub: #a3a3ad; --line: #2e2e36; --accent: #b291ff; --box: #221f2e; --warn: #2d2615; --warn-line: #8a6d2a; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.8 "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 1.9em; margin: 0 0 4px; letter-spacing: .02em; }
+.lead { color: var(--sub); margin: 0 0 28px; }
+h2 { font-size: 1.3em; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--accent); }
+h3 { font-size: 1.05em; margin: 28px 0 8px; }
+p, li { margin: 6px 0; }
+ul, ol { padding-left: 1.4em; }
+nav { background: var(--box); border-radius: 10px; padding: 12px 18px; }
+nav ol { margin: 0; columns: 2; column-gap: 32px; }
+@media (max-width: 600px) { nav ol { columns: 1; } }
+a { color: var(--accent); }
+table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: .95em; }
+th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--box); white-space: nowrap; }
+kbd { display: inline-block; min-width: 1.6em; padding: 0 .4em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; font: .9em/1.6 Consolas, monospace; text-align: center; background: var(--bg); }
+code { font: .92em Consolas, monospace; background: var(--box); padding: 1px 5px; border-radius: 4px; }
+.note { background: var(--warn); border-left: 4px solid var(--warn-line); padding: 10px 14px; border-radius: 6px; margin: 14px 0; }
+.tip { background: var(--box); border-left: 4px solid var(--accent); padding: 10px 14px; border-radius: 6px; margin: 14px 0; }
+.table-wrap { overflow-x: auto; }
+footer { margin-top: 56px; color: var(--sub); font-size: .9em; }
+</style>
+</head>
+<body>
+<main>
+<h1>Revenant Deliria 説明書</h1>
+<p class="lead">Revenant Deliria（RD）は、LR2 と同じ感覚で遊べる BMS プレイヤーです。この版は身内向けの試験版です。おかしなところがあったら作者に教えてください。</p>
+
+<nav>
+<ol>
+  <li><a href="#install">入れ方</a></li>
+  <li><a href="#first">最初の起動</a></li>
+  <li><a href="#launcher">設定アプリ</a></li>
+  <li><a href="#start">起動の画面</a></li>
+  <li><a href="#select">選曲画面</a></li>
+  <li><a href="#play">プレー中</a></li>
+  <li><a href="#result">リザルト</a></li>
+  <li><a href="#mod">MOD</a></li>
+  <li><a href="#trial">試験的な機能</a></li>
+  <li><a href="#update">自動の更新とログ</a></li>
+  <li><a href="#data">データの置き場と消し方</a></li>
+  <li><a href="#trouble">困ったとき</a></li>
+</ol>
+</nav>
+
+<h2 id="install">1. 入れ方</h2>
+<ol>
+  <li>zip を好きな場所に広げます。デスクトップやドキュメントなど、自分が書き込める場所にしてください（<code>C:\Program Files</code> の中は避けてください）。</li>
+  <li>広げたフォルダの <code>RD.exe</code> を開きます。これが設定アプリで、ここから遊びます。</li>
+</ol>
+<p>フォルダの中身は次のとおりです。</p>
+<div class="table-wrap"><table>
+  <tr><th>RD.exe</th><td>設定アプリ。設定を変え、「RDの起動」で遊び始めます。</td></tr>
+  <tr><th>RDbody.exe</th><td>ゲームの本体。設定アプリから起動されます。</td></tr>
+  <tr><th>RDfiles</th><td>スキン・音・BGM などの素材と、あなたの設定・記録が入るフォルダ。</td></tr>
+  <tr><th>mods</th><td>公式の MOD。</td></tr>
+  <tr><th>skinpatch</th><td>RD がスキンに足す表示。スキンのファイルそのものは書き換えません。</td></tr>
+</table></div>
+<div class="note">Windows が「PC を保護しました」と出して止めたときは、「詳細情報」→「実行」で開けます。</div>
+
+<h2 id="first">2. 最初の起動</h2>
+<p>最初に設定アプリを開くと「RD へようこそ」と出て、3 つから選べます。</p>
+<ul>
+  <li><b>LR2 から引き継ぐ</b>：LR2 のフォルダ（<code>LR2body.exe</code> がある所）を選びます。</li>
+  <li><b>新しく始める</b>：曲フォルダ → 難易度表の順に登録します。</li>
+  <li><b>あとで設定する</b>：何もせずに設定アプリに進みます。</li>
+</ul>
+
+<h3>LR2 から引き継ぐもの</h3>
+<ul>
+  <li>プレイヤー全員分（LR2 のプレイヤーごとに、同じ名前のプレイヤーを作ります）と、それぞれのスコア</li>
+  <li>曲フォルダ、難易度表の URL、曲の情報、段位・コース、お気に入りと IGNORE</li>
+  <li>遊び方・音・選曲・画面の設定、キーコンフィグ（1P）、スキンのカスタマイズ</li>
+  <li>スキン・サウンドセット・BGM・壁紙・カスタムフォルダの素材（RDfiles に写します）</li>
+</ul>
+<p>終わると、LR2 で最後に使っていたプレイヤーに切り替わります。選曲のソートと鍵盤数の絞り込みは引き継ぎません。</p>
+<div class="tip"><b>LR2 はそのまま遊べます。</b>RD は LR2 のファイルを読むだけで、書き換えません。あとから設定アプリの RD タブの「LR2 から引き継ぐ」で、もう一度取り込むこともできます。</div>
+
+<h2 id="launcher">3. 設定アプリ（RD.exe）</h2>
+<p>見た目は LR2 の設定と同じ並びです。灰色の項目は、まだ使えないものです。下の「RDの起動」で遊び始めます。</p>
+
+<h3>よく使うところ</h3>
+<div class="table-wrap"><table>
+  <tr><th>MAIN</th><td>
+    プレイヤーの切り替え・作成・削除（削除は 2 回押し。最後の 1 人は消せません）。<br>
+    ウインドウモード。<br>
+    「データベース自動更新」：起動のたびに全部の曲フォルダを読み直すか、手動（選曲画面の <kbd>F8</kbd>）にするか。
+  </td></tr>
+  <tr><th>JUKEBOX1</th><td>曲フォルダの登録。「追加」か、フォルダを窓にドロップします。</td></tr>
+  <tr><th>OPTION</th><td>ハイスピの MIN・MAX・MARGIN、基本スクロールスピード、フォルダランプ、「右クリックで曲を終了させない」など。</td></tr>
+  <tr><th>SYSTEM</th><td>垂直同期、音の出し方（WASAPI の共有・排他）、バッファ数。</td></tr>
+  <tr><th>RD</th><td>
+    「LR2 から引き継ぐ」、「曲の一覧を作り直す」、「曲フォルダに入れた曲を自動で読み込む」、<br>
+    「スキンと音のフォルダ」、「スキンの解像度」、「描画の上限（fps）」、「難易度表の URL」の追加と登録解除、<br>
+    「選曲中に曲のプレビューを鳴らす」、「キー音を軽く読み込む（16 ビット）」、「メモリを節約する」、<br>
+    「ログを作者へ送る」、「自動で新しい版に更新する」など。
+  </td></tr>
+  <tr><th>PLAY</th><td>
+    ハイスピのモード（クラシック／フローティング）、緑数字、基準の BPM、ギアチェン、LIFT、<br>
+    LN の種類（LN／CN／HCN）、判定の自動調整（OFF／ON／SILENT）。
+  </td></tr>
+  <tr><th>MOD</th><td>MOD を選んで使います（<a href="#mod">8. MOD</a>）。</td></tr>
+</table></div>
+
+<div class="tip"><b>曲がとても多い人へ</b>：MAIN の「データベース自動更新」を「起動時に全フォルダ」にしていると、起動のたびに曲フォルダを全部見て回ります。HDD に十数万譜面あると 10 分以上かかります。その場合は「手動のみ」にしてください。新しく登録した曲フォルダは手動でも起動時に読みますし、RD タブの「曲フォルダに入れた曲を自動で読み込む」が ON なら、遊んでいる間に足した曲もそのつど読み込みます。</div>
+
+<h3>ハイスピのモード</h3>
+<ul>
+  <li><b>クラシック</b>：LR2 と同じハイスピの値で遊びます。</li>
+  <li><b>フローティング</b>：緑数字（ノーツが見え始めてから判定ラインに届くまでの時間）を保つようにハイスピを決めます。プレー中に変えた緑数字は次の曲にも持ち越します。SUDDEN+ や LIFT を動かしても緑数字は変わりません。</li>
+</ul>
+
+<h2 id="start">4. 起動の画面</h2>
+<p>黒い画面に、曲フォルダや難易度表の読み込みの様子が出ます。準備が全部終わると版の名前と「PUSH ANY KEY」が出るので、何か押すと選曲画面に入ります。</p>
+
+<h2 id="select">5. 選曲画面</h2>
+<h3>既定のキー</h3>
+<div class="table-wrap"><table>
+  <tr><th>鍵盤 1〜7</th><td><kbd>Z</kbd> <kbd>S</kbd> <kbd>X</kbd> <kbd>D</kbd> <kbd>C</kbd> <kbd>F</kbd> <kbd>V</kbd></td></tr>
+  <tr><th>皿</th><td><kbd>左Ctrl</kbd> か <kbd>Space</kbd> と、<kbd>左Shift</kbd></td></tr>
+  <tr><th>START / SELECT</th><td><kbd>Q</kbd> / <kbd>W</kbd></td></tr>
+</table></div>
+<p>キーコンフィグは、選曲スキンのキーコンフィグのボタンから開きます。押したキーやボタンがそのまま割り当てられます（<kbd>Delete</kbd> で外す、<kbd>F2</kbd> で既定に戻す、<kbd>Esc</kbd> で閉じる）。</p>
+
+<h3>操作</h3>
+<div class="table-wrap"><table>
+  <tr><th>選ぶ</th><td><kbd>↑</kbd><kbd>↓</kbd>、皿、マウスのホイール。<kbd>PageUp</kbd><kbd>PageDown</kbd> で 10 曲ずつ。</td></tr>
+  <tr><th>決定</th><td><kbd>Enter</kbd>、<kbd>→</kbd>（フォルダを開く）、鍵盤 1・3・5・7</td></tr>
+  <tr><th>戻る</th><td><kbd>←</kbd>、<kbd>Backspace</kbd>、鍵盤 2、右クリック</td></tr>
+  <tr><th>難易度の切り替え</th><td>SELECT、譜面の上で <kbd>→</kbd></td></tr>
+  <tr><th>オートで遊ぶ</th><td>鍵盤 6。リプレイがある譜面では、2 秒押し続けるとリプレイ。</td></tr>
+  <tr><th>プレイオプション</th><td>START か <kbd>Space</kbd> を押している間だけパネルが開きます（下の表）。</td></tr>
+  <tr><th>ゲームを終える</th><td><kbd>Esc</kbd></td></tr>
+</table></div>
+
+<h3>プレイオプション（START を押している間）</h3>
+<div class="table-wrap"><table>
+  <tr><th>鍵盤 1</th><td>鍵盤数の絞り込み</td></tr>
+  <tr><th>鍵盤 2</th><td>RANDOM（OFF／MIRROR／RANDOM／S-RANDOM／SCATTER／CONVERGE）</td></tr>
+  <tr><th>鍵盤 4</th><td>GAUGE（MOD で足したゲージも並びます）</td></tr>
+  <tr><th>鍵盤 5 / 7</th><td>ハイスピを下げる / 上げる</td></tr>
+  <tr><th>鍵盤 6</th><td>7K と 7K+S の切り替え</td></tr>
+  <tr><th>鍵盤 6＋7</th><td>HIDDEN / SUDDEN</td></tr>
+  <tr><th>鍵盤 5＋7</th><td>HS-FIX</td></tr>
+  <tr><th>SELECT か皿</th><td>ターゲット</td></tr>
+</table></div>
+
+<h3>ファンクションキー（<kbd>F1</kbd> を押している間、画面に説明が出ます）</h3>
+<div class="table-wrap"><table>
+  <tr><th><kbd>F3</kbd></th><td>押しながら <kbd>↑</kbd><kbd>↓</kbd> で難易度、<kbd>←</kbd><kbd>→</kbd> でレベルを書き換え</td></tr>
+  <tr><th><kbd>F4</kbd></th><td>ウインドウとフルスクリーンの切り替え</td></tr>
+  <tr><th><kbd>F6</kbd></th><td>スクリーンショット（実行ファイルの横の <code>screenshot</code> フォルダ）</td></tr>
+  <tr><th><kbd>F7</kbd></th><td>FPS の表示</td></tr>
+  <tr><th><kbd>F8</kbd></th><td>今開いている曲フォルダを読み直す</td></tr>
+  <tr><th><kbd>F9</kbd></th><td>保存した配置（<a href="#trial">試験的な機能</a>）</td></tr>
+</table></div>
+
+<h3>そのほか</h3>
+<ul>
+  <li><b>検索</b>：スキンの検索欄をクリックして入力し、<kbd>Enter</kbd>。数字だけならレベル（50 以上なら BPM）、<code>10-12</code> のように書けばその範囲のレベルで探します。それ以外は曲名・アーティスト・ジャンルなどから探します。</li>
+  <li><b>お気に入り・IGNORE</b>：スキンのボタンで「なし → FAVORITE → IGNORE」と切り替わります。IGNORE にした譜面は IGNORE のフォルダにだけ出ます。</li>
+  <li><b>タグの書き換え</b>：スキンの欄をクリックすると、曲名・ジャンル・アーティスト・レベル・難易度を書き換えられます。</li>
+  <li><b>リプレイ</b>：スキンの REPLAY SAVE で残し方を選びます。最初は残さない設定です。</li>
+</ul>
+
+<h2 id="play">6. プレー中</h2>
+<div class="table-wrap"><table>
+  <tr><th>ハイスピ</th><td><kbd>↑</kbd><kbd>↓</kbd>。START か SELECT を押しながら鍵盤でも変えられます。</td></tr>
+  <tr><th>SUDDEN+</th><td><kbd>←</kbd><kbd>→</kbd>、マウスのホイール。START か SELECT を素早く 2 回押すと出し入れ。</td></tr>
+  <tr><th>細かい調整</th><td>START か SELECT を押しながら皿：LIFT・SUDDEN+・ハイスピのどれかを細かく動かします。</td></tr>
+  <tr><th>判定のタイミング</th><td><kbd>Shift</kbd>＋<kbd>←</kbd><kbd>→</kbd> で 1ms ずつ</td></tr>
+  <tr><th>途中でやめる</th><td><kbd>Esc</kbd>、START＋SELECT、右クリック（OPTION タブで止められます）</td></tr>
+  <tr><th>画面の切り替え</th><td><kbd>F4</kbd> でウインドウとフルスクリーン</td></tr>
+</table></div>
+
+<h2 id="result">7. リザルト</h2>
+<div class="table-wrap"><table>
+  <tr><th>次へ</th><td><kbd>Enter</kbd>、<kbd>Esc</kbd>、鍵盤</td></tr>
+  <tr><th>リトライ</th><td><kbd>F5</kbd>。白鍵と黒鍵を同時に押したまま抜けてもリトライします。</td></tr>
+  <tr><th>配置の保存</th><td><kbd>F9</kbd>（<a href="#trial">試験的な機能</a>）</td></tr>
+</table></div>
+
+<h2 id="mod">8. MOD</h2>
+<p>設定アプリの MOD タブでチェックを入れると使えます。設定のある MOD は「詳細」から変えられます。プレーの結果に関わる MOD には「＊記録を分ける」と付き、その MOD を使った記録は普段の記録とは別に残ります。</p>
+<div class="table-wrap"><table>
+  <tr><th>ASSIST EASY</th><td>GAUGE に ASSIST EASY を足す</td></tr>
+  <tr><th>EX-HARD</th><td>GAUGE に EX-HARD を足す</td></tr>
+  <tr><th>GAS</th><td>ゲージが尽きたら、決めた順番の次のゲージに切り替えて続ける（GAUGE で GAS を選んだとき）</td></tr>
+  <tr><th>カスタムゲージ</th><td>自分でゲージを作る（増減・クリアの線・色・ランプ）。作ったゲージは GAUGE に CUSTOM1〜9 として出る</td></tr>
+  <tr><th>カスタム判定</th><td>自分で判定の幅を作って遊ぶ。記録は判定ごとに分かれる</td></tr>
+  <tr><th>メトロノーム</th><td>譜面の BPM に合わせてメトロノームの音を鳴らす</td></tr>
+  <tr><th>BGM のセット</th><td>選曲と決定の BGM を何曲でも選んでセットにし、選曲画面に入るたびにランダムに流す</td></tr>
+  <tr><th>ランダムセレクト</th><td>フォルダの名前の下に ????? のバーを出す。決定すると、そのフォルダに見えている譜面から 1 つを選んで遊ぶ</td></tr>
+  <tr><th>リコメンド</th><td>発狂難易度表などのランプから地力を推定して、次に取れそうなランプの譜面を EASY・NORMAL・HARD・FULL COMBO のフォルダに並べる（walkure の移植。作者 naktazdim）</td></tr>
+  <tr><th>譜面の傾向</th><td>難易度表のレベルごとに、譜面の傾向（乱打・腕・指・ディレイ）・密度・プレー状況・クリア状況・スコア状況のフォルダを作る（oraja-constellator の移植。作者 DJHemorrhoid）。譜面の分析は選曲画面にいる間に裏で進みます</td></tr>
+</table></div>
+
+<h2 id="trial">9. 試験的な機能</h2>
+<h3>ランダムの配置の保存</h3>
+<div class="note">まだ十分に確かめていない機能です。おかしな動きがあったら教えてください。</div>
+<p>RANDOM で遊んだときの配置を残しておき、あとで同じ配置で遊べます。残すのは譜面と RANDOM の種類と配置の種（シード）だけで、譜面そのものは書き換えません。</p>
+<ol>
+  <li>残したい配置で遊んだら、リザルトで <kbd>F9</kbd>。「配置を保存しました」と出ます。</li>
+  <li>選曲画面でその譜面にカーソルを合わせて <kbd>F9</kbd> を押すと、保存した配置の一覧（日時と RANDOM の種類）が出ます。</li>
+  <li><kbd>↑</kbd><kbd>↓</kbd> か皿で選び、<kbd>Enter</kbd> か白鍵で「この譜面で使う」に決めます。「使わない」を選ぶと外れます。<kbd>Delete</kbd> で消せます。</li>
+  <li>使うと決めた配置があると、その譜面は保存した配置で遊びます。RANDOM の設定は遊び終わると元に戻ります。</li>
+</ol>
+<p>コースでは使えません。</p>
+
+<h3>譜面の貸し借り（準備中）</h3>
+<p>設定アプリの SHARE タブは準備中です。今の版では使えません。</p>
+
+<h2 id="update">10. 自動の更新とログ</h2>
+<ul>
+  <li><b>自動の更新</b>：設定アプリを開くたびに新しい版を確かめ、あればそのまま入れ替えて開き直します。あなたの設定や記録には触りません。止めたいときは、RD タブの「自動で新しい版に更新する」を OFF にします。</li>
+  <li><b>ログ</b>：不具合を調べるために、RD の動作の記録（ログ）と、落ちたときの記録を、次に起動したときに作者へ送ります。送るのは RD が書いたログだけで、ほかのファイルは送りません。ログにはファイルの場所（曲フォルダのパスなど）が含まれます。止めたいときは、RD タブの「ログを作者へ送る」を OFF にします。</li>
+</ul>
+
+<h2 id="data">11. データの置き場と消し方</h2>
+<p>設定と記録は、すべて <code>RDfiles</code> の中にあります。</p>
+<div class="table-wrap"><table>
+  <tr><th>Player\&lt;名前&gt;</th><td>プレイヤーごとの設定・キーコンフィグ・スコア（score.db）・リプレイ・MOD の設定</td></tr>
+  <tr><th>Config</th><td>全員で共通の設定</td></tr>
+  <tr><th>Database</th><td>曲の一覧（songs.db）と難易度表</td></tr>
+  <tr><th>Log</th><td>ログ</td></tr>
+  <tr><th>Theme・Sound・Bgm など</th><td>スキンと音の素材</td></tr>
+</table></div>
+<ul>
+  <li><b>記録を残しておきたいとき</b>：<code>RDfiles</code> の中の <code>Player</code> フォルダを写しておけば十分です。</li>
+  <li><b>別の PC に移すとき</b>：フォルダごと写します。</li>
+  <li><b>消すとき</b>：フォルダごと消せば終わりです。RD はほかの場所には何も書きません。</li>
+</ul>
+
+<h2 id="trouble">12. 困ったとき</h2>
+<ul>
+  <li><b>固まって閉じられない</b>：<kbd>Ctrl</kbd>＋<kbd>Shift</kbd>＋<kbd>Esc</kbd> でタスク マネージャーを開き、「RD」か「RDbody」を選んで「タスクの終了」。そのあと設定アプリを開くと、そのときのログが作者に届きます（ログを送る設定のとき）。</li>
+  <li><b>曲が出てこない</b>：JUKEBOX1 に曲フォルダが登録されているか見てください。登録してあるのに出ないときは、選曲画面でそのフォルダを開いて <kbd>F8</kbd>、それでもだめなら RD タブの「曲の一覧を作り直す」。</li>
+  <li><b>音が遅れる・途切れる</b>：SYSTEM タブの音の出し方とバッファ数を変えてみてください。</li>
+  <li><b>そのほか</b>：何をしたらどうなったかを、作者に直接教えてください。</li>
+</ul>
+
+<footer>
+  <p>使っているもののライセンスは <code>THIRD_PARTY_NOTICES.md</code> と <code>licenses</code> フォルダにあります。</p>
+</footer>
+</main>
+</body>
+</html>

@@ -29,6 +29,7 @@ Copy-Item -Recurse "$Build\mods" "$prog\mods"
 foreach ($m in @("level-folders", "judge-log", "judge-bar")) { Remove-Item -Recurse -Force "$prog\mods\$m" -ErrorAction SilentlyContinue }
 Copy-Item -Recurse "$Build\skinpatch" "$prog\skinpatch"  # RD で足したスキンの表示（スキンのファイルは書き換えない）
 Copy-Item $Notices $prog
+Copy-Item (Join-Path (Split-Path $Notices) "説明書.html") $prog  # 説明書（ソースのいちばん上にある）
 # FFmpeg（LGPL 2.1）を入れるので、その全文も置く（vcpkg が入れたもの）
 $ffl = Join-Path $env:USERPROFILE "vcpkg\installed\x64-windows\share\ffmpeg\copyright"
 if (Get-ChildItem $prog -Filter "avcodec-*.dll") {
