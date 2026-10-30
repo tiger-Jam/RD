@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <random>
+#include <thread>
 
 // Lua は C++ として組んでいる（CMakeLists.txt）ので、extern "C" の lua.hpp ではなく素のヘッダを読む
 #include "lauxlib.h"
@@ -27,8 +29,17 @@ constexpr long long kStepsPerCall = 5'000'000;
 constexpr long long kStepsFolders = 2'000'000'000;
 constexpr long long kHookEvery = 10'000;
 constexpr size_t kMemoryLimit = 256u << 20;  // 1 つの MOD が使ってよいメモリ
+// フォルダを作るときは全譜面の表を渡すので、譜面 1 つにつきこれだけ足す（傾向と難易度表のレベルを付けた表は 1 つ 1.5 KB ほど。
+// 16 万譜面で 256 MB を超えて、譜面の傾向の MOD が作れなかった）
+constexpr size_t kMemoryPerChart = 4u << 10;
 
 const char* kJudgeNames[6] = {"EMPTY_POOR", "POOR", "BAD", "GOOD", "GREAT", "PGREAT"};
+
+// パスを UTF-8 の文字列にする
+std::string utf8_of(const fs::path& p) {
+    const std::u8string u8 = p.u8string();
+    return std::string(u8.begin(), u8.end());
+}
 
 }  // namespace
 
@@ -123,6 +134,10 @@ public:
     }
 
     std::vector<ModDrawCmd>* draw_sink = nullptr;
+    // スクリプトが読んだファイルと、今の時刻を見たか（MOD のフォルダの計算を残すとき、作り直しが要るかを決める）
+    std::vector<std::string> read_paths;
+    bool read_time = false;
+    size_t memory_limit = kMemoryLimit;
 
 private:
     static ModScript* self(lua_State* L) { return *static_cast<ModScript**>(lua_getextraspace(L)); }
@@ -135,7 +150,7 @@ private:
             std::free(ptr);
             return nullptr;
         }
-        if (nsize > old && s->memory_ + (nsize - old) > kMemoryLimit) return nullptr;  // Lua は「メモリが足りない」で止まる
+        if (nsize > old && s->memory_ + (nsize - old) > s->memory_limit) return nullptr;  // Lua は「メモリが足りない」で止まる
         void* p = std::realloc(ptr, nsize);
         if (p) s->memory_ = s->memory_ - old + nsize;
         return p;
@@ -252,6 +267,7 @@ private:
         {
             std::string name(n, nlen), text;
             if (mod_file_name_ok(name)) {
+                self(L)->read_paths.push_back(utf8_of(fs::path(root) / fs::u8path(name)));
                 std::ifstream f(fs::path(root) / fs::u8path(name), std::ios::binary);
                 if (f) {
                     text.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
@@ -268,12 +284,14 @@ private:
     static int l_read_mod_file(lua_State* L) { return read_impl(L, self(L)->dir_); }
 
     static int l_time(lua_State* L) {
+        self(L)->read_time = true;
         lua_pushinteger(L, static_cast<lua_Integer>(std::time(nullptr)));
         return 1;
     }
     // rd.date(書式, 時刻)：strftime と同じ書式（既定 "%Y-%m-%d %H:%M:%S"、時刻の既定は今）
     static int l_date(lua_State* L) {
         const char* fmt = luaL_optstring(L, 1, "%Y-%m-%d %H:%M:%S");
+        if (lua_isnoneornil(L, 2)) self(L)->read_time = true;
         std::time_t t = static_cast<std::time_t>(luaL_optinteger(L, 2, static_cast<lua_Integer>(std::time(nullptr))));
         std::tm tm{};
 #ifdef _WIN32
@@ -349,50 +367,96 @@ void set_bool(lua_State* L, const char* k, bool v) {
     lua_setfield(L, -2, k);
 }
 
+// 譜面 1 つぶんの値を、MOD に渡す順に v へ出す。Lua に積むとき（LuaPush）と、MOD のフォルダの計算を残すための
+// 指紋を取るとき（Fingerprint）で同じものを使い、渡す値と指紋がずれないようにする。
+//   v.table(配列の数, 名前の数) で表を始め、v.str / v.integer / v.num / v.boolean で名前つきの値を足し、
+//   v.field(名前) で表を親の名前つきの値に、v.item(番号) で親の配列の要素にする
+template <class V>
+void visit_chart(V& v, const ChartRecord& c, const std::unordered_map<std::string, ScoreRecord>& scores, const ModChartExtra& extra) {
+    v.table(0, 30);
+    v.str("sha256", c.sha256), v.str("md5", c.md5), v.str("path", c.path), v.str("folder", c.folder);
+    v.str("title", c.title), v.str("subtitle", c.subtitle), v.str("artist", c.artist);
+    v.str("genre", c.genre);
+    v.integer("playlevel", c.playlevel), v.integer("difficulty", c.difficulty), v.integer("notes", c.notes);
+    v.integer("ln", c.ln), v.integer("rank", c.rank), v.integer("total", c.total), v.integer("keys", c.keys);
+    v.num("bpm_min", c.bpm_min), v.num("bpm_max", c.bpm_max), v.num("bpm_main", c.bpm_main);
+    v.integer("length_ms", c.length_ms), v.boolean("scratch", c.scratch), v.integer("added", c.added);
+    auto it = scores.find(c.sha256);
+    if (it != scores.end()) {
+        v.integer("clear", it->second.clear), v.integer("exscore", it->second.exscore);
+        v.integer("bp", it->second.bp), v.integer("playcount", it->second.playcount);
+        v.integer("last_played", it->second.last_played);
+    } else {
+        v.integer("clear", 0);
+    }
+    if (extra.attrs)
+        if (auto a = extra.attrs->find(c.sha256); a != extra.attrs->end()) {
+            const ChartAttr& x = a->second;
+            v.table(0, 20);
+            v.integer("code", x.attr), v.integer("code2", x.attr2), v.integer("sub", x.sub), v.integer("mask", x.mask);
+            v.integer("practice_low", x.practice_low), v.num("conf", x.conf), v.num("grid_bpm", x.grid_bpm);
+            v.num("avg_chord", x.avg_chord), v.num("micro_rate", x.micro_rate), v.num("subgrid_rate", x.subgrid_rate);
+            v.num("avg_density", x.avg_density), v.num("d10", x.d10), v.num("randa_33", x.randa_33);
+            v.num("randa_42", x.randa_42), v.num("randa_51", x.randa_51), v.num("stair_rate", x.stair_rate);
+            v.num("full_rate", x.full_rate), v.num("chart_seconds", x.chart_seconds);
+            v.field("attr");
+        }
+    if (extra.tables)
+        if (auto t = extra.tables->find(c.md5); t != extra.tables->end()) {
+            v.table(static_cast<int>(t->second.size()), 0);
+            long long k = 0;
+            for (const ModTableLevel& tl : t->second) {
+                v.table(0, 5);
+                v.str("table", tl.table), v.str("symbol", tl.symbol), v.str("level", tl.level);
+                v.integer("table_order", tl.table_order), v.integer("level_order", tl.level_order);
+                v.item(++k);
+            }
+            v.field("tables");
+        }
+}
+
+struct LuaPush {
+    lua_State* L;
+    void table(int narr, int nrec) { lua_createtable(L, narr, nrec); }
+    void str(const char* k, const std::string& x) { set_str(L, k, x); }
+    void integer(const char* k, long long x) { set_int(L, k, x); }
+    void num(const char* k, double x) { set_num(L, k, x); }
+    void boolean(const char* k, bool x) { set_bool(L, k, x); }
+    void field(const char* k) { lua_setfield(L, -2, k); }
+    void item(long long i) { lua_rawseti(L, -2, static_cast<lua_Integer>(i)); }
+};
+
+// 渡す値の指紋（FNV-1a 64 ビット）。値の区切りも混ぜる（"ab"+"c" と "a"+"bc" を分ける）
+struct Fingerprint {
+    uint64_t h = 1469598103934665603ull;
+    void bytes(const void* p, size_t n) {
+        const auto* b = static_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n; ++i) h = (h ^ b[i]) * 1099511628211ull;
+    }
+    void tag(char t, const char* k) {
+        bytes(&t, 1);
+        bytes(k, std::strlen(k) + 1);
+    }
+    void table(int, int) { tag('{', ""); }
+    void str(const char* k, const std::string& x) {
+        tag('s', k);
+        const uint64_t n = x.size();
+        bytes(&n, sizeof(n));
+        bytes(x.data(), x.size());
+    }
+    void integer(const char* k, long long x) { tag('i', k), bytes(&x, sizeof(x)); }
+    void num(const char* k, double x) { tag('n', k), bytes(&x, sizeof(x)); }
+    void boolean(const char* k, bool x) { tag('b', k), bytes(&x, 1); }
+    void field(const char* k) { tag('}', k); }
+    void item(long long i) { tag(']', ""), bytes(&i, sizeof(i)); }
+};
+
 // 譜面 1 つの表：{ sha256, md5, title, …, clear, exscore, bp, playcount, last_played }（記録が無ければ clear = 0）。
 // extra があれば、傾向（attr = { code, code2, sub, mask, … }）と難易度表のレベル（tables = { { table, symbol, level, … }, … }）
 void push_chart(lua_State* L, const ChartRecord& c, const std::unordered_map<std::string, ScoreRecord>& scores,
                 const ModChartExtra& extra = {}) {
-    lua_createtable(L, 0, 30);
-    set_str(L, "sha256", c.sha256), set_str(L, "md5", c.md5), set_str(L, "path", c.path), set_str(L, "folder", c.folder);
-    set_str(L, "title", c.title), set_str(L, "subtitle", c.subtitle), set_str(L, "artist", c.artist);
-    set_str(L, "genre", c.genre);
-    set_int(L, "playlevel", c.playlevel), set_int(L, "difficulty", c.difficulty), set_int(L, "notes", c.notes);
-    set_int(L, "ln", c.ln), set_int(L, "rank", c.rank), set_int(L, "total", c.total), set_int(L, "keys", c.keys);
-    set_num(L, "bpm_min", c.bpm_min), set_num(L, "bpm_max", c.bpm_max), set_num(L, "bpm_main", c.bpm_main);
-    set_int(L, "length_ms", c.length_ms), set_bool(L, "scratch", c.scratch), set_int(L, "added", c.added);
-    auto it = scores.find(c.sha256);
-    if (it != scores.end()) {
-        set_int(L, "clear", it->second.clear), set_int(L, "exscore", it->second.exscore);
-        set_int(L, "bp", it->second.bp), set_int(L, "playcount", it->second.playcount);
-        set_int(L, "last_played", it->second.last_played);
-    } else {
-        set_int(L, "clear", 0);
-    }
-    if (extra.attrs)
-        if (auto a = extra.attrs->find(c.sha256); a != extra.attrs->end()) {
-            const ChartAttr& v = a->second;
-            lua_createtable(L, 0, 20);
-            set_int(L, "code", v.attr), set_int(L, "code2", v.attr2), set_int(L, "sub", v.sub), set_int(L, "mask", v.mask);
-            set_int(L, "practice_low", v.practice_low), set_num(L, "conf", v.conf), set_num(L, "grid_bpm", v.grid_bpm);
-            set_num(L, "avg_chord", v.avg_chord), set_num(L, "micro_rate", v.micro_rate), set_num(L, "subgrid_rate", v.subgrid_rate);
-            set_num(L, "avg_density", v.avg_density), set_num(L, "d10", v.d10), set_num(L, "randa_33", v.randa_33);
-            set_num(L, "randa_42", v.randa_42), set_num(L, "randa_51", v.randa_51), set_num(L, "stair_rate", v.stair_rate);
-            set_num(L, "full_rate", v.full_rate), set_num(L, "chart_seconds", v.chart_seconds);
-            lua_setfield(L, -2, "attr");
-        }
-    if (extra.tables)
-        if (auto t = extra.tables->find(c.md5); t != extra.tables->end()) {
-            lua_createtable(L, static_cast<int>(t->second.size()), 0);
-            lua_Integer k = 0;
-            for (const ModTableLevel& tl : t->second) {
-                lua_createtable(L, 0, 5);
-                set_str(L, "table", tl.table), set_str(L, "symbol", tl.symbol), set_str(L, "level", tl.level);
-                set_int(L, "table_order", tl.table_order), set_int(L, "level_order", tl.level_order);
-                lua_rawseti(L, -2, ++k);
-            }
-            lua_setfield(L, -2, "tables");
-        }
+    LuaPush v{L};
+    visit_chart(v, c, scores, extra);
 }
 
 std::unique_ptr<ModScript> open_script(const ModManifest& m, const std::string& data_root, std::string& err) {
@@ -548,47 +612,216 @@ std::vector<std::string> ModScripts::take_errors() {
     return out;
 }
 
+namespace {
+
+// MOD のフォルダの計算を残したファイル（<cache_dir>/<MOD の id>.cache）。中身は次の順：
+//   目印・渡した値の指紋・時刻を見たならその時（1 時間の区切り）・スクリプトが読んだファイル（場所・大きさ・更新日時）・フォルダ
+// 指紋と、読んだファイルと、時刻（見たときだけ）が同じなら、計算せずにこのフォルダを使う
+constexpr char kModCacheMagic[] = "RDMODFOLDERS1";
+
+struct FileStamp {
+    std::string path;
+    int64_t size = -1;  // 無いファイルは -1
+    int64_t mtime = 0;
+};
+
+FileStamp stamp_of(const std::string& path) {
+    FileStamp f;
+    f.path = path;
+    std::error_code ec;
+    const fs::path p = fs::u8path(path);
+    const auto size = fs::file_size(p, ec);
+    if (ec) return f;
+    const auto t = fs::last_write_time(p, ec);
+    if (ec) return f;
+    f.size = static_cast<int64_t>(size);
+    f.mtime = static_cast<int64_t>(t.time_since_epoch().count());
+    return f;
+}
+
+int64_t current_hour() { return static_cast<int64_t>(std::time(nullptr)) / 3600; }
+
+struct CacheWriter {
+    std::string buf;
+    void u64(uint64_t x) { buf.append(reinterpret_cast<const char*>(&x), sizeof(x)); }
+    void str(const std::string& x) { u64(x.size()), buf.append(x); }
+    void folder(const ModFolder& f) {
+        str(f.title), u64(f.keep_order), u64(f.charts.size());
+        for (size_t i = 0; i < f.charts.size(); ++i) str(f.charts[i]), str(i < f.labels.size() ? f.labels[i] : "");
+        u64(f.children.size());
+        for (const ModFolder& c : f.children) folder(c);
+    }
+};
+
+struct CacheReader {
+    const std::string& buf;
+    size_t pos = 0;
+    bool ok = true;
+    uint64_t u64() {
+        uint64_t x = 0;
+        if (pos + sizeof(x) > buf.size()) return ok = false, 0;
+        std::memcpy(&x, buf.data() + pos, sizeof(x));
+        pos += sizeof(x);
+        return x;
+    }
+    std::string str() {
+        const uint64_t n = u64();
+        if (!ok || n > buf.size() - pos) return ok = false, std::string();
+        std::string x = buf.substr(pos, n);
+        pos += n;
+        return x;
+    }
+    bool folder(ModFolder& f, int depth) {
+        if (depth > 6) return ok = false;
+        f.title = str(), f.keep_order = u64() != 0;
+        const uint64_t n = u64();
+        for (uint64_t i = 0; ok && i < n; ++i) f.charts.push_back(str()), f.labels.push_back(str());
+        const uint64_t nc = u64();
+        for (uint64_t i = 0; ok && i < nc; ++i) {
+            f.children.emplace_back();
+            folder(f.children.back(), depth + 1);
+        }
+        return ok;
+    }
+};
+
+// 残した計算が今も使えるなら、そのフォルダを out に足して true
+bool read_mod_cache(const std::string& path, uint64_t key, std::vector<ModFolder>& out) {
+    std::ifstream f(fs::u8path(path), std::ios::binary);
+    if (!f) return false;
+    const std::string buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    CacheReader r{buf};
+    // 開発用：RD_TIMING があれば、使えなかったわけを出す
+    auto miss = [&](const std::string& why) {
+        if (dev_env("RD_TIMING")) std::printf("      MOD のフォルダの計算を作り直す：%s\n", why.c_str());
+        return false;
+    };
+    if (r.str() != kModCacheMagic) return miss("形が違う");
+    if (r.u64() != key) return miss("渡す値が変わった");
+    const auto hour = static_cast<int64_t>(r.u64());
+    if (hour >= 0 && hour != current_hour()) return miss("時刻を見る MOD で、前に作ってから 1 時間の区切りを越えた");
+    for (uint64_t i = 0, n = r.u64(); r.ok && i < n; ++i) {
+        FileStamp was;
+        was.path = r.str(), was.size = static_cast<int64_t>(r.u64()), was.mtime = static_cast<int64_t>(r.u64());
+        const FileStamp now = stamp_of(was.path);
+        if (now.size != was.size || now.mtime != was.mtime) return miss("読んだファイルが変わった：" + was.path);
+    }
+    std::vector<ModFolder> got(r.ok ? r.u64() : 0);
+    for (ModFolder& x : got)
+        if (!r.folder(x, 0)) return false;
+    if (!r.ok) return false;
+    for (ModFolder& x : got) out.push_back(std::move(x));
+    return true;
+}
+
+void write_mod_cache(const std::string& path, uint64_t key, bool read_time, const std::vector<FileStamp>& deps,
+                     const std::vector<ModFolder>& folders) {
+    CacheWriter w;
+    w.str(kModCacheMagic), w.u64(key), w.u64(static_cast<uint64_t>(read_time ? current_hour() : -1));
+    w.u64(deps.size());
+    for (const FileStamp& d : deps) w.str(d.path), w.u64(static_cast<uint64_t>(d.size)), w.u64(static_cast<uint64_t>(d.mtime));
+    w.u64(folders.size());
+    for (const ModFolder& x : folders) w.folder(x);
+    // 書きかけを読まれないように、別の名前で書いてから置き換える（裏の 2 本が同時に書いても混ざらない）
+    std::error_code ec;
+    const fs::path dst = fs::u8path(path);
+    fs::create_directories(dst.parent_path(), ec);
+    fs::path tmp = dst;
+    tmp += "." + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())) + ".tmp";
+    {
+        std::ofstream o(tmp, std::ios::binary);
+        if (!o.write(w.buf.data(), static_cast<std::streamsize>(w.buf.size()))) return;
+    }
+    fs::rename(tmp, dst, ec);
+    if (dev_env("RD_TIMING")) std::printf("      MOD のフォルダの計算を残した：%s %zu B%s\n", path.c_str(), w.buf.size(), ec ? "（置けない）" : "");
+    if (ec) fs::remove(tmp, ec);
+}
+
+}  // namespace
+
 std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& mods, const std::vector<ChartRecord>& charts,
                                          const std::unordered_map<std::string, ScoreRecord>& scores,
-                                         const std::string& data_root, std::vector<std::string>* errors, const ModChartExtra& extra) {
+                                         const std::string& data_root, std::vector<std::string>* errors, const ModChartExtra& extra,
+                                         const std::string& cache_dir) {
     std::vector<ModFolder> out;
+    // 渡す値の指紋は、傾向を渡す MOD と渡さない MOD の 2 通りだけなので、それぞれ 1 回だけ取る
+    uint64_t prints[2] = {};
+    bool printed[2] = {};
     for (const ModManifest* m : mods) {
         if (m->script.empty() || !(m->touches & static_cast<uint32_t>(ModTouch::Control))) continue;
+        const ModChartExtra& ex = m->chart_attr ? extra : ModChartExtra{};
+        // 開発用：RD_TIMING があれば、MOD ごとに譜面を渡すまでと、MOD の処理の時間を出す
+        auto t0 = std::chrono::steady_clock::now(), t1 = t0;
+        // 渡す値が前と同じなら、残した計算を使う
+        uint64_t key = 0;
+        const std::string cache = cache_dir.empty() ? "" : cache_dir + "/" + m->id + ".cache";
+        if (!cache.empty()) {
+            const int v = m->chart_attr ? 1 : 0;
+            if (!printed[v]) {
+                Fingerprint fp;
+                fp.integer("charts", static_cast<long long>(charts.size()));
+                for (const ChartRecord& c : charts) visit_chart(fp, c, scores, ex);
+                prints[v] = fp.h, printed[v] = true;
+            }
+            Fingerprint fp;
+            fp.integer("values", static_cast<long long>(prints[v])), fp.str("mod", m->id);
+            key = fp.h;
+            if (read_mod_cache(cache, key, out)) {
+                if (dev_env("RD_TIMING"))
+                    std::printf("      MOD %s：残した計算を使った %.0f ms\n", m->id.c_str(),
+                                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+                continue;
+            }
+        }
         std::string err;
         auto s = open_script(*m, data_root, err);
         if (!s) {
             if (errors) errors->push_back(err);
             continue;
         }
-        if (!s->has("build_folders")) continue;
-        // 開発用：RD_TIMING があれば、MOD ごとに譜面を渡すまでと、MOD の処理の時間を出す
-        auto t0 = std::chrono::steady_clock::now(), t1 = t0;
-        bool ok = s->run("build_folders", [&](lua_State* L) {
-            lua_createtable(L, static_cast<int>(charts.size()), 0);
-            lua_Integer i = 0;
-            for (const ChartRecord& c : charts) {
-                push_chart(L, c, scores, m->chart_attr ? extra : ModChartExtra{});
-                lua_rawseti(L, -2, ++i);
-            }
+        std::vector<ModFolder> got;
+        bool ok = true;
+        if (s->has("build_folders")) {
+            s->memory_limit = kMemoryLimit + charts.size() * kMemoryPerChart;
             t1 = std::chrono::steady_clock::now();
-        }, kStepsFolders, [&](lua_State* L) {
-            // 戻り値はフォルダの配列
-            if (!lua_istable(L, -1)) return;
-            lua_Integer n = static_cast<lua_Integer>(lua_rawlen(L, -1));
-            for (lua_Integer k = 1; k <= n; ++k) {
-                if (lua_rawgeti(L, -1, k) == LUA_TTABLE) {
-                    ModFolder f;
-                    read_folder(L, -1, f, 0);
-                    if (!f.title.empty()) out.push_back(std::move(f));
+            ok = s->run("build_folders", [&](lua_State* L) {
+                lua_createtable(L, static_cast<int>(charts.size()), 0);
+                lua_Integer i = 0;
+                for (const ChartRecord& c : charts) {
+                    push_chart(L, c, scores, ex);
+                    lua_rawseti(L, -2, ++i);
                 }
-                lua_pop(L, 1);
-            }
-        });
-        if (dev_env("RD_TIMING"))
-            std::printf("      MOD %s：譜面を渡す %.0f ms、MOD の処理 %.0f ms\n", m->id.c_str(),
-                        std::chrono::duration<double, std::milli>(t1 - t0).count(),
-                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count());
-        if (!ok && errors) errors->push_back(s->error());
+                t1 = std::chrono::steady_clock::now();
+            }, kStepsFolders, [&](lua_State* L) {
+                // 戻り値はフォルダの配列
+                if (!lua_istable(L, -1)) return;
+                lua_Integer n = static_cast<lua_Integer>(lua_rawlen(L, -1));
+                for (lua_Integer k = 1; k <= n; ++k) {
+                    if (lua_rawgeti(L, -1, k) == LUA_TTABLE) {
+                        ModFolder f;
+                        read_folder(L, -1, f, 0);
+                        if (!f.title.empty()) got.push_back(std::move(f));
+                    }
+                    lua_pop(L, 1);
+                }
+            });
+            if (dev_env("RD_TIMING"))
+                std::printf("      MOD %s：譜面を渡す %.0f ms、MOD の処理 %.0f ms\n", m->id.c_str(),
+                            std::chrono::duration<double, std::milli>(t1 - t0).count(),
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count());
+        }
+        if (!ok) {
+            if (errors) errors->push_back(s->error());
+            continue;
+        }
+        if (!cache.empty()) {
+            // スクリプトそのものと、スクリプトが読んだファイル（設定・モデルなど）が変わったら作り直す
+            std::vector<FileStamp> deps{stamp_of(utf8_of(fs::path(m->dir) / m->script))};
+            for (const std::string& p : s->read_paths)
+                if (std::none_of(deps.begin(), deps.end(), [&](const FileStamp& d) { return d.path == p; })) deps.push_back(stamp_of(p));
+            write_mod_cache(cache, key, s->read_time, deps, got);
+        }
+        for (ModFolder& f : got) out.push_back(std::move(f));
     }
     return out;
 }

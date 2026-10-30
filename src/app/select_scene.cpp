@@ -300,7 +300,7 @@ std::vector<ModFolder> make_mod_folders(const Library& lib, const std::vector<co
         }
         extra.attrs = lib.attrs.get(), extra.tables = &tables;
     }
-    return build_mod_folders(mods, lib.charts, lib.scores, mod_data_dir(""), errors, extra);
+    return build_mod_folders(mods, lib.charts, lib.scores, mod_data_dir(""), errors, extra, mod_cache_dir());
 }
 
 // カスタムフォルダを読み、中身を集める表を作り直す（曲・記録・お気に入りが変わったとき）

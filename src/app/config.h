@@ -189,6 +189,8 @@ std::string input_log_path(const std::string& sha256, int64_t played_at);
 // MOD が書いてよいのは RDfiles/Player/<ID>/ModData/<MOD の id>/ だけ
 std::string official_mods_dir();
 std::string mod_data_dir(const std::string& id);
+// MOD のフォルダの計算を残す所（RDfiles/Player/<ID>/ModCache。MOD は書けない）
+std::string mod_cache_dir();
 // MOD の詳細の設定（RDfiles/Player/<ID>/ModData/<MOD の id>/settings.json）
 std::string mod_settings_path(const std::string& id);
 // ゲージで「GAS」を選んだときの custom_gauge の値（カスタムゲージの鍵は「MOD/ゲージ」なので重ならない）

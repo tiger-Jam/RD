@@ -112,6 +112,43 @@ TEST(mod_script_folders) {
     }
 }
 
+// MOD のフォルダの計算を残す：渡す値・読んだファイル・スクリプトが同じなら計算しない（数えた回数で見る）
+TEST(mod_script_folders_cache) {
+    TempMod t("cache", "\"control\"", R"LUA(
+        function build_folders(charts)
+          local n = tonumber(rd.read_file("runs.txt") or "0") + 1
+          rd.write_file("runs.txt", tostring(n))
+          local hard = {}
+          for _, c in ipairs(charts) do
+            if c.clear >= 4 then hard[#hard + 1] = c.sha256 end
+          end
+          return { { title = "HARD 以上 " .. n, charts = hard } }
+        end
+    )LUA");
+    const std::string cache = (t.root / "cache").string();
+    std::vector<ChartRecord> charts(2);
+    charts[0].sha256 = "a", charts[1].sha256 = "b";
+    std::unordered_map<std::string, ScoreRecord> scores;
+    scores["a"].clear = 5;
+    auto title = [&] {
+        auto f = build_mod_folders({&t.m}, charts, scores, t.data.string(), nullptr, {}, cache);
+        return f.size() == 1 ? f[0].title + ":" + std::to_string(f[0].charts.size()) : std::string("?");
+    };
+    CHECK(title() == "HARD 以上 1:1");
+    // 何も変わらなければ、残した計算を使う（数えた回数が増えない）
+    CHECK(title() == "HARD 以上 1:1");
+    // ランプが変わったら作り直す
+    scores["b"].clear = 4;
+    CHECK(title() == "HARD 以上 2:2");
+    CHECK(title() == "HARD 以上 2:2");
+    // スクリプトが読んだファイルが変わったら作り直す（大きさを変えて、更新日時の細かさに頼らない）
+    std::ofstream(t.data / "cache" / "runs.txt") << "10";
+    CHECK(title() == "HARD 以上 11:2");
+    // スクリプトが変わったら作り直す
+    std::ofstream(fs::path(t.m.dir) / "main.lua", std::ios::app) << "\n-- changed\n";
+    CHECK(title() == "HARD 以上 12:2");
+}
+
 // 譜面に曲名の前の文字（label）を付けられる
 TEST(mod_script_folder_labels) {
     TempMod t("labels", "\"control\"", R"LUA(

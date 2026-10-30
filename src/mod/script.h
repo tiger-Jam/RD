@@ -116,11 +116,13 @@ struct ModChartExtra {
     const std::unordered_map<std::string, std::vector<ModTableLevel>>* tables = nullptr;  // md5 → 難易度表のレベル
 };
 
-// 選曲の一覧を作るときに、「操作」を宣言した MOD の build_folders を呼んでフォルダを作る
+// 選曲の一覧を作るときに、「操作」を宣言した MOD の build_folders を呼んでフォルダを作る。
+// cache_dir があれば、MOD ごとの計算をそこに残し、渡す値・スクリプトが読んだファイル・時刻（見たときだけ、1 時間ごと）が
+// 前と同じなら、計算せずに残したものを使う
 std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& mods, const std::vector<ChartRecord>& charts,
                                          const std::unordered_map<std::string, ScoreRecord>& scores,
                                          const std::string& data_root, std::vector<std::string>* errors = nullptr,
-                                         const ModChartExtra& extra = {});
+                                         const ModChartExtra& extra = {}, const std::string& cache_dir = {});
 
 // フォルダの中の、フォルダの名前の下に出すバー（folder_bars の戻り値。ランダムセレクトなど）
 struct ModBar {

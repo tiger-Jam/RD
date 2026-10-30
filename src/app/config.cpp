@@ -502,6 +502,7 @@ std::string official_mods_dir() { return base_dir() + "mods"; }
 std::string mod_data_dir(const std::string& id) {
     return (player_id().empty() ? data_dir() + "Mods/ModData/" : player_dir() + "ModData/") + id;
 }
+std::string mod_cache_dir() { return player_id().empty() ? data_dir() + "Mods/ModCache" : player_dir() + "ModCache"; }
 std::string mod_settings_path(const std::string& id) { return mod_data_dir(id) + "/settings.json"; }
 
 std::string lr2_courses_path() { return data_dir() + "Database/lr2_courses.txt"; }
