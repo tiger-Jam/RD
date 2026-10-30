@@ -1090,6 +1090,26 @@ int main(int argc, char** argv) {
             run_keyconfig(app.window, app.renderer, app.keycfg, keyconfig_path());
         } else if (opt.chart_path.empty()) {
             app.scene_end_ns = SDL_GetTicksNS();
+            // 選曲画面の一覧ができるまで（READY の間）も、窓の知らせを処理する（止めていると「応答なし」になり、閉じられもしない）。
+            // 待っている間に閉じられたら、そのまま終わる（設定とスコアは保存済み）
+            if (select_prep.valid()) {
+                const auto t0 = std::chrono::steady_clock::now();
+                while (select_prep.wait_for(std::chrono::milliseconds(16)) != std::future_status::ready) {
+                    SDL_Event e;
+                    bool quit = false;
+                    while (SDL_PollEvent(&e))
+                        if (e.type == SDL_EVENT_QUIT) quit = true;
+                    if (quit) {
+                        std::printf("選曲画面の一覧を作っている間に閉じた（%.1f 秒待った）\n",
+                                    std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+                        std::fflush(stdout);
+                        stop_log();
+                        std::_Exit(0);
+                    }
+                }
+                const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+                if (waited > 1.0) std::printf("READY のあと、選曲画面の一覧ができるのを %.1f 秒待った\n", waited);
+            }
             auto prep = select_prep.valid() ? select_prep.get() : nullptr;
             startup_mark("選曲画面に入る");
             run_select(app, prep);

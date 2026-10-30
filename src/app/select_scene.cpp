@@ -873,18 +873,31 @@ std::shared_ptr<SelectPrep> prepare_select(App& app) {
     if (!db.open(song_db_path())) return nullptr;
     p->lib = std::make_shared<Library>();
     Library& lib = *p->lib;
+    // 段ごとにかかった時間（0.5 秒を超えた段だけログに書く。起動が遅いときに、どこで待っているかを見る）
+    auto lap_t = std::chrono::steady_clock::now();
+    auto lap = [&lap_t](const char* what) {
+        const auto now = std::chrono::steady_clock::now();
+        const double sec = std::chrono::duration<double>(now - lap_t).count();
+        if (sec > 0.5) std::printf("選曲画面の一覧づくり：%s %.1f 秒\n", what, sec);
+        lap_t = now;
+    };
     load_charts(lib, db, app.cfg);
+    lap("譜面を読む");
     for (const std::string& u : app.cfg.tables) {
         DifficultyTable t;
         if (!load_cached_table(table_cache_dir(), u, t)) t.url = u, t.warning = "まだ取得していない";
         lib.tables.push_back(std::move(t));
     }
+    lap("難易度表を読む");
     p->profile = record_profile(db, app);
     lib.load_records(db, app.cfg.ln_mode, p->profile);
     p->favs = db.favorites();
+    lap("記録を読む");
     lib.build_indexes();
     load_custom(lib, app, p->favs);
+    lap("カスタムフォルダと MOD のフォルダ");
     p->root = build_tree(lib, new_song_since(app.cfg.title_flash), p->favs);
+    lap("一覧を組む");
     return p;
 }
 
