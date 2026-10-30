@@ -2021,6 +2021,7 @@ int main(int, char**) {
     save_changed_settings();
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(window);
-    SDL_Quit();
+    // SDL_Quit は呼ばない。Windows では終わるまで 20 秒ほどかかることがあり、その間このプロセスが残って、
+    // 更新で入れ替えた古いファイル（.old）を掴んだままになる。片付けはプロセスが終わるときに OS がする
     return 0;
 }

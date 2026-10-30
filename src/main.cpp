@@ -1109,13 +1109,9 @@ int main(int argc, char** argv) {
     }
     raw_hid().stop();
     midi_input().stop();
-    if (!joystick_init().ready()) {
-        // 準備中（Windows の DirectInput の列挙中）なら、待たずにそのまま終わる。設定やスコアは保存済み
-        std::fflush(stdout);
-        stop_log();
-        std::_Exit(rc);
-    }
-    joystick_init().join();
-    SDL_Quit();
-    return rc;
+    // 設定やスコアは保存済み。コントローラーの準備（Windows の DirectInput の列挙）や SDL_Quit を待たずに終わる
+    // （SDL_Quit は Windows で 20 秒ほどかかることがあり、その間このプロセスが残って、更新で入れ替えた古いファイルを掴んだままになる）
+    std::fflush(stdout);
+    stop_log();
+    std::_Exit(rc);
 }
