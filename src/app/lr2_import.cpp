@@ -316,7 +316,12 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     fs::path root = fs::path(lr2_dir) / "LR2files";
     std::string xml = read_all(root / "Config" / "config.xmh");
     if (xml.empty()) xml = read_all(root / "Config" / "config.xml");
-    if (xml.empty()) return res.error = "LR2 の設定が見つからない（" + (root / "Config").string() + "）", res;
+    // LR2 の設定が無くても（一度も起動していない LR2）、LR2 のフォルダなら止めない。プレイヤー・記録・スキンは引き継ぐ
+    if (xml.empty()) {
+        std::error_code ec;
+        if (!fs::is_directory(root, ec)) return res.error = "LR2 のフォルダではありません（LR2files がありません）：" + lr2_dir, res;
+        std::printf("LR2 の設定（%s）が無い（曲フォルダと設定は引き継がない）\n", (root / "Config" / "config.xml").string().c_str());
+    }
     xml = to_utf8_auto(xml);
     // 曲フォルダ（LR2 のカスタムフォルダの置き場は除く）
     std::vector<std::string> dirs, custom_dirs;
@@ -339,8 +344,9 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     // 今のプレイヤーと同じ ID の LR2 のプレイヤーがいれば、その人を引き継ぐ（LR2 で使っていたプレイヤーでなくても）
     if (std::error_code ec; !player_id().empty() && fs::exists(root / "Database" / "Score" / fs::u8path(player_id() + ".db"), ec))
         res.player = player_id();
-    if (dirs.empty()) return res.error = "LR2 の設定に曲フォルダが無い", res;
-    cfg.song_dirs = dirs;
+    // 曲フォルダが無くても（LR2 で曲を登録していない）止めない。プレイヤー・記録・設定・スキンは引き継ぐ
+    if (dirs.empty()) std::printf("LR2 に曲フォルダが登録されていない（曲フォルダは引き継がない）\n");
+    else cfg.song_dirs = dirs;
     if (!res.player.empty()) cfg.lr2_player = res.player;  // LR2 の形で書き出すスコアも同じ名前にする
     cfg.custom_folder_dirs = custom_dirs;
     res.song_dirs = static_cast<int>(dirs.size());
@@ -360,9 +366,10 @@ Lr2ImportResult import_from_lr2(const std::string& lr2_dir, AppConfig& cfg, Song
     res.skins = import_lr2_skin_custom(lr2_dir, skin_root, cfg);
     if (status) status("LR2 の曲の情報を取り込んでいます");
     std::string err;
+    // LR2 の曲データベースが読めなくても止めない（曲を登録していない LR2 には無いことがある）
     int n = db.import_lr2_songs((root / "Database" / "song.db").string(), &err, {}, dirs);
-    if (n < 0) return res.error = err, res;
-    res.charts = n;
+    if (n < 0) std::printf("LR2 の曲データベースを読めない（曲の情報は引き継がない）：%s\n", err.c_str());
+    res.charts = std::max(0, n);
     if (status) status("LR2 の段位とコースを引き継いでいます");
     res.courses = std::max(0, import_lr2_courses((root / "Database" / "song.db").string()));
     if (status) status("LR2 のお気に入りを引き継いでいます");

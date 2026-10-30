@@ -1406,11 +1406,18 @@ int main(int, char**) {
     if (const char* gs = dev_env("RD_LAUNCHER_GUIDE")) guide = std::atoi(gs);  // 開発用：案内の画面を出す
 
     while (!quit) {
-        // 字は実際に映る大きさで作る（拡大してもつぶれない・ぼやけない）
+        // 字は実際に映る大きさで作る（拡大してもつぶれない・ぼやけない）。作り直すと全部の字を作るので重い。
+        // 窓の大きさを変えている間は作り直さず（今の字を拡大して描く）、大きさが 0.3 秒変わらなくなってから、0.25 刻みの倍率で 1 回だけ作る
         {
+            static int last_w = 0, last_h = 0;
+            static Uint64 changed_at = 0;
             int ow = 0, oh = 0;
             SDL_GetCurrentRenderOutputSize(r, &ow, &oh);
-            if (ow > 0 && oh > 0) text.set_scale(std::min(static_cast<float>(ow) / kW, static_cast<float>(oh) / kH));
+            if (ow != last_w || oh != last_h) last_w = ow, last_h = oh, changed_at = SDL_GetTicks();
+            if (ow > 0 && oh > 0 && SDL_GetTicks() - changed_at >= 300) {
+                const float s = std::min(static_cast<float>(ow) / kW, static_cast<float>(oh) / kH);
+                text.set_scale(std::max(1.0f, std::round(s * 4.0f) / 4.0f));
+            }
         }
         g.pressed = false, g.wheel = 0, g.typed.clear();
         g.key_enter = g.key_back = g.key_esc = false;
@@ -1939,6 +1946,7 @@ int main(int, char**) {
                 } else {
                     message = job.res.error;
                 }
+                std::printf("LR2 からの引き継ぎ：%s\n", message.c_str());
             }
         }
         if (borrow_test.running) {
