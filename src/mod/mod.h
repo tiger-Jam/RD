@@ -117,6 +117,7 @@ struct ModManifest {
     bool official = false;        // 実行ファイルの横の mods/ にあったもの
     std::string script;           // スクリプト（mod.json からの相対。無ければ空）
     bool chart_attr = false;      // build_folders で譜面の傾向（chart/chart_attr.h）を使う（無い譜面は裏で分析する）
+    bool table_charts = false;    // build_folders には難易度表に載っている譜面だけを渡す（mod.json の "charts": "tables"）
     bool gas = false;             // GAS（ゲージの自動切り替え）を選べるようにする
     // メトロノーム：遊んでいる間、拍に合わせて音を鳴らす（小節の頭は accent、ほかの拍は beat。どちらも MOD のフォルダの中の音）
     bool metronome = false;

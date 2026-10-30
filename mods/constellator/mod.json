@@ -6,5 +6,6 @@
   "description": "難易度表のレベルごとに、譜面の傾向（乱打・腕・指・ディレイ）・密度・プレー状況・クリア状況・スコア状況のフォルダを作る",
   "touches": ["control"],
   "chart_attr": true,
+  "charts": "tables",
   "script": "main.lua"
 }

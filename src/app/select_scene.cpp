@@ -278,7 +278,7 @@ void load_custom_entry(Library& lib, const Entry& e) {
 std::vector<ModFolder> make_mod_folders(const Library& lib, const std::vector<const ModManifest*>& mods, std::vector<std::string>* errors) {
     std::unordered_map<std::string, std::vector<ModTableLevel>> tables;
     ModChartExtra extra;
-    if (std::any_of(mods.begin(), mods.end(), [](const ModManifest* m) { return m->chart_attr; })) {
+    if (std::any_of(mods.begin(), mods.end(), [](const ModManifest* m) { return m->chart_attr || m->table_charts; })) {
         if (!lib.attrs) {
             SongDb rd;
             auto a = std::make_shared<std::unordered_map<std::string, ChartAttr>>();

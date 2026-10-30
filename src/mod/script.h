@@ -117,6 +117,7 @@ struct ModChartExtra {
 };
 
 // 選曲の一覧を作るときに、「操作」を宣言した MOD の build_folders を呼んでフォルダを作る。
+// "charts": "tables" の MOD には、extra.tables に載っている（難易度表にある）譜面だけを渡す。
 // cache_dir があれば、MOD ごとの計算をそこに残し、渡す値・スクリプトが読んだファイル・時刻（見たときだけ、1 時間ごと）が
 // 前と同じなら、計算せずに残したものを使う
 std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& mods, const std::vector<ChartRecord>& charts,

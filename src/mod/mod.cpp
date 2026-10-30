@@ -292,6 +292,7 @@ bool load_mod_manifest(const std::string& dir, ModManifest& out, std::string* er
     out.touches = parse_touches(yyjson_obj_get(root, "touches"));
     out.gas = boolean(root, "gas", false);
     out.chart_attr = boolean(root, "chart_attr", false);
+    out.table_charts = str(root, "charts") == "tables";
     size_t i, n;
     yyjson_val* v;
     out.lamps = parse_lamps(yyjson_obj_get(root, "lamps"));

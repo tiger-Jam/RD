@@ -744,23 +744,31 @@ std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& 
                                          const std::string& data_root, std::vector<std::string>* errors, const ModChartExtra& extra,
                                          const std::string& cache_dir) {
     std::vector<ModFolder> out;
-    // 渡す値の指紋は、傾向を渡す MOD と渡さない MOD の 2 通りだけなので、それぞれ 1 回だけ取る
-    uint64_t prints[2] = {};
-    bool printed[2] = {};
+    // 難易度表に載っている譜面（"charts": "tables" の MOD に渡す）
+    std::vector<const ChartRecord*> all, in_tables;
+    all.reserve(charts.size());
+    for (const ChartRecord& c : charts) {
+        all.push_back(&c);
+        if (extra.tables && extra.tables->count(c.md5)) in_tables.push_back(&c);
+    }
+    // 渡す値の指紋は、傾向を渡すか・難易度表の譜面だけかの 4 通りだけなので、それぞれ 1 回だけ取る
+    uint64_t prints[4] = {};
+    bool printed[4] = {};
     for (const ModManifest* m : mods) {
         if (m->script.empty() || !(m->touches & static_cast<uint32_t>(ModTouch::Control))) continue;
         const ModChartExtra& ex = m->chart_attr ? extra : ModChartExtra{};
+        const std::vector<const ChartRecord*>& given = m->table_charts ? in_tables : all;
         // 開発用：RD_TIMING があれば、MOD ごとに譜面を渡すまでと、MOD の処理の時間を出す
         auto t0 = std::chrono::steady_clock::now(), t1 = t0;
         // 渡す値が前と同じなら、残した計算を使う
         uint64_t key = 0;
         const std::string cache = cache_dir.empty() ? "" : cache_dir + "/" + m->id + ".cache";
         if (!cache.empty()) {
-            const int v = m->chart_attr ? 1 : 0;
+            const int v = (m->chart_attr ? 1 : 0) | (m->table_charts ? 2 : 0);
             if (!printed[v]) {
                 Fingerprint fp;
-                fp.integer("charts", static_cast<long long>(charts.size()));
-                for (const ChartRecord& c : charts) visit_chart(fp, c, scores, ex);
+                fp.integer("charts", static_cast<long long>(given.size()));
+                for (const ChartRecord* c : given) visit_chart(fp, *c, scores, ex);
                 prints[v] = fp.h, printed[v] = true;
             }
             Fingerprint fp;
@@ -782,13 +790,13 @@ std::vector<ModFolder> build_mod_folders(const std::vector<const ModManifest*>& 
         std::vector<ModFolder> got;
         bool ok = true;
         if (s->has("build_folders")) {
-            s->memory_limit = kMemoryLimit + charts.size() * kMemoryPerChart;
+            s->memory_limit = kMemoryLimit + given.size() * kMemoryPerChart;
             t1 = std::chrono::steady_clock::now();
             ok = s->run("build_folders", [&](lua_State* L) {
-                lua_createtable(L, static_cast<int>(charts.size()), 0);
+                lua_createtable(L, static_cast<int>(given.size()), 0);
                 lua_Integer i = 0;
-                for (const ChartRecord& c : charts) {
-                    push_chart(L, c, scores, ex);
+                for (const ChartRecord* c : given) {
+                    push_chart(L, *c, scores, ex);
                     lua_rawseti(L, -2, ++i);
                 }
                 t1 = std::chrono::steady_clock::now();

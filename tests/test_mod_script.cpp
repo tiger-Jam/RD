@@ -149,6 +149,29 @@ TEST(mod_script_folders_cache) {
     CHECK(title() == "HARD 以上 12:2");
 }
 
+// "charts": "tables" の MOD には、難易度表に載っている譜面だけを渡す
+TEST(mod_script_folders_table_charts) {
+    TempMod t("tablecharts", "\"control\"", R"LUA(
+        function build_folders(charts)
+          local all = {}
+          for _, c in ipairs(charts) do all[#all + 1] = c.sha256 end
+          return { { title = "渡された", charts = all } }
+        end
+    )LUA");
+    t.m.table_charts = true;
+    std::vector<ChartRecord> charts(3);
+    charts[0].sha256 = "a", charts[0].md5 = "ma";
+    charts[1].sha256 = "b", charts[1].md5 = "mb";
+    charts[2].sha256 = "c", charts[2].md5 = "mc";
+    std::unordered_map<std::string, std::vector<ModTableLevel>> tables;
+    tables["mb"].push_back({"表", "★", "1", 0, 0});
+    ModChartExtra extra;
+    extra.tables = &tables;
+    auto f = build_mod_folders({&t.m}, charts, {}, t.data.string(), nullptr, extra);
+    CHECK_EQ(f.size(), size_t(1));
+    if (f.size() == 1) CHECK(f[0].charts == std::vector<std::string>{"b"});
+}
+
 // 譜面に曲名の前の文字（label）を付けられる
 TEST(mod_script_folder_labels) {
     TempMod t("labels", "\"control\"", R"LUA(
