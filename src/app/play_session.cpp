@@ -308,6 +308,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     // 読み終えるのに時間がかかるとき（冷えた HDD など）は、先にプレー画面のスキンを読んで、読み込み中の絵を出して待つ。
     // スキンの #IF は譜面で決まるものもあるので、選曲画面の譜面の情報で仮に決め、読み終えて違っていたら読み直す
     bool prelude_shown = false;
+    // 画面の時計（タイマー 0）の始まり。LR2 と同じく、スキンを読み終えて出したときから数える
+    uint64_t prelude_skin_ns = prelude_ns;
     std::array<bool, 1000> prelude_ops{};
     if (read_early && early.wait_for(std::chrono::milliseconds(80)) != std::future_status::ready) {
         const ChartRecord& r = *opt.record;
@@ -323,6 +325,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         pctx.autoplay = opt.autoplay;
         pctx.bga_shown = cfg.auto_adjust != 2 && (cfg.bga == 1 || cfg.bga == 3 || (cfg.bga == 2 && opt.autoplay));
         pctx.hs_fix = cfg.hs_fix;
+        pctx.random = cfg.random, pctx.seven_key = cfg.seven_key, pctx.effect = cfg.effect;
         pctx.gauge_type = cfg.gauge;
         pctx.ghost_pos = cfg.ghost, pctx.score_graph = cfg.score_graph, pctx.bga_size = cfg.bga_size;
         pctx.silent = cfg.auto_adjust == 2;
@@ -339,6 +342,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
             SDL_HideCursor();
             pctx.skin = sk;
             pctx.timers.set(0, 0);
+            prelude_skin_ns = SDL_GetTicksNS();
             while (early.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
                 SDL_Event e;
                 while (SDL_PollEvent(&e)) {
@@ -346,7 +350,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     if (e.type == SDL_EVENT_JOYSTICK_ADDED) SDL_OpenJoystick(e.jdevice.which);
                 }
                 PlaySkinState st;
-                st.now_ms = (SDL_GetTicksNS() - prelude_ns) / 1e6;
+                st.now_ms = (SDL_GetTicksNS() - prelude_skin_ns) / 1e6;
                 st.timers = &pctx.timers;
                 st.option = [&](int o) { return pctx.option(o); };
                 st.number = [&](int id) { return pctx.number(id); };
@@ -506,6 +510,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
     ctx.autoplay = opt.autoplay;
     ctx.bga_shown = bga_shown;
     ctx.hs_fix = cfg.hs_fix;
+    ctx.random = cfg.random, ctx.seven_key = cfg.seven_key, ctx.effect = cfg.effect;
     {
         // 同じフォルダの、難易度ごとの譜面のレベル（数値45〜49）
         // 曲データベースのパスは絶対パスなので、合わせてから比べる
@@ -762,7 +767,7 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
         bool started = false;
         enum class Phase { Play, Fadeout, Failed, Result } phase = Phase::Play;
         // 譜面を待つ間に読み込み中の絵を出していたら、その続きから動かす（入場の演出を頭からやり直さない）
-        const uint64_t scene_start = prelude_shown && !retried ? prelude_ns : SDL_GetTicksNS();
+        const uint64_t scene_start = prelude_shown && !retried ? prelude_skin_ns : SDL_GetTicksNS();
         uint64_t prev_ns = scene_start, next_frame_ns = scene_start;
         int next_capture_s = 0;
         float scratch_angle = 0;
@@ -1428,7 +1433,8 @@ PlayExit run_play(App& app, const std::string& chart_path, PlayOptions opt) {
                     lane_in.clear();
                 }
                 for (const LaneInput& li : lane_in) {
-                    int64_t t = mixer.song_time_us_at(li.time_ns);
+                    // 高精度なタイマーを使わないなら、LR2 と同じく、このフレームの時刻で判定する
+                    int64_t t = app.cfg.hp_timer ? mixer.song_time_us_at(li.time_ns) : song_us;
                     if (li.down) judge.press(li.lane, t);
                     else judge.release(li.lane, t);
                     if (!opt.autoplay) record.events.push_back({t, static_cast<uint8_t>(li.lane), li.down});

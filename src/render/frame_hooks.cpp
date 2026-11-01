@@ -122,6 +122,7 @@ bool make_frame(SDL_Renderer* r, int w, int h) {
 }
 
 int g_w = 0, g_h = 0;  // スキンの解像度（0 ならウィンドウに直接描いている）
+bool g_sd_stretch = false;
 
 }  // namespace
 
@@ -129,12 +130,15 @@ void frame_target_set(SDL_Renderer* r, int w, int h) {
     SDL_SetRenderTarget(r, nullptr);
     g_w = g_h = 0;
     if (w <= 0 || h <= 0) return;
-    // ウィンドウの側：描き先の絵を枠付きで拡大する（マウスの座標もこれでスキンの座標に直る）
-    SDL_SetRenderLogicalPresentation(r, w, h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    // ウィンドウの側：描き先の絵を枠付きで拡大する（マウスの座標もこれでスキンの座標に直る）。SD は設定で引き伸ばす
+    const bool stretch = g_sd_stretch && w == 640 && h == 480;
+    SDL_SetRenderLogicalPresentation(r, w, h, stretch ? SDL_LOGICAL_PRESENTATION_STRETCH : SDL_LOGICAL_PRESENTATION_LETTERBOX);
     if (!make_frame(r, w, h)) return;  // 描き先を作れないときは、前と同じくウィンドウに直接描く
     g_w = w, g_h = h;
     SDL_SetRenderTarget(r, g.frame);
 }
+
+void frame_set_sd_stretch(bool on) { g_sd_stretch = on; }
 
 void frame_present(SDL_Renderer* r) {
     frame_hooks_before_present(r);

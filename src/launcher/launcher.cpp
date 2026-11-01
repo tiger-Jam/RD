@@ -1715,7 +1715,7 @@ int main(int, char**) {
             g.label(X + 48, Y + 235, "バッファ数 (低くすれば音の出が早くなりますがノイズが増えます)");
             g.edit_int(cfg.audio_buffer, X + 462, Y + 226, 58, 22, true, 0, 4096);
             g.check(X + 48, Y + 268, "FMOD Exを使用しない(どうしても発音遅延やノイズが気になるならチェックを入れてください)", d_true, false);
-            g.check(X + 22, Y + 328, "高精度なタイマーを使用する(基本的に外して下さい)", d_true, false);
+            g.check(X + 22, Y + 328, "高精度なタイマーを使用する(基本的に外して下さい)", cfg.hp_timer);
         } else if (tab == 6) {
             // RD だけの設定（LR2 SETUP には無い）
             if (g.button(X + 20, Y + 10, 180, 22, "LR2 から引き継ぐ", !job.running)) {
@@ -1779,6 +1779,7 @@ int main(int, char**) {
             g.check(X + 20, by + 72, "ログを作者へ送る", cfg.log_upload);
             g.check(X + 300, by + 72, "自動で新しい版に更新する", cfg.auto_update);
             g.check(X + 20, by + 94, "LR2 の形でも曲とスコアを書き出す（外部ツール用）", cfg.lr2_export);
+            g.check(X + 300, by + 94, "SD のスキンを画面いっぱいに広げる", cfg.sd_stretch);
 #ifdef _WIN32
             g.check(X + 300, by + 28, "古いコントローラーも探す（DirectInput）", cfg.joystick_directinput);
 #endif

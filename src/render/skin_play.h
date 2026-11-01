@@ -47,6 +47,9 @@ struct PlayContext {
     // 表示用に補間した値（LR2: score_print / HP_print）。負なら補間せず実値を使う（リザルトなど）
     double score_print = -1, hp_print = -1;
     int hs_fix = 0;              // ハイスピード固定（ボタン55）
+    int random = 0;              // ランダム（ボタン42）
+    bool seven_key = false;      // 7k モード（ボタン44）
+    int effect = 0;              // HID/SUD（ボタン50）
     int ghost_pos = 0;           // ゴーストの位置（op 34〜37。0=OFF）
     bool score_graph = false;    // スコアグラフ（op 38 / 39）
     int bga_size = 0;            // BGA の大きさ（op 30 / 31）

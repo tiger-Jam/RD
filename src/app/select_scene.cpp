@@ -21,6 +21,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <thread>
 #include <unordered_map>
@@ -106,6 +107,7 @@ struct Entry {
     int bar_type = 1;
     bool fs_folder = false;          // 曲フォルダの階層（中の譜面に LR2 の難易度の絞り込みをかける）
     bool keep_order = false;         // 中の譜面に並べ替えをかけない（MOD が keep_order を付けたフォルダ）
+    bool from_mod = false;           // MOD が作ったフォルダ（記録で中身や名前が変わる）
     // カスタムフォルダ。中身は開くとき（とフォルダのランプを出すとき）に集める（LR2 と同じ。全部を先に集めると、数が多いと遅い）。
     // #MAXTRACKS 1 のフォルダは、開くたびに 1 曲を選び直す
     const CustomFolderDef* custom = nullptr;
@@ -664,6 +666,7 @@ std::vector<Entry> build_tree(const Library& lib, int64_t new_since, const std::
         f.bar_type = 2;
         f.label = mf.title;
         f.keep_order = mf.keep_order;
+        f.from_mod = true;
         for (const ModFolder& c : mf.children) {
             Entry sub = mod_entry(c);
             f.owned += sub.owned, f.total += sub.total;
@@ -1693,13 +1696,18 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
     };
     // prebuilt：裏で作ってある一覧の木（あればそれを使い、ここでは作らない）
     auto rebuild = [&](std::shared_ptr<std::vector<Entry>> prebuilt = nullptr) {
-        std::vector<std::string> path, keys;
+        std::vector<std::string> path, keys, next_keys;
         std::vector<int> cursors;
+        std::vector<std::optional<Entry>> cursor_charts;  // カーソルの譜面（MOD のフォルダから消えたら戻すため）
         for (size_t i = 1; i < stack.size(); ++i) path.push_back(stack[i].name);
         for (const Level& lv : stack) {
             cursors.push_back(lv.cursor);
             int n = static_cast<int>(lv.list->size());
-            keys.push_back(n ? entry_key((*lv.list)[std::clamp(lv.cursor, 0, n - 1)]) : "");
+            const int c = n ? std::clamp(lv.cursor, 0, n - 1) : 0;
+            keys.push_back(n ? entry_key((*lv.list)[c]) : "");
+            next_keys.push_back(n ? entry_key((*lv.list)[(c + 1) % n]) : "");
+            if (n && (*lv.list)[c].kind == Entry::Kind::Chart) cursor_charts.emplace_back((*lv.list)[c]);
+            else cursor_charts.emplace_back();
         }
         const int old_cursor = stack.back().cursor;
         if (prebuilt) root = std::move(*prebuilt);
@@ -1721,9 +1729,29 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
             const std::vector<Entry>& list = *stack.back().list;
             auto it = std::find_if(list.begin(), list.end(),
                                    [&](const Entry& e) { return e.kind == Entry::Kind::Folder && e.label == path[i]; });
+            // MOD のフォルダは記録で名前が変わる（リコメンドの★など）。同じ位置の MOD のフォルダなら、それを開き直す
+            if (it == list.end() && cursors[i] >= 0 && cursors[i] < static_cast<int>(list.size()) &&
+                list[cursors[i]].kind == Entry::Kind::Folder && list[cursors[i]].from_mod)
+                it = list.begin() + cursors[i];
             if (it == list.end()) break;
             if (it->custom && !it->custom_loaded) load_custom_entry(*lib, *it);
-            stack.push_back(make_level(it->children.ptr(), cursors[i + 1], path[i], it->fs_folder, it->dir,
+            if (it->from_mod && cursor_charts[i + 1]) {
+                // 遊んだ譜面が MOD のフォルダから外れた（リコメンドでランプが上がったなど）：フォルダを出るまでは元の位置に残し、
+                // カーソルもその譜面のままにする（消すと、カーソルが次の譜面へずれる）
+                const std::vector<Entry>& kids = *it->children.ptr();
+                const bool gone = std::none_of(kids.begin(), kids.end(), [&](const Entry& e) { return entry_key(e) == keys[i + 1]; });
+                const std::string& p = cursor_charts[i + 1]->chart->path;  // 前の一覧の譜面（まだ捨てていない）
+                auto rec = gone ? std::find_if(lib->charts.begin(), lib->charts.end(), [&](const ChartRecord& c) { return c.path == p; })
+                                : lib->charts.end();
+                if (rec != lib->charts.end()) {
+                    Entry e = std::move(*cursor_charts[i + 1]);
+                    e.chart = &*rec;
+                    std::vector<Entry>& v = const_cast<Entry&>(*it).children.vec();
+                    auto pos = std::find_if(v.begin(), v.end(), [&](const Entry& x) { return entry_key(x) == next_keys[i + 1]; });
+                    v.insert(pos, std::move(e));
+                }
+            }
+            stack.push_back(make_level(it->children.ptr(), cursors[i + 1], it->label, it->fs_folder, it->dir,
                                        it->course_folder ? 6 : it->bar_type, it->keep_order));
             place(stack.back(), i + 1);
         }
@@ -3834,7 +3862,7 @@ void run_select(App& app, std::shared_ptr<SelectPrep> prep) {
                         for (size_t ci = 0; ci < chain.size(); ++ci) {
                             const std::vector<Entry>& l = *stack.back().list;
                             for (size_t i = 0; i < l.size(); ++i)
-                                if (l[i].label == chain[ci] && l[i].kind != Entry::Kind::Header) {
+                                if (l[i].label.rfind(chain[ci], 0) == 0 && l[i].kind != Entry::Kind::Header) {  // 名前の頭が合えばよい
                                     stack.back().cursor = static_cast<int>(i), snap();
                                     if (ci + 1 < chain.size()) decide();
                                     break;

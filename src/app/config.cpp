@@ -158,6 +158,8 @@ bool AppConfig::load(const std::string& path) {
         else if (key == "gas") gas = iv != 0;
         else if (key == "fps") fps = iv;
         else if (key == "vsync") vsync = iv != 0;
+        else if (key == "hp_timer") hp_timer = iv != 0;
+        else if (key == "sd_stretch") sd_stretch = iv != 0;
         else if (key == "fullscreen") fullscreen = iv != 0;
         else if (key == "window_scale") window_scale = iv;
         else if (key == "db_update") db_update = iv;
@@ -313,6 +315,8 @@ void AppConfig::write(std::ostream& f) const {
     f << "gas = " << (gas ? 1 : 0) << "\n";
     f << "fps = " << fps << "  # 0=モニタに合わせる -1=上限なし それ以外=その値\n";
     f << "vsync = " << (vsync ? 1 : 0) << "\n";
+    f << "hp_timer = " << (hp_timer ? 1 : 0) << "  # 1=押した瞬間の時刻で判定 0=入力を読んだフレームの時刻で判定\n";
+    f << "sd_stretch = " << (sd_stretch ? 1 : 0) << "  # 1=SD のスキンを画面いっぱいに引き伸ばす 0=縦横比を保つ\n";
     f << "fullscreen = " << (fullscreen ? 1 : 0) << "\n";
     f << "window_scale = " << window_scale << "  # ウィンドウの大きさ（%）。0 はスキンに合わせる\n";
     f << "db_update = " << db_update << "  # 0=起動時に曲フォルダを読み直す 1=手動（選曲画面の F8 で今のフォルダだけ）\n";

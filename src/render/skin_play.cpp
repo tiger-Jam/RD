@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <ctime>
 
 namespace rd {
 
@@ -209,6 +210,18 @@ int PlayContext::number_raw(int id) const {
     case 312: return visible_ms;
     case 313: return green_number;
     case 314: case 421: case 422: return lift;  // 421・422 は OpenLR2 の LIFT
+    case 21: case 22: case 23: case 24: case 25: case 26: {
+        // 年 月 日 時 分 秒（選曲と同じく、どの画面でも出す）
+        std::time_t now = std::time(nullptr);
+        std::tm tm{};
+#ifdef _WIN32
+        localtime_s(&tm, &now);
+#else
+        localtime_r(&now, &tm);
+#endif
+        const int v[] = {tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec};
+        return v[id - 21];
+    }
     default: break;
     }
     if (int v; course_number(course, id, v)) return v;
@@ -399,7 +412,6 @@ std::string PlayContext::text(int id) const {
     }
 }
 
-// LR2: SetObjectValue_Button。プレイ画面で意味があるのは、まだ機能の無い設定ばかりなので 0（オフ）
 int PlayContext::bp_now() const {
     if (!stats()) return 0;
     const PlayStats& st = *stats();
@@ -407,6 +419,7 @@ int PlayContext::bp_now() const {
     return st.total_notes - st.note_current + st.judge_count[kBad] + st.judge_count[kPoor];
 }
 
+// LR2: SetObjectValue_Button。設定の値をそのまま絵のコマにする
 int PlayContext::button(int type) const {
     switch (type) {
     // ゲージの種類（カスタムゲージは、落ちるものを HARD、落ちないものを GROOVE として見せる）
@@ -419,6 +432,10 @@ int PlayContext::button(int type) const {
     case 29: return sound_fx && sound_fx->eq_on ? 1 : 0;
     case 32: return sound_fx && sound_fx->pitch_on ? 1 : 0;
     case 33: return sound_fx ? sound_fx->pitch_type : 0;
+    case 42: return random;                   // ランダム
+    case 44: return seven_key ? 1 : 0;        // 7k モード（0 = 7K+S 1 = 7K。選曲と同じ）
+    case 46: return lane_cover_on ? 1 : 0;    // レーンカバー
+    case 50: return effect;                   // HID/SUD
     case 55: return hs_fix;  // ハイスピ固定の種類
     default: return 0;
     }

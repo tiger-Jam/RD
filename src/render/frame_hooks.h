@@ -17,6 +17,8 @@ void frame_hooks_before_present(SDL_Renderer* r);
 // 絵を 1 枚ずつウィンドウの大きさで描くと、なめらかにしない絵が荒れ、つなげた絵の継ぎ目に線が出る）。
 // w か h が 0 以下なら、ウィンドウに直接描く（自分で拡大のしかたを決める画面）
 void frame_target_set(SDL_Renderer* r, int w, int h);
+// SD（640×480）の絵を、縦横比を保たずにウィンドウいっぱいに引き伸ばすか（次の frame_target_set から効く）
+void frame_set_sd_stretch(bool on);
 // 1 フレームを出す（frame_hooks_before_present、拡大、SDL_RenderPresent）。各画面は SDL_RenderPresent の代わりにこれを呼ぶ
 void frame_present(SDL_Renderer* r);
 

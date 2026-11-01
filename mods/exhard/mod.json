@@ -2,7 +2,7 @@
   // EX-HARD：HARD より減りが大きく、落ちたら終わりのゲージ（数値は IIDX の EX-HARD。30% 以下で減りが減る補正は無い）
   "id": "exhard",
   "name": "EX-HARD",
-  "version": "3",
+  "version": "4",
   "author": "RD",
   "description": "GAUGE に EX-HARD を足す",
   "gauges": [
@@ -19,5 +19,5 @@
       "lamp": "exhard"
     }
   ],
-  "lamps": [{ "id": "exhard", "name": "EX-HARD", "color": "#ffd800", "rank": 4.5 }]
+  "lamps": [{ "id": "exhard", "name": "EX-HARD", "colors": 2, "color": "#ffd800", "color2": "#ff3030", "blink": 250, "rank": 4.5 }]
 }

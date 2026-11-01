@@ -113,6 +113,10 @@ struct AppConfig {
     // （OpenLR2と同じく、描画を待つ間も入力と判定を回すため）
     int fps = 0;
     bool vsync = false;
+    // 判定の時刻（LR2: 高精度なタイマー）。true は押した瞬間の時刻、false は LR2 と同じく入力を読んだフレームの時刻
+    bool hp_timer = true;
+    // SD（4:3）のスキンを画面いっぱいに引き伸ばす。false なら縦横比を保って拡大する（左右に黒い帯）
+    bool sd_stretch = false;
     // 画面（LR2: screenmode / screenexrate）。window_scale は % で、0 ならスキンに合わせる（SD は 2 倍）
     bool fullscreen = false;
     int window_scale = 0;
