@@ -267,12 +267,18 @@ struct Gui {
     int font = 12;
     float mx = -1, my = -1;
     bool pressed = false;  // このフレームで左ボタンを押した
+    bool rpressed = false;  // このフレームで右ボタンを押した
     float wheel = 0;
     // 入力欄
     const void* focus = nullptr;
     std::string buf;
     std::function<void(const std::string&)> commit;
     std::string typed;     // このフレームに打った文字
+    std::string orig;      // 打つ前の文字（Esc で戻す）
+    std::string pasted;    // 右クリックの「貼り付け」で、次のフレームに打ったことにする文字
+    // 入力欄の右クリックの一覧（開いている入力欄と、一覧の場所）
+    const void* menu_for = nullptr;
+    SDL_FRect menu_rect{};
     bool key_enter = false, key_back = false, key_esc = false;
     // 開いているコンボボックス
     const void* combo_open = nullptr;
@@ -308,7 +314,7 @@ struct Gui {
         SDL_StopTextInput(win);
     }
     bool clicked(SDL_FRect rc) {
-        if (!pressed || combo_open || !in(rc)) return false;
+        if (!pressed || combo_open || menu_for || !in(rc)) return false;
         unfocus();
         return true;
     }
@@ -379,31 +385,45 @@ struct Gui {
         if (!title.empty()) label(x + 8, y, title);
     }
     // 入力欄。文字列はそのまま、数字だけの欄は int に戻す
+    // live：打つたびに確定する（欄から外れるのを待たずに、ほかの部品がその文字を見られる）
     void edit_box(const void* id, float x, float y, float w, float h, const std::string& shown, bool enabled,
-                  std::function<void(const std::string&)> on_commit) {
+                  std::function<void(const std::string&)> on_commit, bool live = false) {
         SDL_FRect rc{x, y, w, h};
         sunken(rc, enabled ? kHi : kFace);
         bool focused = focus == id;
         if (focused) {
+            const std::string before = buf;
             if (!typed.empty()) buf += typed;
             if (key_back && !buf.empty()) {
                 size_t i = buf.size() - 1;
                 while (i > 0 && (static_cast<unsigned char>(buf[i]) & 0xC0) == 0x80) --i;
                 buf.erase(i);
             }
+            if (live && buf != before && commit) commit(buf);
             if (key_enter) unfocus();
-            else if (key_esc) focus = nullptr, commit = nullptr, SDL_StopTextInput(win);
+            else if (key_esc) {
+                if (live && commit) commit(orig);
+                focus = nullptr, commit = nullptr, SDL_StopTextInput(win);
+            }
         }
         SDL_Rect clip{static_cast<int>(x) + 2, static_cast<int>(y), static_cast<int>(w) - 4, static_cast<int>(h)};
         SDL_SetRenderClipRect(r, &clip);
         float tw = label2(x + 4, y + (h - font) / 2, focus == id ? buf : shown, enabled);
         if (focus == id && (SDL_GetTicks() / 500) % 2 == 0) line(x + 5 + tw, y + 3, x + 5 + tw, y + h - 4, kText);
         SDL_SetRenderClipRect(r, nullptr);
-        if (enabled && clicked(rc)) {
+        const bool right = enabled && rpressed && !combo_open && !menu_for && in(rc);
+        if ((enabled && clicked(rc)) || (right && focus != id)) {
+            if (right) unfocus();
             focus = id;
-            buf = shown;
+            buf = orig = shown;
             commit = std::move(on_commit);
             SDL_StartTextInput(win);
+        }
+        if (right) {
+            // 右クリック：その場に「貼り付け」の一覧を出す
+            menu_for = id;
+            menu_rect = {mx, my, 96, 22};
+            rpressed = false;
         }
     }
     void edit_int(int& v, float x, float y, float w, float h = 20, bool enabled = true, int lo = INT32_MIN, int hi = INT32_MAX) {
@@ -412,8 +432,9 @@ struct Gui {
             v = std::clamp(std::atoi(s.c_str()), lo, hi);
         });
     }
-    void edit_str(std::string& v, float x, float y, float w, float h = 20, bool enabled = true) {
-        edit_box(&v, x, y, w, h, v, enabled, [&v](const std::string& s) { v = s; });
+    // live：打つたびに v を変える（中身が空かどうかでボタンを押せるようにする欄）
+    void edit_str(std::string& v, float x, float y, float w, float h = 20, bool enabled = true, bool live = false) {
+        edit_box(&v, x, y, w, h, v, enabled, [&v](const std::string& s) { v = s; }, live);
     }
     // コンボボックス（押すと下に一覧が開く）
     void combo(const void* id, float x, float y, float w, float h, const std::vector<std::string>& items, int sel,
@@ -504,6 +525,26 @@ struct Gui {
             }
         }
         if (pressed) combo_open = nullptr, pressed = false;
+    }
+    // 入力欄の右クリックの一覧（ほかの部品より手前に描く）
+    void edit_menu() {
+        if (!menu_for) return;
+        if (focus != menu_for) {
+            menu_for = nullptr;
+            return;
+        }
+        fill(menu_rect, kFace);
+        raised(menu_rect);
+        SDL_FRect row{menu_rect.x + 2, menu_rect.y + 2, menu_rect.w - 4, menu_rect.h - 4};
+        const bool hot = in(row);
+        if (hot) fill(row, kSel);
+        text->draw(row.x + 6, row.y + (row.h - font) / 2, font, hot ? SDL_Color{255, 255, 255, 255} : kText, "貼り付け", 0, 0, 0);
+        if (pressed) {
+            if (hot)
+                if (char* c = SDL_GetClipboardText()) pasted += c, SDL_free(c);
+            menu_for = nullptr, pressed = false;
+        }
+        if (rpressed) menu_for = nullptr;
     }
     // 一覧（JUKEBOX1 の曲検索フォルダなど）。sel は選んでいる行
     // gray：先頭のこの数の行は灰色で書く（変えられない見本）
@@ -1423,7 +1464,8 @@ int main(int, char**) {
                 text.set_scale(std::max(1.0f, std::round(s * 4.0f) / 4.0f));
             }
         }
-        g.pressed = false, g.wheel = 0, g.typed.clear();
+        g.pressed = g.rpressed = false, g.wheel = 0, g.typed.clear();
+        g.typed.swap(g.pasted);  // 右クリックで貼り付けた文字は、このフレームに打ったことにする
         g.key_enter = g.key_back = g.key_esc = false;
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -1433,6 +1475,7 @@ int main(int, char**) {
                 if (e.type == SDL_EVENT_MOUSE_MOTION) g.mx = e.motion.x, g.my = e.motion.y;
                 else if (e.type == SDL_EVENT_MOUSE_WHEEL) g.wheel += e.wheel.y;
                 else if (e.button.button == SDL_BUTTON_LEFT) g.mx = e.button.x, g.my = e.button.y, g.pressed = true;
+                else if (e.button.button == SDL_BUTTON_RIGHT) g.mx = e.button.x, g.my = e.button.y, g.rpressed = true;
             }
             if (e.type == SDL_EVENT_TEXT_INPUT) g.typed += e.text.text;
             if (e.type == SDL_EVENT_KEY_DOWN) {
@@ -1450,15 +1493,19 @@ int main(int, char**) {
                     cfg.song_dirs.push_back(p), tab = 1;
             }
         }
-        // 開発用：RD_LAUNCHER_CLICKS の「x,y;x,y;…」（/ でも区切れる）を、5 フレーム目から 3 フレームごとに 1 つずつ押したことにする
+        // 開発用：RD_LAUNCHER_CLICKS の「x,y;x,y;…」（/ でも区切れる）を、5 フレーム目から 3 フレームごとに 1 つずつ押したことにする。
+        // 頭に r を付けた「rx,y」は右ボタン。RD_LAUNCHER_CLIP があれば、始めにその文字をクリップボードに入れる
         static std::vector<std::pair<float, float>> dev_clicks = [] {
             std::vector<std::pair<float, float>> v;
+            if (const char* clip = dev_env("RD_LAUNCHER_CLIP")) SDL_SetClipboardText(clip);
             if (const char* c = dev_env("RD_LAUNCHER_CLICKS"))
                 for (const char* q = c; *q;) {
                     float x = 0, y = 0;
                     int n = 0;
+                    const bool right = *q == 'r';
+                    if (right) ++q;
                     if (std::sscanf(q, "%f,%f%n", &x, &y, &n) != 2) break;
-                    v.push_back({x, y});
+                    v.push_back({right ? -x - 1 : x, y});  // 右ボタンは x を負にして持つ
                     q += n;
                     if (*q == ';' || *q == '/') ++q;  // Windows の起動の口では ; が使えないので / でも区切れる
                 }
@@ -1467,7 +1514,8 @@ int main(int, char**) {
         static int dev_frame = 0;
         if (++dev_frame >= 5 && (dev_frame - 5) % 3 == 0 && static_cast<size_t>((dev_frame - 5) / 3) < dev_clicks.size()) {
             const auto [cx, cy] = dev_clicks[(dev_frame - 5) / 3];
-            g.mx = cx, g.my = cy, g.pressed = true;
+            if (cx < 0) g.mx = -cx - 1, g.my = cy, g.rpressed = true;
+            else g.mx = cx, g.my = cy, g.pressed = true;
         }
         {
             std::lock_guard<std::mutex> lock(g_dialog.mu);
@@ -1538,7 +1586,7 @@ int main(int, char**) {
                 g.label(gx, gy, "2 / 2　難易度表");
                 g.label(gx, gy + 24, "使いたい難易度表の URL を登録します（あとから RD タブでも登録できます）。");
                 g.listview(gx, gy + 50, 530, 170, "url", cfg.tables, table_sel, table_scroll);
-                g.edit_str(table_input, gx, gy + 230, 380, 20);
+                g.edit_str(table_input, gx, gy + 230, 380, 20, true, true);
                 if (g.button(gx + 390, gy + 229, 64, 22, "追加", !table_input.empty())) {
                     if (std::find(cfg.tables.begin(), cfg.tables.end(), table_input) == cfg.tables.end()) cfg.tables.push_back(table_input);
                     table_input.clear();
@@ -1559,7 +1607,7 @@ int main(int, char**) {
             g.label(X + 26, Y + 40, "PLAYER ID");
             const std::vector<std::string> players = list_players();
             if (new_player) {
-                g.edit_str(new_player_id, X + 90, Y + 33, 142, 21);
+                g.edit_str(new_player_id, X + 90, Y + 33, 142, 21, true, true);
                 if (g.button(X + 251, Y + 32, 80, 23, "作成", !new_player_id.empty())) {
                     std::string err;
                     if (create_player(new_player_id, cfg.player, &err)) {
@@ -1766,7 +1814,7 @@ int main(int, char**) {
             g.label(X + 20, y + 10, "難易度表の URL");
             g.listview(X + 20, y + 26, 546, 76, "url", cfg.tables, table_sel, table_scroll);
             float by = y + 108;
-            g.edit_str(table_input, X + 20, by, 380, 20);
+            g.edit_str(table_input, X + 20, by, 380, 20, true, true);
             if (g.button(X + 410, by - 1, 74, 22, "追加", !table_input.empty())) {
                 if (std::find(cfg.tables.begin(), cfg.tables.end(), table_input) == cfg.tables.end()) cfg.tables.push_back(table_input);
                 table_input.clear();
@@ -1810,7 +1858,7 @@ int main(int, char**) {
             }
             g.label(X + 20, Y + 160, "借りる（ほかの PC の譜面を）", on);
             g.label(X + 34, Y + 188, "借りる先", on);
-            g.edit_str(cfg.borrow_url, X + 124, Y + 182, 300, 20, on);
+            g.edit_str(cfg.borrow_url, X + 124, Y + 182, 300, 20, on, true);
             g.label(X + 34, Y + 216, "合言葉", on);
             g.edit_str(cfg.borrow_key, X + 124, Y + 210, 240, 20, on);
             g.label(X + 34, Y + 244, "置き場の上限（MB）", on);
@@ -1906,6 +1954,7 @@ int main(int, char**) {
                     [&](int i) { cfg.ln_mode = i; });
         }
         g.combo_popup();
+        g.edit_menu();
 
         if (job.running) {
             std::lock_guard<std::mutex> lock(job.mu);
